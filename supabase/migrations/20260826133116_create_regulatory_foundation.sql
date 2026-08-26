@@ -284,9 +284,33 @@ create table public.cbam_goods (
             active_to is null
             or active_from is null
             or active_to >= active_from
+        ),
+
+    constraint cbam_goods_classification_consistency_ck
+        check (
+            (
+                trade_code_type = 'HS_HEADING'
+                and record_type = 'CLASSIFICATION'
+                and record_level = 'HS_HEADING'
+            )
+            or
+            (
+                trade_code_type = 'HS_SUBHEADING'
+                and record_type = 'CLASSIFICATION'
+                and record_level = 'HS_SUBHEADING'
+            )
+            or
+            (
+                trade_code_type in ('CN', 'TARIC')
+                and record_type = 'TRADE_GOOD'
+                and record_level = 'TRADE_GOOD'
+            )
         )
+    )
 );
 
+
+-- Trade-code format must match its declared level.
 alter table public.cbam_goods
     add constraint cbam_goods_trade_code_format_ck
     check (
@@ -312,6 +336,16 @@ alter table public.cbam_goods
     );
 
 
+-- Prevent duplicate classification identity for the same
+-- effective start date while allowing future effective versions.
+create unique index cbam_goods_identity_uq
+    on public.cbam_goods (
+        trade_code,
+        trade_code_type,
+        coalesce(active_from, '1900-01-01'::date)
+    );
+
+
 -- ============================================================
 -- 6. DEFAULT EMISSION VALUES
 -- ============================================================
@@ -330,6 +364,14 @@ create table public.default_emission_values (
     country_id uuid not null
         references public.countries(id)
         on delete restrict,
+
+    emission_unit text not null
+        check (
+            emission_unit in (
+                'TCO2E_PER_TONNE',
+                'TCO2_PER_MWH'
+            )
+        ),
 
     direct_value numeric,
 
@@ -392,6 +434,45 @@ create table public.default_emission_values (
         check (
             source_row is null
             or source_row > 0
+        ),
+
+    constraint default_emission_values_direct_consistency_ck
+        check (
+            (
+                direct_status = 'AVAILABLE'
+                and direct_value is not null
+            )
+            or
+            (
+                direct_status <> 'AVAILABLE'
+                and direct_value is null
+            )
+        ),
+
+    constraint default_emission_values_indirect_consistency_ck
+        check (
+            (
+                indirect_status = 'AVAILABLE'
+                and indirect_value is not null
+            )
+            or
+            (
+                indirect_status <> 'AVAILABLE'
+                and indirect_value is null
+            )
+        ),
+
+    constraint default_emission_values_total_consistency_ck
+        check (
+            (
+                total_status = 'AVAILABLE'
+                and total_value is not null
+            )
+            or
+            (
+                total_status <> 'AVAILABLE'
+                and total_value is null
+            )
         )
 );
 
@@ -454,13 +535,20 @@ create index default_emission_values_route_idx
         production_route_id
     );
 
+create index default_emission_values_lookup_idx
+    on public.default_emission_values (
+        dataset_id,
+        country_id,
+        good_id
+    );
+
 
 -- ============================================================
 -- 8. ROW LEVEL SECURITY
 --
 -- Reference data is protected by default.
--- We will add explicit read policies later when the
--- application/API access model has been finalized.
+-- Explicit read policies will be added after the backend/API
+-- access model is finalized.
 -- ============================================================
 
 alter table public.regulatory_sources
