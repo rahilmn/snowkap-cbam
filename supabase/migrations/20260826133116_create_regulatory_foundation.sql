@@ -286,7 +286,7 @@ create table public.cbam_goods (
             or active_to >= active_from
         ),
 
-    constraint cbam_goods_classification_consistency_ck
+        constraint cbam_goods_classification_consistency_ck
         check (
             (
                 trade_code_type = 'HS_HEADING'
@@ -306,7 +306,6 @@ create table public.cbam_goods (
                 and record_level = 'TRADE_GOOD'
             )
         )
-    )
 );
 
 
