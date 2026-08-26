@@ -1,0 +1,11 @@
+{
+  "datasets": [
+    {
+      "id": "cbam-default-values-2026-02-04",
+      "file": "cbam-default-values-2026-02-04.xlsx",
+      "source": "User-provided project source",
+      "status": "REFERENCE_ONLY",
+      "notes": "Superseded for production use by the corrected 2026 Commission dataset."
+    }
+  ]
+}
