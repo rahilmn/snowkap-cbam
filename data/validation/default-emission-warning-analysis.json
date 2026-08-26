@@ -1,0 +1,1295 @@
+{
+  "record_count": 12532,
+  "source_warning_count": 2362,
+  "source_warning_types": {
+    "NON_NUMERIC_REFERENCE_VALUE": 2362
+  },
+  "source_warning_fields": {
+    "direct_emissions": 873,
+    "indirect_emissions": 615,
+    "total_emissions": 874
+  },
+  "top_warning_sheets": {
+    "Algeria": 69,
+    "Argentina": 69,
+    "Australia": 69,
+    "Azerbaijan": 69,
+    "Bosnia and Herzegovina": 69,
+    "Brazil": 69,
+    "Canada": 69,
+    "Chile": 69,
+    "China": 69,
+    "Colombia": 69,
+    "India": 69,
+    "Iran": 69,
+    "Japan": 69,
+    "Kazakhstan": 69,
+    "Mexico": 69,
+    "Myanmar_Burma": 69,
+    "New Zealand": 69,
+    "North Macedonia": 69,
+    "_Other Countries and Territorie": 69,
+    "Indonesia": 68
+  },
+  "missing_emission_record_count": 9751,
+  "missing_emissions_by_record_level": {
+    "TRADE_GOOD": 5540,
+    "HS_HEADING": 2046,
+    "HS_SUBHEADING": 2165
+  },
+  "missing_emissions_by_sector": {
+    "CEMENT": 471,
+    "FERTILISERS": 223,
+    "HYDROGEN": 94,
+    "ALUMINIUM": 1632,
+    "IRON_STEEL": 7331
+  },
+  "missing_emission_examples": [
+    {
+      "origin_country_name": "Albania",
+      "trade_code": "25070080",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "CEMENT",
+      "product_name": "Calcined clay",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 4
+    },
+    {
+      "origin_country_name": "Albania",
+      "trade_code": "25231000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "CEMENT",
+      "product_name": "White clinker",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 5
+    },
+    {
+      "origin_country_name": "Albania",
+      "trade_code": "25232100",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "CEMENT",
+      "product_name": "White Portland cement",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 7
+    },
+    {
+      "origin_country_name": "Albania",
+      "trade_code": "25239000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "CEMENT",
+      "product_name": "White hydraulic cements",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 9
+    },
+    {
+      "origin_country_name": "Albania",
+      "trade_code": "25233000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "CEMENT",
+      "product_name": "Aluminous cement",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 11
+    },
+    {
+      "origin_country_name": "Albania",
+      "trade_code": "28141000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "FERTILISERS",
+      "product_name": "Anhydrous ammonia",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 14
+    },
+    {
+      "origin_country_name": "Albania",
+      "trade_code": "3102",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "FERTILISERS",
+      "product_name": "Mineral or chemical fertilizers, nitrogenous",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 17
+    },
+    {
+      "origin_country_name": "Albania",
+      "trade_code": "3105",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "FERTILISERS",
+      "product_name": "Mineral or chemical fertilisers containing two or three of the fertilising elements nitrogen, phosphorus and potassium",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 32
+    },
+    {
+      "origin_country_name": "Albania",
+      "trade_code": "28041000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "HYDROGEN",
+      "product_name": "Hydrogen",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 43
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "25070080",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "CEMENT",
+      "product_name": "Calcined clay",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 4
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "25233000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "CEMENT",
+      "product_name": "Aluminous cement",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 11
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "3102",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "FERTILISERS",
+      "product_name": "Mineral or chemical fertilizers, nitrogenous",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 17
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "3105",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "FERTILISERS",
+      "product_name": "Mineral or chemical fertilisers containing two or three of the fertilising elements nitrogen, phosphorus and potassium",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 32
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7601",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "ALUMINIUM",
+      "product_name": "Unwrought aluminium",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 43
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7603",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "ALUMINIUM",
+      "product_name": "Aluminium powders and flakes",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 44
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76041010",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Bars and rods",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 45
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76041090",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Profiles",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 46
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76042100",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Hollow profiles",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 47
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76042910",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Bars and rods",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 48
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76042990",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Profiles",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 49
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7605",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "ALUMINIUM",
+      "product_name": "Aluminium wire",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 50
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7606",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "ALUMINIUM",
+      "product_name": "Aluminium plates, sheets and strip, of a thickness exceeding 0,2 mm",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 51
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7607",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "ALUMINIUM",
+      "product_name": "Aluminium foil (whether or not printed or backed with paper, paperboard, plastics or similar backing materials) of a thickness (excluding any backing) not exceeding 0,2 mm",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 52
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7608",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "ALUMINIUM",
+      "product_name": "Aluminium tubes and pipes",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 53
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76090000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Aluminium tube or pipe fittings (for example, couplings, elbows, sleeves)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 54
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76101000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Doors, windows and their frames and thresholds for doors",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 55
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "761090",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "ALUMINIUM",
+      "product_name": "Other",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 56
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76109010",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Bridges and bridge-sections, towers and lattice masts",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 57
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76109090",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Other",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 58
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76110000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Aluminium reservoirs, tanks, vats and similar containers, for any material (other than compressed or liquefied gas), of a capacity exceeding 300 litres, whether or not lined or heat-insulated, but not fitted with mechanical or thermal equipment",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 59
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7612",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "ALUMINIUM",
+      "product_name": "Aluminium casks, drums, cans, boxes and similar containers (including rigid or collapsible tubular containers), for any material (other than compressed or liquefied gas), of a capacity not exceeding 300 litres, whether or not lined or heat-insulated, but not fitted with mechanical or thermal equipment",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 60
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76130000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Aluminium containers for compressed or liquefied gas",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 61
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7614",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "ALUMINIUM",
+      "product_name": "Stranded wire, cables, plaited bands and the like, of aluminium, not electrically insulated",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 62
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76161000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Nails, tacks, staples (other than those of heading 8305), screws, bolts, nuts, screw hooks, rivets, cotters, cotter pins, washers and similar articles",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 63
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76169100",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Cloth, grill, netting and fencing, of aluminium wire",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 64
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76169910",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Cast",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 65
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "76169990",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "ALUMINIUM",
+      "product_name": "Other",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 66
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "28041000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "HYDROGEN",
+      "product_name": "Hydrogen",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 68
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7201",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Pig iron and spiegeleisen, in pigs, blocks or other primary forms",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 71
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "720211",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Ferro-manganese, containing by weight > 2% of carbon",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 72
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "720219",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Ferro-manganese, containing by weight <= 2% carbon",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 73
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "720241",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Ferro-chromium, containing by weight > 4% of carbon",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 74
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "720249",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Ferro-chromium, containing by weight <= 4% of carbon",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 75
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72026000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Ferro-nickel",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 76
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7203",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Ferrous products obtained by direct reduction of iron ore and other spongy ferrous products, in lumps, pellets or similar forms; iron having a minimum purity by weight of 99,94%, in lumps, pellets or similar forms",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 77
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7205",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Granules and powders of pig iron, spiegeleisen, iron or steel (excl. granules and powders of ferro-alloys, turnings and filings of iron or steel, radioactive iron powders \"isotopes\" and certain low-calibre, substandard balls for ballbearings)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 78
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7206",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Iron and non-alloy steel in ingots or other primary forms (excl. remelting scrap ingots, products obtained by continuous casting and iron of heading 7203)",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 79
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72061000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Ingots, of iron and non-alloy steel (excl. remelted scrap ingots, continuous cast products, iron of heading 7203)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 80
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72069000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Iron and non-alloy steel, in puddled bars or other primary forms (excl. ingots, remelted scrap ingots, continuous cast products, iron of heading 7203)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 81
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7207",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 82
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72071111",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products, of non-alloy free-cutting steel, containing by weight < 0,25% carbon, of square or rectangular cross-section, the width < twice the thickness, rolled or obtained by continuous casting",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 83
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72071114",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products, of iron or non-alloy steel, containing by weight < 0,25% carbon, of square or rectangular cross-section, the width < twice the thickness of <= 130 mm, rolled or obtained by continuous casting (excl. free-cutting steel)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 84
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72071116",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products, of iron or non-alloy steel, containing by weight < 0,25% carbon, of square or rectangular cross-section, the width < twice the thickness of > 130 mm, rolled or obtained by continuous casting (excl. free-cutting steel)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 85
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72071190",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight < 0,25% carbon, of rectangular cross-section, the width < twice the thickness, forged",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 86
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72071210",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight < 0,25 of carbon, of rectangular \"other than square\" cross-section, the width measuring >= twice the thickness, rolled or obtained by continuous casting",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 87
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72071290",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight < 0,25% carbon, of rectangular \"other than square\" cross-section, the width >= twice the thickness, forged",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 88
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72071912",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products, of iron or non-alloy steel, containing by weight < 0,25% carbon, of circular or polygonal cross-section, rolled or obtained by continuous casting",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 89
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72071919",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight < 0,25% carbon, of circular or polygonal cross-section, forged",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 90
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72071980",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight < 0,25% carbon (excl. semi-products, of square, rectangular, circular or polygonal cross-section)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 91
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72072011",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products, of non-alloy free-cutting steel, containing by weight >= 0,25% carbon, of square or rectangular cross-section, the width < twice the thickness, rolled or obtained by continuous casting",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 92
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72072015",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight >= 0,25% but < 0,6% carbon, of square or rectangular cross-section, the width < twice the thickness, rolled or obtained by continuous casting (excl. free-cutting steel)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 93
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72072017",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight >= 0,6% carbon, of square or rectangular cross-section, the width < twice the thickness, rolled or obtained by continuous casting (excl. free-cutting steel)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 94
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72072019",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight >= 0,25% carbon, of square or rectangular cross-section, the width < twice the thickness, forged",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 95
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72072032",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight >= 0,25 of carbon, of rectangular \"other than square\" cross-section, the width measuring >= twice the thickness, rolled or obtained by continuous casting",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 96
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72072039",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight >= 0,25% carbon, of rectangular \"other than square\" cross-section and the width >= twice the thickness, forged",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 97
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72072052",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight >= 0,25% carbon, of circular or polygonal cross-section, rolled or obtained by continuous casting",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 98
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72072059",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight >= 0,6% carbon, of circular or polygonal cross-section, forged",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 99
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72072080",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of iron or non-alloy steel, containing by weight >= 0,25% carbon (excl. those of square, rectangular, circular or polygonal cross-section)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 100
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7208",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Flat-rolled products of iron or non-alloy steel, of a width >= 600 mm, hot-rolled, not clad, plated or coated",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 101
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7209",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Flat-rolled products of iron or non-alloy steel, of a width of >= 600 mm, cold-rolled \"cold-reduced\", not clad, plated or coated",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 102
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7210",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Flat-rolled products of iron or non-alloy steel, of a width >= 600 mm, hot-rolled or cold-rolled \"cold-reduced\", clad, plated or coated",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 103
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7211",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Flat-rolled products of iron or non-alloy steel, of a width of < 600 mm, hot-rolled or cold-rolled \"cold-reduced\", not clad, plated or coated",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 104
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72111300",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Flat-rolled products of iron or non-alloy steel, simply hot-rolled on four faces or in a closed box pass, not clad, plated or coated, of a width of > 150 mm but < 600 mm and a thickness of >= 4 mm, not in coils, without patterns in relief, commonly known as \"wide flats\"",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 105
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72111400",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Flat-rolled products of iron or non-alloy steel, of a width < 600 mm, not further worked than hot-rolled, not clad, plated or coated, of a thickness of >= 4,75 mm (excl. \"wide flats\")",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 106
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72111900",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Flat-rolled products of iron or non-alloy steel, of a width < 600 mm, simply hot-rolled, not clad, plated or coated, of a thickness < 4,75 mm (excl. \"wide flats\")",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 107
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "721123",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Flat-rolled products of iron or non-alloy steel, of a width of < 600 mm, simply cold-rolled \"cold-reduced\", not clad, plated or coated, containing by weight < 0,25% of carbon",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 108
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72112900",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Flat-rolled products of iron or non-alloy steel, of a width of < 600 mm, simply cold-rolled \"cold-reduced\", not clad, plated or coated, containing by weight >= 0,25% of carbon",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 109
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "721190",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Flat-rolled products of iron or non-alloy steel, of a width of < 600 mm, hot-rolled or cold-rolled \"cold-reduced\" and further worked, but not clad, plated or coated",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 110
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7212",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Flat-rolled products of iron or non-alloy steel, of a width of < 600 mm, hot-rolled or cold-rolled \"cold-reduced\", clad, plated or coated",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 111
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7213",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Bars and rods of iron or non-alloy steel, hot-rolled, in irregularly wound coils",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 112
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7214",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Bars and rods, of iron or non-alloy steel, not further worked than forged, hot-rolled, hot-drawn or hot-extruded, but incl. those twisted after rolling (excl. in irregularly wound coils)",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 113
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72141000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Bars and rods, of iron or non-alloy steel, not further worked than forged (excl. in irregularly wound coils)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 114
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72142000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Bars and rods, of iron or non-alloy steel, with indentations, ribs, groves or other deformations produced during the rolling process",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 115
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72143000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Bars and rods, of non-alloy free-cutting steel, not further worked than hot-rolled, hot-drawn or hot-extruded (excl. containing indentations, ribs, grooves or other deformations produced during the rolling process or twisted after rolling)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 116
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "721491",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Bars and rods, of iron or non-alloy steel, not further worked than hot-rolled, hot-drawn or hot-extruded, of rectangular \"other than square\" cross-section (excl. containing indentations, ribs, grooves or other deformations produced during the rolling process, bars and rods twisted after rolling and free-cutting steel)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 117
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "721499",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Bars and rods, of iron or non-alloy steel, only hot-rolled, only hot-drawn or only hot-extruded (excl. of rectangular [other than square] cross-section and those containing indentations, ribs, grooves or other deformations produced during the rolling process, and of non-alloy free-cutting steel)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 118
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7215",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Bars and rods, of iron or non-alloy steel, cold-formed or cold-finished, whether or not further worked, or hot-formed and further worked, n.e.s.",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 119
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7216",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Angles, shapes and sections of iron or non-alloy steel, n.e.s.",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 120
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7217",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Wire of iron or non-alloy steel, in coils (excl. bars and rods)",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 121
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "721710",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Wire of iron or non-alloy steel, in coils, not plated or coated, whether or not polished (excl. bars and rods)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 122
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "721720",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Wire of iron or non-alloy steel, in coils, plated or coated with zinc (excl. bars and rods)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 123
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "721730",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Wire of iron or non-alloy steel, in coils, plated or coated with base metals (excl. plated or coated with zinc, and bars and rods)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 124
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "721790",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Wire of iron or non-alloy steel, in coils, plated or coated (excl. plated or coated with base metals, and bars and rods)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 125
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "7218",
+      "trade_code_type": "HS_HEADING",
+      "record_level": "HS_HEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Stainless steel in ingots or other primary forms (excl. remelting scrap ingots and products obtained by continuous casting); semi-finished products of stainless steel",
+      "missing_fields": [
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions"
+      ],
+      "source_row": 126
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72181000",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Steel, stainless, in ingots and other primary forms (excl. waste and scrap in ingot form, and products obtained by continuous casting)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 127
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "721891",
+      "trade_code_type": "HS_SUBHEADING",
+      "record_level": "HS_SUBHEADING",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of stainless steel, of rectangular \"other than square\" cross-section",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 128
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72189911",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of stainless steel, of square cross-section, rolled or obtained by continuous casting",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 129
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72189919",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of stainless steel, of square cross-section, forged",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 130
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72189920",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of stainless steel, of circular cross-section or of cross-section other than square or rectangular, rolled or obtained by continuous casting",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 131
+    },
+    {
+      "origin_country_name": "Algeria",
+      "trade_code": "72189980",
+      "trade_code_type": "CN",
+      "record_level": "TRADE_GOOD",
+      "sector": "IRON_STEEL",
+      "product_name": "Semi-finished products of stainless steel, forged (excl. products of square or rectangular cross-section)",
+      "missing_fields": [
+        "indirect_emissions"
+      ],
+      "source_row": 132
+    }
+  ]
+}

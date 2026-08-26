@@ -1,6 +1,9 @@
 import type { CbamSector, ProductionRoute } from "./types.js";
 
+import type { RegulatoryNumericValue } from "./value-types.js";
+
 export type TradeCodeType = "HS_HEADING" | "HS_SUBHEADING" | "CN" | "TARIC";
+
 export interface TradeCode {
   code: string;
   codeType: TradeCodeType;
@@ -12,8 +15,10 @@ export interface DefaultEmissionValue {
 
   datasetId: string;
 
-  originCountryCode: string;
+  originCountryCode: string | null;
   originCountryName: string;
+
+  sourceSheet: string;
 
   tradeCode: TradeCode;
 
@@ -21,15 +26,14 @@ export interface DefaultEmissionValue {
 
   productName: string;
 
-  directEmissions: string | null;
-  indirectEmissions: string | null;
-  totalEmissions: string | null;
-
-  unit: "TCO2E_PER_TONNE" | "TCO2_PER_MWH";
+  directEmissions: RegulatoryNumericValue;
+  indirectEmissions: RegulatoryNumericValue;
+  totalEmissions: RegulatoryNumericValue;
 
   productionRoute: ProductionRoute | null;
   sourceProductionRouteCode: string | null;
 
-  sourceSheet: string;
   sourceRow: number;
+
+  recordLevel: "HS_HEADING" | "HS_SUBHEADING" | "TRADE_GOOD";
 }

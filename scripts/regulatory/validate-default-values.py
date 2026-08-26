@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 import json
-import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,13 +12,6 @@ INPUT = (
     / "data"
     / "processed"
     / "default-emission-values.json"
-)
-
-WARNINGS_INPUT = (
-    ROOT
-    / "data"
-    / "validation"
-    / "default-emission-value-warnings.json"
 )
 
 REPORT_OUTPUT = (
@@ -48,10 +40,25 @@ VALID_CODE_TYPES = {
 }
 
 
+VALID_RECORD_TYPES = {
+    "CLASSIFICATION",
+    "TRADE_GOOD",
+}
+
+
 VALID_RECORD_LEVELS = {
     "HS_HEADING",
     "HS_SUBHEADING",
     "TRADE_GOOD",
+}
+
+
+VALID_VALUE_STATUSES = {
+    "AVAILABLE",
+    "NOT_APPLICABLE",
+    "UNAVAILABLE",
+    "REFERENCE_REQUIRED",
+    "SOURCE_TEXT",
 }
 
 
@@ -70,7 +77,7 @@ VALID_ROUTES = {
 }
 
 
-TRADE_CODE_LENGTHS = {
+EXPECTED_LENGTH = {
     "HS_HEADING": 4,
     "HS_SUBHEADING": 6,
     "CN": 8,
@@ -83,7 +90,9 @@ def load_json(path: Path):
         raise FileNotFoundError(path)
 
     return json.loads(
-        path.read_text(encoding="utf-8")
+        path.read_text(
+            encoding="utf-8"
+        )
     )
 
 
@@ -91,32 +100,124 @@ def add_error(
     errors: list[dict],
     code: str,
     message: str,
-    record_index: int | None = None,
+    index: int,
 ) -> None:
     errors.append(
         {
-            "severity": "ERROR",
             "code": code,
             "message": message,
-            "record_index": record_index,
+            "record_index": index,
         }
     )
 
 
-def add_warning(
-    warnings: list[dict],
-    code: str,
-    message: str,
-    record_index: int | None = None,
+def validate_value_object(
+    value_object,
+    field_name: str,
+    index: int,
+    errors: list[dict],
 ) -> None:
-    warnings.append(
-        {
-            "severity": "WARNING",
-            "code": code,
-            "message": message,
-            "record_index": record_index,
-        }
+    """
+    Validate a semantic regulatory value object.
+
+    Expected structure:
+
+    {
+        "value": "...",
+        "status": "...",
+        "rawSourceValue": "..."
+    }
+    """
+
+    if not isinstance(
+        value_object,
+        dict,
+    ):
+        add_error(
+            errors,
+            "INVALID_REGULATORY_VALUE",
+            (
+                f"{field_name} must be an object; "
+                "the processed dataset may be stale."
+            ),
+            index,
+        )
+        return
+
+    required_keys = {
+        "value",
+        "status",
+        "rawSourceValue",
+    }
+
+    missing = required_keys.difference(
+        value_object.keys()
     )
+
+    if missing:
+        add_error(
+            errors,
+            "INVALID_REGULATORY_VALUE",
+            (
+                f"{field_name} is missing keys: "
+                f"{sorted(missing)}"
+            ),
+            index,
+        )
+        return
+
+    status = value_object["status"]
+    value = value_object["value"]
+
+    if status not in VALID_VALUE_STATUSES:
+        add_error(
+            errors,
+            "INVALID_VALUE_STATUS",
+            (
+                f"{field_name} has unknown "
+                f"status={status!r}"
+            ),
+            index,
+        )
+        return
+
+    if status == "AVAILABLE":
+        if value is None:
+            add_error(
+                errors,
+                "AVAILABLE_VALUE_MISSING",
+                (
+                    f"{field_name} is AVAILABLE "
+                    "but value is null."
+                ),
+                index,
+            )
+        else:
+            try:
+                float(value)
+            except (TypeError, ValueError):
+                add_error(
+                    errors,
+                    "AVAILABLE_VALUE_NOT_NUMERIC",
+                    (
+                        f"{field_name} has non-numeric "
+                        f"value={value!r}"
+                    ),
+                    index,
+                )
+
+    else:
+        if value is not None:
+            add_error(
+                errors,
+                "NONAVAILABLE_VALUE_PRESENT",
+                (
+                    f"{field_name} has status="
+                    f"{status!r} but value="
+                    f"{value!r}"
+                ),
+                index,
+            )
 
 
 def validate_trade_code(
@@ -124,14 +225,22 @@ def validate_trade_code(
     index: int,
     errors: list[dict],
 ) -> None:
-    code = record.get("trade_code")
-    code_type = record.get("trade_code_type")
+    code = record.get(
+        "trade_code"
+    )
 
-    if not isinstance(code, str):
+    code_type = record.get(
+        "trade_code_type"
+    )
+
+    if not isinstance(
+        code,
+        str,
+    ):
         add_error(
             errors,
-            "MISSING_TRADE_CODE",
-            "trade_code is missing or is not a string",
+            "INVALID_TRADE_CODE",
+            f"Trade code is invalid: {code!r}",
             index,
         )
         return
@@ -149,221 +258,216 @@ def validate_trade_code(
         add_error(
             errors,
             "INVALID_TRADE_CODE_TYPE",
-            f"Unknown trade_code_type: {code_type!r}",
+            f"Unknown code type: {code_type!r}",
             index,
         )
         return
 
-    expected_length = TRADE_CODE_LENGTHS[code_type]
+    expected_length = EXPECTED_LENGTH[
+        code_type
+    ]
 
     if len(code) != expected_length:
         add_error(
             errors,
             "TRADE_CODE_LENGTH_MISMATCH",
             (
-                f"{code_type} expects {expected_length} digits "
-                f"but got {code!r}"
+                f"{code_type} requires "
+                f"{expected_length} digits; "
+                f"got {code!r}"
             ),
             index,
         )
 
 
-def validate_required_fields(
+def validate_classification(
     record: dict,
     index: int,
     errors: list[dict],
 ) -> None:
-    required = [
-        "dataset_id",
-        "origin_country_name",
-        "source_sheet",
-        "trade_code",
-        "source_trade_code",
-        "trade_code_type",
-        "sector",
-        "product_name",
-        "source_row",
-        "record_level",
-    ]
+    code_type = record.get(
+        "trade_code_type"
+    )
 
-    for field in required:
-        value = record.get(field)
+    record_type = record.get(
+        "record_type"
+    )
 
-        if value is None or value == "":
-            add_error(
-                errors,
-                "MISSING_REQUIRED_FIELD",
-                f"Missing required field: {field}",
-                index,
-            )
+    record_level = record.get(
+        "record_level"
+    )
 
+    expected_record_type = {
+        "HS_HEADING": "CLASSIFICATION",
+        "HS_SUBHEADING": "CLASSIFICATION",
+        "CN": "TRADE_GOOD",
+        "TARIC": "TRADE_GOOD",
+    }.get(code_type)
 
-def validate_sector(
-    record: dict,
-    index: int,
-    errors: list[dict],
-) -> None:
-    sector = record.get("sector")
-
-    if sector not in VALID_SECTORS:
-        add_error(
-            errors,
-            "INVALID_SECTOR",
-            f"Unknown sector: {sector!r}",
-            index,
-        )
-
-
-def validate_route(
-    record: dict,
-    index: int,
-    errors: list[dict],
-) -> None:
-    route = record.get("production_route")
-
-    if route not in VALID_ROUTES:
-        add_error(
-            errors,
-            "INVALID_PRODUCTION_ROUTE",
-            f"Unknown production route: {route!r}",
-            index,
-        )
-
-
-def validate_record_level(
-    record: dict,
-    index: int,
-    errors: list[dict],
-) -> None:
-    record_level = record.get("record_level")
-
-    if record_level not in VALID_RECORD_LEVELS:
-        add_error(
-            errors,
-            "INVALID_RECORD_LEVEL",
-            f"Unknown record level: {record_level!r}",
-            index,
-        )
-
-    code_type = record.get("trade_code_type")
-
-    expected_level = {
+    expected_record_level = {
         "HS_HEADING": "HS_HEADING",
         "HS_SUBHEADING": "HS_SUBHEADING",
         "CN": "TRADE_GOOD",
         "TARIC": "TRADE_GOOD",
     }.get(code_type)
 
-    if expected_level != record_level:
+    if record_type != expected_record_type:
+        add_error(
+            errors,
+            "RECORD_TYPE_MISMATCH",
+            (
+                f"code type {code_type!r} requires "
+                f"record type {expected_record_type!r}; "
+                f"got {record_type!r}"
+            ),
+            index,
+        )
+
+    if record_level != expected_record_level:
         add_error(
             errors,
             "RECORD_LEVEL_MISMATCH",
             (
-                f"trade_code_type={code_type!r} "
-                f"should have record_level={expected_level!r}, "
+                f"code type {code_type!r} requires "
+                f"record level {expected_record_level!r}; "
                 f"got {record_level!r}"
             ),
             index,
         )
 
 
-def validate_emissions(
-    record: dict,
-    index: int,
-    warnings: list[dict],
-) -> None:
-    fields = [
-        "direct_emissions",
-        "indirect_emissions",
-        "total_emissions",
-    ]
-
-    for field in fields:
-        value = record.get(field)
-
-        if value is None:
-            add_warning(
-                warnings,
-                "MISSING_EMISSION_VALUE",
-                f"{field} is unavailable",
-                index,
-            )
-            continue
-
-        try:
-            float(value)
-        except (TypeError, ValueError):
-            add_warning(
-                warnings,
-                "NON_NUMERIC_EMISSION_VALUE",
-                f"{field} has non-numeric value: {value!r}",
-                index,
-            )
-
-
-def validate_source_row(
+def validate_parent(
     record: dict,
     index: int,
     errors: list[dict],
 ) -> None:
-    source_row = record.get("source_row")
+    code = record.get(
+        "trade_code"
+    )
 
-    if not isinstance(source_row, int):
+    code_type = record.get(
+        "trade_code_type"
+    )
+
+    parent = record.get(
+        "parent_trade_code"
+    )
+
+    if code_type == "HS_HEADING":
+        expected_parent = None
+    elif code_type == "HS_SUBHEADING":
+        expected_parent = code[:4]
+    elif code_type == "CN":
+        expected_parent = code[:6]
+    elif code_type == "TARIC":
+        expected_parent = code[:8]
+    else:
+        expected_parent = None
+
+    if parent != expected_parent:
         add_error(
             errors,
-            "INVALID_SOURCE_ROW",
-            f"source_row is not an integer: {source_row!r}",
+            "PARENT_CODE_MISMATCH",
+            (
+                f"Expected parent={expected_parent!r}; "
+                f"got {parent!r}"
+            ),
             index,
         )
 
 
-def duplicate_key(record: dict) -> tuple:
+def duplicate_key(
+    record: dict,
+) -> tuple:
     return (
-        record.get("origin_country_name"),
-        record.get("trade_code"),
-        record.get("trade_code_type"),
-        record.get("sector"),
-        record.get("product_name"),
-        record.get("production_route"),
+        record.get(
+            "origin_country_name"
+        ),
+        record.get(
+            "trade_code"
+        ),
+        record.get(
+            "trade_code_type"
+        ),
+        record.get(
+            "sector"
+        ),
+        record.get(
+            "product_name"
+        ),
+        record.get(
+            "production_route"
+        ),
     )
 
 
 def main() -> None:
-    records = load_json(INPUT)
-
-    source_warnings = (
-        load_json(WARNINGS_INPUT)
-        if WARNINGS_INPUT.exists()
-        else []
+    records = load_json(
+        INPUT
     )
 
     errors: list[dict] = []
-    warnings: list[dict] = []
+
+    # This collects unresolved source text such as
+    # "N/(A" without treating it as a numeric value.
+    source_text_values: list[dict] = []
 
     # ---------------------------------------------------------
-    # Record count
+    # Record validation
     # ---------------------------------------------------------
 
-    record_count = len(records)
+    for index, record in enumerate(
+        records
+    ):
+        required_fields = [
+            "dataset_id",
+            "origin_country_name",
+            "source_sheet",
+            "trade_code",
+            "source_trade_code",
+            "trade_code_type",
+            "sector",
+            "product_name",
+            "source_row",
+            "record_type",
+            "record_level",
+            "parent_trade_code",
+        ]
 
-    if record_count == 0:
-        add_error(
-            errors,
-            "EMPTY_DATASET",
-            "Normalized dataset contains zero records",
-        )
+        for field in required_fields:
+            if field not in record:
+                add_error(
+                    errors,
+                    "MISSING_FIELD",
+                    f"Missing field: {field}",
+                    index,
+                )
 
-    # ---------------------------------------------------------
-    # Validate every record
-    # ---------------------------------------------------------
+        if record.get(
+            "sector"
+        ) not in VALID_SECTORS:
+            add_error(
+                errors,
+                "INVALID_SECTOR",
+                (
+                    "Invalid sector: "
+                    f"{record.get('sector')!r}"
+                ),
+                index,
+            )
 
-    for index, record in enumerate(records):
-
-        validate_required_fields(
-            record,
-            index,
-            errors,
-        )
+        if record.get(
+            "production_route"
+        ) not in VALID_ROUTES:
+            add_error(
+                errors,
+                "INVALID_PRODUCTION_ROUTE",
+                (
+                    "Invalid production route: "
+                    f"{record.get('production_route')!r}"
+                ),
+                index,
+            )
 
         validate_trade_code(
             record,
@@ -371,46 +475,83 @@ def main() -> None:
             errors,
         )
 
-        validate_sector(
+        validate_classification(
             record,
             index,
             errors,
         )
 
-        validate_route(
+        validate_parent(
             record,
             index,
             errors,
         )
 
-        validate_record_level(
-            record,
-            index,
-            errors,
-        )
+        # -----------------------------------------------------
+        # Validate the three emissions value objects
+        # -----------------------------------------------------
 
-        validate_source_row(
-            record,
-            index,
-            errors,
-        )
+        for field_name in (
+            "direct_emissions",
+            "indirect_emissions",
+            "total_emissions",
+        ):
+            value_object = record.get(
+                field_name
+            )
 
-        validate_emissions(
-            record,
-            index,
-            warnings,
-        )
+            validate_value_object(
+                value_object,
+                field_name,
+                index,
+                errors,
+            )
+
+            # -------------------------------------------------
+            # Capture unresolved source text
+            # -------------------------------------------------
+
+            if (
+                isinstance(
+                    value_object,
+                    dict,
+                )
+                and value_object.get(
+                    "status"
+                ) == "SOURCE_TEXT"
+            ):
+                source_text_values.append(
+                    {
+                        "record_index": index,
+                        "sheet": record.get(
+                            "source_sheet"
+                        ),
+                        "row": record.get(
+                            "source_row"
+                        ),
+                        "trade_code": record.get(
+                            "trade_code"
+                        ),
+                        "product_name": record.get(
+                            "product_name"
+                        ),
+                        "field": field_name,
+                        "raw_source_value": (
+                            value_object.get(
+                                "rawSourceValue"
+                            )
+                        ),
+                    }
+                )
 
     # ---------------------------------------------------------
     # Duplicate detection
     # ---------------------------------------------------------
 
-    keys = [
+    counts = Counter(
         duplicate_key(record)
         for record in records
-    ]
-
-    counts = Counter(keys)
+    )
 
     duplicate_records = [
         {
@@ -426,119 +567,83 @@ def main() -> None:
             errors,
             "DUPLICATE_REGULATORY_RECORD",
             (
-                "Duplicate normalized regulatory key: "
+                "Duplicate normalized key: "
                 f"{duplicate['key']}"
             ),
+            -1,
         )
 
     # ---------------------------------------------------------
-    # Warning statistics
+    # Regulatory value status statistics
     # ---------------------------------------------------------
 
-    source_warning_counts = Counter(
-        warning.get("warning")
-        for warning in source_warnings
-    )
+    value_status_counts: dict[str, dict] = {}
 
-    source_warning_fields = Counter(
-        warning.get("field")
-        for warning in source_warnings
-    )
+    for field_name in (
+        "direct_emissions",
+        "indirect_emissions",
+        "total_emissions",
+    ):
+        counter = Counter()
 
-    # ---------------------------------------------------------
-    # Country statistics
-    # ---------------------------------------------------------
+        for record in records:
+            value_object = record.get(
+                field_name
+            )
 
-    country_counts = Counter(
-        record.get("origin_country_name")
-        for record in records
-    )
+            if isinstance(
+                value_object,
+                dict,
+            ):
+                status = value_object.get(
+                    "status"
+                )
 
-    sector_counts = Counter(
-        record.get("sector")
-        for record in records
-    )
+                counter[status] += 1
 
-    code_type_counts = Counter(
-        record.get("trade_code_type")
-        for record in records
-    )
+            else:
+                counter[
+                    "INVALID_OBJECT"
+                ] += 1
 
-    record_level_counts = Counter(
-        record.get("record_level")
-        for record in records
-    )
-
-    route_counts = Counter(
-        record.get("production_route")
-        for record in records
-    )
+        value_status_counts[
+            field_name
+        ] = dict(counter)
 
     # ---------------------------------------------------------
-    # Validation status
+    # Overall report
     # ---------------------------------------------------------
-
-    status = (
-        "VALID"
-        if not errors
-        else "INVALID"
-    )
 
     report = {
-        "status": status,
-
-        "record_count": record_count,
-
-        "errors": errors,
-        "error_count": len(errors),
-
-        "warnings": warnings,
-        "warning_count": len(warnings),
-
-        "source_warning_count": len(source_warnings),
-        "source_warning_types": dict(
-            source_warning_counts
+        "status": (
+            "VALID"
+            if not errors
+            else "INVALID"
         ),
-        "source_warning_fields": dict(
-            source_warning_fields
+        "record_count": len(
+            records
         ),
-
-        "country_count": len(country_counts),
-        "records_by_country": dict(
-            country_counts
+        "error_count": len(
+            errors
         ),
-
-        "records_by_sector": dict(
-            sector_counts
-        ),
-
-        "records_by_code_type": dict(
-            code_type_counts
-        ),
-
-        "records_by_record_level": dict(
-            record_level_counts
-        ),
-
-        "records_by_production_route": {
-            str(key): value
-            for key, value in route_counts.items()
-        },
-
         "duplicate_record_count": len(
             duplicate_records
         ),
-
-        "duplicate_records": duplicate_records,
-
-        "source_validation_note": (
-            "This dataset originated from the "
-            "user-provided February 2026 workbook and "
-            "is not approved for production regulatory "
-            "use until reconciled against the current "
-            "corrected official Commission dataset."
+        "errors": errors,
+        "value_status_counts": (
+            value_status_counts
+        ),
+        "source_text_value_count": len(
+            source_text_values
+        ),
+        "source_text_values": (
+            source_text_values
         ),
     }
+
+    # ---------------------------------------------------------
+    # Write validation report
+    # ---------------------------------------------------------
 
     REPORT_OUTPUT.parent.mkdir(
         parents=True,
@@ -554,27 +659,41 @@ def main() -> None:
         encoding="utf-8",
     )
 
+    # ---------------------------------------------------------
+    # Console summary
+    # ---------------------------------------------------------
+
     print()
-    print("=== CBAM DEFAULT VALUE VALIDATION ===")
-    print(f"Status: {status}")
-    print(f"Records: {record_count}")
-    print(f"Errors: {len(errors)}")
-    print(f"Warnings: {len(warnings)}")
     print(
-        f"Source warnings: {len(source_warnings)}"
+        "=== CBAM DEFAULT VALUE VALIDATION ==="
     )
     print(
-        f"Duplicate regulatory records: "
+        f"Status: {report['status']}"
+    )
+    print(
+        f"Records: {len(records)}"
+    )
+    print(
+        f"Errors: {len(errors)}"
+    )
+    print(
+        "Source text values: "
+        f"{len(source_text_values)}"
+    )
+    print(
+        "Duplicate regulatory records: "
         f"{len(duplicate_records)}"
     )
-    print()
     print(
-        f"Validation report: {REPORT_OUTPUT}"
+        f"Validation report: "
+        f"{REPORT_OUTPUT}"
     )
 
     if errors:
         print()
-        print("First 20 validation errors:")
+        print(
+            "First 20 errors:"
+        )
 
         for error in errors[:20]:
             print(

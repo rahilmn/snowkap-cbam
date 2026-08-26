@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import json
 import re
@@ -24,19 +25,10 @@ OUTPUT = (
     / "default-emission-values.json"
 )
 
-WARNINGS_OUTPUT = (
-    ROOT
-    / "data"
-    / "validation"
-    / "default-emission-value-warnings.json"
-)
-
-
 SKIP_SHEETS = {
     "Overview",
     "Version History",
 }
-
 
 SECTOR_NAMES = {
     "Cement": "CEMENT",
@@ -46,7 +38,6 @@ SECTOR_NAMES = {
     "Aluminium": "ALUMINIUM",
     "Electricity": "ELECTRICITY",
 }
-
 
 ROUTE_CODES = {
     "(A)": "GREY_CLINKER",
@@ -76,98 +67,136 @@ class DefaultEmissionValue:
     sector: str
     product_name: str
 
-    direct_emissions: str | None
-    indirect_emissions: str | None
-    total_emissions: str | None
+    direct_emissions: dict
+    indirect_emissions: dict
+    total_emissions: dict
 
     production_route: str | None
     source_production_route_code: str | None
 
     source_row: int
 
+    record_type: str
     record_level: str
+
+    parent_trade_code: str | None
 
 
 def clean(value) -> str | None:
-    """
-    Convert spreadsheet cell content into a clean string.
+    if value is None:
+        return None
 
-    Blank cells, NaN and empty strings become None.
-    """
     if pd.isna(value):
         return None
 
     text = str(value).strip()
 
+    return text if text else None
+
+
+def normalize_regulatory_value(value) -> dict:
+    """
+    Preserve the semantic meaning of a regulatory spreadsheet value.
+
+    Numeric:
+        AVAILABLE
+
+    Explicit non-applicable markers:
+        NOT_APPLICABLE
+
+    Explicit unavailable markers:
+        UNAVAILABLE
+
+    Explicit delegation:
+        REFERENCE_REQUIRED
+
+    Other non-numeric text:
+        SOURCE_TEXT
+        This is preserved for review and is never converted to zero.
+    """
+
+    if value is None or pd.isna(value):
+        return {
+            "value": None,
+            "status": "UNAVAILABLE",
+            "rawSourceValue": None,
+        }
+
+    text = str(value).strip()
+
     if not text:
-        return None
+        return {
+            "value": None,
+            "status": "UNAVAILABLE",
+            "rawSourceValue": None,
+        }
 
-    return text
+    # Normalize only for marker comparison.
+    marker = (
+        text.upper()
+        .replace(" ", "")
+    )
 
+    if marker in {
+        "-",
+        "–",
+        "_",
+    }:
+        return {
+            "value": None,
+            "status": "UNAVAILABLE",
+            "rawSourceValue": text,
+        }
 
-def normalize_numeric(
-    value,
-    *,
-    sheet_name: str,
-    row_number: int,
-    field_name: str,
-    warnings: list[dict],
-) -> str | None:
-    """
-    Normalize a numeric regulatory value.
+    if marker in {
+        "N/A",
+        "N.A.",
+        "N.A",
+        "NA",
+    }:
+        return {
+            "value": None,
+            "status": "NOT_APPLICABLE",
+            "rawSourceValue": text,
+        }
 
-    Rules:
-    - blank / NaN -> None
-    - '-', '–', '_' -> None
-    - numeric values -> canonical numeric string
-    - unexpected text -> None + warning
+    if text.lower() == "see below":
+        return {
+            "value": None,
+            "status": "REFERENCE_REQUIRED",
+            "rawSourceValue": text,
+        }
 
-    We never silently interpret non-numeric text as zero.
-    """
-
-    text = clean(value)
-
-    if text is None:
-        return None
-
-    if text in {"–", "-", "_"}:
-        return None
+    normalized_text = text.replace(",", ".")
 
     try:
-        number = float(text.replace(",", "."))
+        decimal_value = Decimal(normalized_text)
 
-        return format(number, ".15g")
+        return {
+            "value": format(decimal_value, "f"),
+            "status": "AVAILABLE",
+            "rawSourceValue": text,
+        }
 
-    except ValueError:
-        warnings.append(
-            {
-                "sheet": sheet_name,
-                "row": row_number,
-                "field": field_name,
-                "raw_value": text,
-                "warning": "NON_NUMERIC_REFERENCE_VALUE",
-            }
-        )
+    except InvalidOperation:
+        return {
+            "value": None,
+            "status": "SOURCE_TEXT",
+            "rawSourceValue": text,
+        }
 
-        return None
 
 def normalize_trade_code(value: str) -> tuple[str, str]:
     """
-    Normalize source trade codes.
-
-    Supported source code levels:
+    Supported code levels:
 
     4 digits  -> HS heading
     6 digits  -> HS subheading
     8 digits  -> CN
     10 digits -> TARIC
-
-    The original source representation is preserved
-    separately for auditability.
     """
 
     source = value.strip()
-
     normalized = re.sub(r"\s+", "", source)
 
     if not normalized.isdigit():
@@ -179,19 +208,15 @@ def normalize_trade_code(value: str) -> tuple[str, str]:
 
     if code_length == 4:
         code_type = "HS_HEADING"
-
     elif code_length == 6:
         code_type = "HS_SUBHEADING"
-
     elif code_length == 8:
         code_type = "CN"
-
     elif code_length == 10:
         code_type = "TARIC"
-
     else:
         raise ValueError(
-            f"Unexpected trade code length: "
+            "Unexpected trade code length: "
             f"{source!r} -> {normalized!r}"
         )
 
@@ -201,10 +226,6 @@ def normalize_trade_code(value: str) -> tuple[str, str]:
 def normalize_route(
     value: str | None,
 ) -> tuple[str | None, str | None]:
-    """
-    Convert the source production-route indicator
-    into Snowkap's normalized route identifier.
-    """
 
     text = clean(value)
 
@@ -222,51 +243,64 @@ def normalize_route(
 
 
 def is_sector_row(row: pd.Series) -> str | None:
-    """
-    Detect a sector/category row.
-
-    Example:
-        Cement
-        Fertilisers
-        Hydrogen
-    """
-
     first = clean(row.iloc[0])
-
-    if first in SECTOR_NAMES:
-        return SECTOR_NAMES[first]
-
-    return None
+    return SECTOR_NAMES.get(first)
 
 
 def is_product_row(row: pd.Series) -> bool:
-    """
-    Detect a likely product row.
-
-    Product rows have:
-      column 0 = trade code
-      column 1 = description
-    """
-
-    trade_code = clean(row.iloc[0])
+    source_code = clean(row.iloc[0])
     description = clean(row.iloc[1])
 
-    if trade_code is None or description is None:
+    if source_code is None or description is None:
         return False
 
-    if trade_code == "Product CN Code":
+    if source_code == "Product CN Code":
         return False
 
     return True
 
 
+def build_record_classification(
+    trade_code_type: str,
+) -> tuple[str, str]:
+
+    if trade_code_type == "HS_HEADING":
+        return "CLASSIFICATION", "HS_HEADING"
+
+    if trade_code_type == "HS_SUBHEADING":
+        return "CLASSIFICATION", "HS_SUBHEADING"
+
+    if trade_code_type in {"CN", "TARIC"}:
+        return "TRADE_GOOD", "TRADE_GOOD"
+
+    raise ValueError(
+        f"Unknown trade code type: {trade_code_type!r}"
+    )
+
+
+def infer_parent_trade_code(
+    trade_code: str,
+    trade_code_type: str,
+) -> str | None:
+
+    if trade_code_type == "HS_HEADING":
+        return None
+
+    if trade_code_type == "HS_SUBHEADING":
+        return trade_code[:4]
+
+    if trade_code_type == "CN":
+        return trade_code[:6]
+
+    if trade_code_type == "TARIC":
+        return trade_code[:8]
+
+    return None
+
+
 def parse_sheet(
     sheet_name: str,
-    warnings: list[dict],
 ) -> list[DefaultEmissionValue]:
-    """
-    Parse one country/territory sheet.
-    """
 
     df = pd.read_excel(
         INPUT,
@@ -274,32 +308,20 @@ def parse_sheet(
         header=None,
     )
 
-    results: list[DefaultEmissionValue] = []
+    records: list[DefaultEmissionValue] = []
 
     current_sector: str | None = None
 
     for row_index, row in df.iterrows():
 
-        # -----------------------------------------------------
-        # Detect sector/category rows
-        # -----------------------------------------------------
-
         detected_sector = is_sector_row(row)
 
-        if detected_sector:
+        if detected_sector is not None:
             current_sector = detected_sector
             continue
 
-        # -----------------------------------------------------
-        # Ignore anything before the first recognized sector
-        # -----------------------------------------------------
-
         if current_sector is None:
             continue
-
-        # -----------------------------------------------------
-        # Ignore non-product rows
-        # -----------------------------------------------------
 
         if not is_product_row(row):
             continue
@@ -307,49 +329,43 @@ def parse_sheet(
         source_trade_code = clean(row.iloc[0])
         product_name = clean(row.iloc[1])
 
-        if source_trade_code is None or product_name is None:
+        if (
+            source_trade_code is None
+            or product_name is None
+        ):
             continue
 
-        # -----------------------------------------------------
-        # Normalize trade code
-        # -----------------------------------------------------
-
-        trade_code, trade_code_type = normalize_trade_code(
-            source_trade_code
+        trade_code, trade_code_type = (
+            normalize_trade_code(
+                source_trade_code
+            )
         )
 
-        # -----------------------------------------------------
-        # Normalize production route
-        # -----------------------------------------------------
-
-        route_value = (
-            row.iloc[8]
-            if len(row) > 8
-            else None
+        record_type, record_level = (
+            build_record_classification(
+                trade_code_type
+            )
         )
 
-        production_route, source_route = normalize_route(
-            route_value
+        production_route, source_route = (
+            normalize_route(
+                row.iloc[8]
+                if len(row) > 8
+                else None
+            )
         )
 
-        # -----------------------------------------------------
-               # -----------------------------------------------------
-        # Determine record level
-        # -----------------------------------------------------
-
-        record_level = {
-            "HS_HEADING": "HS_HEADING",
-            "HS_SUBHEADING": "HS_SUBHEADING",
-            "CN": "TRADE_GOOD",
-            "TARIC": "TRADE_GOOD",
-        }[trade_code_type]
-
-        # -----------------------------------------------------
-        # Build normalized record
-        # -----------------------------------------------------
+        parent_trade_code = (
+            infer_parent_trade_code(
+                trade_code,
+                trade_code_type,
+            )
+        )
 
         record = DefaultEmissionValue(
-            dataset_id="cbam-default-values-2026-02-04",
+            dataset_id=(
+                "cbam-default-values-2026-02-04"
+            ),
 
             origin_country_name=sheet_name,
             source_sheet=sheet_name,
@@ -361,28 +377,22 @@ def parse_sheet(
             sector=current_sector,
             product_name=product_name,
 
-            direct_emissions=normalize_numeric(
-                row.iloc[2],
-                sheet_name=sheet_name,
-                row_number=row_index + 1,
-                field_name="direct_emissions",
-                warnings=warnings,
+            direct_emissions=(
+                normalize_regulatory_value(
+                    row.iloc[2]
+                )
             ),
 
-            indirect_emissions=normalize_numeric(
-                row.iloc[3],
-                sheet_name=sheet_name,
-                row_number=row_index + 1,
-                field_name="indirect_emissions",
-                warnings=warnings,
+            indirect_emissions=(
+                normalize_regulatory_value(
+                    row.iloc[3]
+                )
             ),
 
-            total_emissions=normalize_numeric(
-                row.iloc[4],
-                sheet_name=sheet_name,
-                row_number=row_index + 1,
-                field_name="total_emissions",
-                warnings=warnings,
+            total_emissions=(
+                normalize_regulatory_value(
+                    row.iloc[4]
+                )
             ),
 
             production_route=production_route,
@@ -390,35 +400,38 @@ def parse_sheet(
 
             source_row=row_index + 1,
 
+            record_type=record_type,
             record_level=record_level,
+
+            parent_trade_code=parent_trade_code,
         )
 
-        results.append(record)
+        records.append(record)
 
-    return results
+    return records
 
 
 def main() -> None:
+
     if not INPUT.exists():
         raise FileNotFoundError(
             f"Workbook not found: {INPUT}"
         )
 
-    warnings: list[dict] = []
-
     workbook = pd.ExcelFile(INPUT)
 
     all_records: list[DefaultEmissionValue] = []
+
+    data_sheet_count = 0
 
     for sheet_name in workbook.sheet_names:
 
         if sheet_name in SKIP_SHEETS:
             continue
 
-        records = parse_sheet(
-            sheet_name,
-            warnings,
-        )
+        data_sheet_count += 1
+
+        records = parse_sheet(sheet_name)
 
         all_records.extend(records)
 
@@ -427,33 +440,18 @@ def main() -> None:
             f"{len(records)} records"
         )
 
-    # ---------------------------------------------------------
-    # Ensure output directories exist
-    # ---------------------------------------------------------
-
     OUTPUT.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
-
-    WARNINGS_OUTPUT.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    # ---------------------------------------------------------
-    # Convert dataclasses to JSON-compatible dictionaries
-    # ---------------------------------------------------------
 
     payload = [
         asdict(record)
         for record in all_records
     ]
 
-    # ---------------------------------------------------------
-    # Write normalized dataset
-    # ---------------------------------------------------------
-
+    # Only replace the processed file after the
+    # complete workbook has parsed successfully.
     OUTPUT.write_text(
         json.dumps(
             payload,
@@ -463,38 +461,15 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    # ---------------------------------------------------------
-    # Write validation warnings
-    # ---------------------------------------------------------
-
-    WARNINGS_OUTPUT.write_text(
-        json.dumps(
-            warnings,
-            indent=2,
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    # ---------------------------------------------------------
-    # Print summary
-    # ---------------------------------------------------------
-
     print()
+    print(
+        f"Total data sheets: {data_sheet_count}"
+    )
     print(
         f"Total records: {len(payload)}"
     )
-
     print(
         f"Output: {OUTPUT}"
-    )
-
-    print(
-        f"Warnings: {len(warnings)}"
-    )
-
-    print(
-        f"Warnings output: {WARNINGS_OUTPUT}"
     )
 
 
