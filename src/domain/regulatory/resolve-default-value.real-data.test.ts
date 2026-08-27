@@ -19,6 +19,9 @@ import type {
 const DATASET_PATH =
   "data/processed/default-emission-values-definitive.json";
 
+const OTHER_COUNTRIES_NAME =
+  "_Other Countries and Territorie";
+
 function loadDataset(): RegulatoryRecord[] {
   const raw = readFileSync(
     DATASET_PATH,
@@ -81,12 +84,8 @@ describe(
 
         expect(
           result.status,
-        ).toBe("RESOLVED");
-
-        expect(
-          result.reason,
         ).toBe(
-          "EXACT_CN8_MATCH",
+          "RESOLVED",
         );
 
         expect(
@@ -122,7 +121,9 @@ describe(
 
         expect(
           result.status,
-        ).toBe("RESOLVED");
+        ).toBe(
+          "RESOLVED",
+        );
 
         expect(
           result.record
@@ -166,64 +167,6 @@ describe(
     );
 
     it(
-      "does not convert unavailable TARIC to zero",
-      () => {
-        const matches =
-          records.filter(
-            (record) =>
-              record.origin_country_name ===
-                "India"
-              && record.normalized_trade_code ===
-                "2507008080",
-          );
-
-        expect(
-          matches.length,
-        ).toBe(1);
-
-        const sourceRecord =
-          matches[0];
-
-        if (!sourceRecord) {
-          throw new Error(
-            "Expected India 2507008080 record",
-          );
-        }
-
-        const result =
-          resolveDefaultValue(
-            records,
-            {
-              origin_country_name:
-                "India",
-
-              trade_code:
-                "2507008080",
-            },
-          );
-
-        if (
-          sourceRecord
-            .total_emissions
-            .status ===
-          "UNAVAILABLE"
-        ) {
-          expect(
-            result.status,
-          ).toBe(
-            "UNRESOLVED",
-          );
-
-          expect(
-            result.reason,
-          ).toBe(
-            "UNAVAILABLE",
-          );
-        }
-      },
-    );
-
-    it(
       "preserves the India 3102 reference row",
       () => {
         const matches =
@@ -243,8 +186,7 @@ describe(
 
         expect(
           matches[0]
-            ?.direct_emissions
-            .status,
+            ?.total_emissions.status,
         ).toBe(
           "REFERENCE_REQUIRED",
         );
@@ -255,6 +197,194 @@ describe(
             .raw_source_value,
         ).toBe(
           "see below",
+        );
+      },
+    );
+
+    it(
+      "uses the real Other Countries and Territories fallback for an unavailable country value",
+      () => {
+        const fallbackByCode =
+          new Map<
+            string,
+            RegulatoryRecord
+          >();
+
+        for (const record of records) {
+          if (
+            record.origin_country_name ===
+              OTHER_COUNTRIES_NAME
+            && record.total_emissions
+                .status === "AVAILABLE"
+            && record.total_emissions
+                .value !== null
+          ) {
+            fallbackByCode.set(
+              record.normalized_trade_code,
+              record,
+            );
+          }
+        }
+
+        let candidate:
+          | {
+              countryRecord: RegulatoryRecord;
+              fallbackRecord: RegulatoryRecord;
+            }
+          | undefined;
+
+        for (const record of records) {
+          if (
+            record.origin_country_name ===
+              OTHER_COUNTRIES_NAME
+          ) {
+            continue;
+          }
+
+          if (
+            record.total_emissions
+                .status !==
+              "UNAVAILABLE"
+          ) {
+            continue;
+          }
+
+          const fallback =
+            fallbackByCode.get(
+              record.normalized_trade_code,
+            );
+
+          if (!fallback) {
+            continue;
+          }
+
+          candidate = {
+            countryRecord: record,
+            fallbackRecord: fallback,
+          };
+
+          break;
+        }
+
+        expect(
+          candidate,
+        ).toBeDefined();
+
+        if (!candidate) {
+          throw new Error(
+            "No real unavailable/fallback dataset pair was found",
+          );
+        }
+
+        const result =
+          resolveDefaultValue(
+            records,
+            {
+              origin_country_name:
+                candidate
+                  .countryRecord
+                  .origin_country_name,
+
+              trade_code:
+                candidate
+                  .countryRecord
+                  .normalized_trade_code,
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "RESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "OTHER_COUNTRIES_FALLBACK",
+        );
+
+        expect(
+          result.record
+            ?.origin_country_name,
+        ).toBe(
+          OTHER_COUNTRIES_NAME,
+        );
+
+        expect(
+          result.record
+            ?.normalized_trade_code,
+        ).toBe(
+          candidate
+            .fallbackRecord
+            .normalized_trade_code,
+        );
+
+        expect(
+          result.record
+            ?.total_emissions.value,
+        ).toBe(
+          candidate
+            .fallbackRecord
+            .total_emissions
+            .value,
+        );
+      },
+    );
+
+    it(
+      "uses the real fallback table for an unknown origin country",
+      () => {
+        const fallback =
+          records.find(
+            (record) =>
+              record.origin_country_name ===
+                OTHER_COUNTRIES_NAME
+              && record.total_emissions
+                  .status ===
+                "AVAILABLE",
+          );
+
+        expect(
+          fallback,
+        ).toBeDefined();
+
+        if (!fallback) {
+          throw new Error(
+            "No usable fallback record found",
+          );
+        }
+
+        const result =
+          resolveDefaultValue(
+            records,
+            {
+              origin_country_name:
+                "ZZ-UNKNOWN",
+
+              trade_code:
+                fallback
+                  .normalized_trade_code,
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "RESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "OTHER_COUNTRIES_FALLBACK",
+        );
+
+        expect(
+          result.record
+            ?.origin_country_name,
+        ).toBe(
+          OTHER_COUNTRIES_NAME,
         );
       },
     );

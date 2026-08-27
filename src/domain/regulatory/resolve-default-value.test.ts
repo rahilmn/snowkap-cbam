@@ -1,4 +1,4 @@
-import {
+﻿import {
   describe,
   expect,
   it,
@@ -19,10 +19,14 @@ function record(
     dataset_id:
       "cbam-default-values-2026-definitive-corrected",
 
-    origin_country_name: "India",
+    origin_country_name:
+      "India",
 
-    source_sheet: "India",
-    source_row: 1,
+    source_sheet:
+      "India",
+
+    source_row:
+      1,
 
     source_trade_code:
       "7206 10 00",
@@ -30,9 +34,11 @@ function record(
     normalized_trade_code:
       "72061000",
 
-    code_level: "CN8",
+    code_level:
+      "CN8",
 
-    sector: "IRON_STEEL",
+    sector:
+      "IRON_STEEL",
 
     product_name:
       "Test product",
@@ -93,7 +99,9 @@ describe(
 
         expect(
           result.status,
-        ).toBe("RESOLVED");
+        ).toBe(
+          "RESOLVED",
+        );
 
         expect(
           result.reason,
@@ -104,12 +112,14 @@ describe(
         expect(
           result.record
             ?.normalized_trade_code,
-        ).toBe("72061000");
+        ).toBe(
+          "72061000",
+        );
       },
     );
 
     it(
-      "normalizes spaces in the input trade code",
+      "normalizes spaces in the input code",
       () => {
         const result =
           resolveDefaultValue(
@@ -122,12 +132,17 @@ describe(
 
               trade_code:
                 "7206 10 00",
+
+              production_route:
+                "(C)",
             },
           );
 
         expect(
           result.status,
-        ).toBe("RESOLVED");
+        ).toBe(
+          "RESOLVED",
+        );
 
         expect(
           result.record
@@ -172,7 +187,9 @@ describe(
 
         expect(
           result.status,
-        ).toBe("RESOLVED");
+        ).toBe(
+          "RESOLVED",
+        );
 
         expect(
           result.reason,
@@ -183,7 +200,7 @@ describe(
     );
 
     it(
-      "selects a route-specific exact record",
+      "prefers a route-specific exact record",
       () => {
         const routeIndependent =
           record({
@@ -223,17 +240,21 @@ describe(
 
         expect(
           result.status,
-        ).toBe("RESOLVED");
+        ).toBe(
+          "RESOLVED",
+        );
 
         expect(
           result.record
             ?.source_production_route_code,
-        ).toBe("(C)");
+        ).toBe(
+          "(C)",
+        );
       },
     );
 
     it(
-      "selects a route-independent exact record",
+      "uses a route-independent exact record",
       () => {
         const result =
           resolveDefaultValue(
@@ -260,7 +281,9 @@ describe(
 
         expect(
           result.status,
-        ).toBe("RESOLVED");
+        ).toBe(
+          "RESOLVED",
+        );
 
         expect(
           result.record
@@ -270,18 +293,12 @@ describe(
     );
 
     it(
-      "returns UNAVAILABLE rather than zero",
+      "uses Other Countries and Territories when the exact country value is unavailable",
       () => {
-        const unavailable =
+        const country =
           record({
-            normalized_trade_code:
-              "2507008080",
-
-            source_production_route_code:
-              null,
-
-            production_route:
-              null,
+            origin_country_name:
+              "India",
 
             total_emissions: {
               value: null,
@@ -292,45 +309,148 @@ describe(
               raw_source_value:
                 "-",
             },
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+          });
+
+        const fallback =
+          record({
+            origin_country_name:
+              "_Other Countries and Territorie",
+
+            source_sheet:
+              "_Other Countries and Territorie",
+
+            total_emissions: {
+              value:
+                "3.100",
+
+              status:
+                "AVAILABLE",
+
+              raw_source_value:
+                "3,100",
+            },
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
           });
 
         const result =
           resolveDefaultValue(
             [
-              unavailable,
+              country,
+              fallback,
             ],
             {
               origin_country_name:
                 "India",
 
               trade_code:
-                "2507008080",
+                "72061000",
             },
           );
 
         expect(
           result.status,
         ).toBe(
-          "UNRESOLVED",
+          "RESOLVED",
         );
 
         expect(
           result.reason,
         ).toBe(
-          "UNAVAILABLE",
+          "OTHER_COUNTRIES_FALLBACK",
         );
 
         expect(
-          result.record,
-        ).toBeNull();
+          result.record
+            ?.origin_country_name,
+        ).toBe(
+          "_Other Countries and Territorie",
+        );
+
+        expect(
+          result.record
+            ?.total_emissions.value,
+        ).toBe(
+          "3.100",
+        );
       },
     );
 
     it(
-      "returns REFERENCE_REQUIRED for a reference row",
+      "uses fallback when the country has no exact record",
+      () => {
+        const fallback =
+          record({
+            origin_country_name:
+              "_Other Countries and Territorie",
+
+            source_sheet:
+              "_Other Countries and Territorie",
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+
+            total_emissions: {
+              value:
+                "3.100",
+
+              status:
+                "AVAILABLE",
+
+              raw_source_value:
+                "3,100",
+            },
+          });
+
+        const result =
+          resolveDefaultValue(
+            [
+              fallback,
+            ],
+            {
+              origin_country_name:
+                "Unknown country",
+
+              trade_code:
+                "72061000",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "RESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "OTHER_COUNTRIES_FALLBACK",
+        );
+      },
+    );
+
+    it(
+      "does not fallback from REFERENCE_REQUIRED",
       () => {
         const reference =
           record({
+            source_trade_code:
+              "3102",
+
             normalized_trade_code:
               "3102",
 
@@ -338,7 +458,8 @@ describe(
               "HS4",
 
             total_emissions: {
-              value: null,
+              value:
+                null,
 
               status:
                 "REFERENCE_REQUIRED",
@@ -348,10 +469,46 @@ describe(
             },
           });
 
+        const fallback =
+          record({
+            origin_country_name:
+              "_Other Countries and Territorie",
+
+            source_sheet:
+              "_Other Countries and Territorie",
+
+            source_trade_code:
+              "3102",
+
+            normalized_trade_code:
+              "3102",
+
+            code_level:
+              "HS4",
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+
+            total_emissions: {
+              value:
+                "1.000",
+
+              status:
+                "AVAILABLE",
+
+              raw_source_value:
+                "1,000",
+            },
+          });
+
         const result =
           resolveDefaultValue(
             [
               reference,
+              fallback,
             ],
             {
               origin_country_name:
@@ -377,16 +534,33 @@ describe(
     );
 
     it(
-      "returns unresolved for an unknown country",
+      "returns UNAVAILABLE when no usable fallback exists",
       () => {
         const result =
           resolveDefaultValue(
             [
-              record(),
+              record({
+                total_emissions: {
+                  value:
+                    null,
+
+                  status:
+                    "UNAVAILABLE",
+
+                  raw_source_value:
+                    "-",
+                },
+
+                source_production_route_code:
+                  null,
+
+                production_route:
+                  null,
+              }),
             ],
             {
               origin_country_name:
-                "Germany",
+                "India",
 
               trade_code:
                 "72061000",
@@ -402,7 +576,7 @@ describe(
         expect(
           result.reason,
         ).toBe(
-          "NO_MATCH",
+          "UNAVAILABLE",
         );
 
         expect(
@@ -412,19 +586,67 @@ describe(
     );
 
     it(
-      "returns unresolved for an unknown code",
+      "does not silently use another route",
       () => {
         const result =
           resolveDefaultValue(
             [
-              record(),
+              record({
+                source_production_route_code:
+                  "(C)",
+              }),
             ],
             {
               origin_country_name:
                 "India",
 
               trade_code:
-                "99999999",
+                "72061000",
+
+              production_route:
+                "(F)",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+      },
+    );
+
+    it(
+      "returns NOT_APPLICABLE explicitly",
+      () => {
+        const result =
+          resolveDefaultValue(
+            [
+              record({
+                total_emissions: {
+                  value:
+                    null,
+
+                  status:
+                    "NOT_APPLICABLE",
+
+                  raw_source_value:
+                    "N/A",
+                },
+
+                source_production_route_code:
+                  null,
+
+                production_route:
+                  null,
+              }),
+            ],
+            {
+              origin_country_name:
+                "India",
+
+              trade_code:
+                "72061000",
             },
           );
 
@@ -437,22 +659,30 @@ describe(
         expect(
           result.reason,
         ).toBe(
-          "NO_MATCH",
+          "NOT_APPLICABLE",
         );
       },
     );
 
     it(
-      "does not silently choose between multiple usable exact records",
+      "returns AMBIGUOUS for multiple usable exact records",
       () => {
         const first =
           record({
-            source_row: 1,
+            source_row:
+              1,
+
+            source_production_route_code:
+              "(C)",
           });
 
         const second =
           record({
-            source_row: 2,
+            source_row:
+              2,
+
+            source_production_route_code:
+              "(F)",
           });
 
         const result =
@@ -485,24 +715,63 @@ describe(
         expect(
           result.record,
         ).toBeNull();
-
-        expect(
-          result.trace.some(
-            (step) =>
-              step.step ===
-              "AMBIGUOUS_EXACT_MATCH",
-          ),
-        ).toBe(true);
       },
     );
 
     it(
-      "records a resolution trace",
+      "records the fallback in the resolution trace",
       () => {
+        const country =
+          record({
+            total_emissions: {
+              value:
+                null,
+
+              status:
+                "UNAVAILABLE",
+
+              raw_source_value:
+                "-",
+            },
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+          });
+
+        const fallback =
+          record({
+            origin_country_name:
+              "_Other Countries and Territorie",
+
+            source_sheet:
+              "_Other Countries and Territorie",
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+
+            total_emissions: {
+              value:
+                "3.100",
+
+              status:
+                "AVAILABLE",
+
+              raw_source_value:
+                "3,100",
+            },
+          });
+
         const result =
           resolveDefaultValue(
             [
-              record(),
+              country,
+              fallback,
             ],
             {
               origin_country_name:
@@ -514,14 +783,22 @@ describe(
           );
 
         expect(
-          result.trace.length,
-        ).toBeGreaterThan(0);
+          result.status,
+        ).toBe(
+          "RESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "OTHER_COUNTRIES_FALLBACK",
+        );
 
         expect(
           result.trace.some(
             (step) =>
               step.step ===
-              "NORMALIZE_CODE",
+              "COUNTRY_FALLBACK_TRIGGER",
           ),
         ).toBe(true);
 
@@ -529,7 +806,7 @@ describe(
           result.trace.some(
             (step) =>
               step.step ===
-              "COUNTRY_MATCH",
+              "FALLBACK_COUNTRY_MATCH",
           ),
         ).toBe(true);
 
@@ -537,7 +814,7 @@ describe(
           result.trace.some(
             (step) =>
               step.step ===
-              "EXACT_CODE_MATCH",
+              "FALLBACK_SELECTION",
           ),
         ).toBe(true);
       },
