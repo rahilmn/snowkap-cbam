@@ -21,6 +21,9 @@
   },
   "packageManager": "pnpm@11.24.0",
   "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
     "decimal.js": "^10.6.0",

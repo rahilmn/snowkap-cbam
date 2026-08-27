@@ -192,3 +192,39 @@ The resolver returns a regulatory source value.
 
 Sector/year markup, certificate pricing, free-allocation effects and
 other CBAM calculations are separate domain operations.
+
+## Resolver contract — production_route input
+
+This section documents an implementation contract of
+`resolveDefaultValue`'s `DefaultValueResolutionInput.production_route`
+field precisely, so callers do not have to infer it from the field
+name. It does not introduce a new rule; it clarifies how Rule R6 is
+implemented.
+
+`input.production_route` is matched against each candidate record's
+**raw source route indicator** — the value carried on
+`RegulatoryRecord.source_production_route_code` (e.g. `"(C)"`,
+`"(E)/(H)"`), exactly as it appears in the source workbook. It is
+**not** matched against `RegulatoryRecord.production_route`, the
+human-readable route name (e.g. `"CARBON_STEEL_BF_BOF"`) the same
+record also carries.
+
+A caller must therefore pass the raw indicator, not the name, when
+requesting a specific production route:
+
+```ts
+resolveDefaultValue(records, {
+  origin_country_name: "India",
+  trade_code: "72061000",
+  production_route: "(C)",   // correct: the raw source indicator
+  // production_route: "CARBON_STEEL_BF_BOF",  // wrong: this will never match
+});
+```
+
+Product-side code (`ShipmentLine.production_route` — see
+`docs/architecture/DOMAIN_MODEL.md`) stores both the name and the raw
+indicator for exactly this reason, and always passes the indicator
+when calling the resolver. See
+`docs/adr/ADR-0010-emission-provenance-and-route-contract.md` for why
+this was resolved at the product layer rather than by changing the
+resolver's matching behavior.

@@ -1,0 +1,70 @@
+name: CI
+
+# Public PR gate: must pass with no secrets configured, on any fresh
+# clone/fork. Integration and real-data test suites are designed to skip
+# themselves cleanly in this environment (see
+# tests/integration/module-load.test.ts) rather than fail or silently
+# pass. pnpm regulatory:verify is NOT run here — it requires a Python
+# environment plus live database credentials (SUPABASE_DB_PASSWORD) and
+# remains a locally-run / manually-dispatched gate per
+# docs/architecture/ARCHITECTURE.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Typecheck, test, secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Scan for committed secrets
+        run: |
+          set -euo pipefail
+
+          # Deliberately dependency-free pattern scan (no external action,
+          # no token required) over tracked files only. Looks for common
+          # secret shapes: JWT-prefixed tokens, cloud/service API-key
+          # prefixes, and generic "<SECRET_NAME> = <long literal>"
+          # assignments. False positives are expected to be rare given the
+          # project's env-indirection convention (see .env.example); a
+          # true hit must fail the build.
+          PATTERN='eyJ[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|SUPABASE_(SERVICE_ROLE_KEY|DB_PASSWORD|ANON_KEY)\s*=\s*[^$[:space:]"'"'"']'
+
+          if git grep -InE "$PATTERN" -- . \
+              ':!pnpm-lock.yaml' \
+              ':!*.md' \
+              ':!.github/workflows/ci.yml'
+          then
+            echo "::error::Possible secret literal found in a tracked file (see matches above)."
+            exit 1
+          fi
+
+          echo "No secret-shaped literals found in tracked files."
