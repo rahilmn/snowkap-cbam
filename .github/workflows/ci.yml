@@ -1,10 +1,12 @@
 name: CI
 
 # Public PR gate: must pass with no secrets configured, on any fresh
-# clone/fork. Integration and real-data test suites are designed to skip
-# themselves cleanly in this environment (see
-# tests/integration/module-load.test.ts) rather than fail or silently
-# pass. pnpm regulatory:verify is NOT run here — it requires a Python
+# clone/fork. Runs: install -> typecheck -> unit/integration tests
+# (Supabase-dependent suites self-skip, see
+# tests/integration/module-load.test.ts) -> build -> Playwright smoke
+# suite against that build (the health-check smoke test also self-skips
+# without credentials, see tests/e2e/shell.spec.ts) -> secret scan.
+# pnpm regulatory:verify is NOT run here — it requires a Python
 # environment plus live database credentials (SUPABASE_DB_PASSWORD) and
 # remains a locally-run / manually-dispatched gate per
 # docs/architecture/ARCHITECTURE.md.
@@ -19,7 +21,7 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Typecheck, test, secret scan
+    name: Typecheck, test, build, smoke, secret scan
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -44,6 +46,30 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Builds the app and runs the Playwright smoke suite against it
+      # (playwright.config.ts's webServer builds+starts the app itself).
+      # No Supabase secrets are configured here -- the health-check test
+      # skips itself accordingly (see tests/e2e/shell.spec.ts); every
+      # other smoke test (shell rendering, navigation, theme toggle,
+      # responsive behavior, keyboard a11y, reduced motion) needs no
+      # backend and runs for real. Full E2E against live data is a
+      # separate, secret-bearing gate (docs/plans/MASTER_PLAN.md §31),
+      # not yet wired -- it needs a staging deployment (Phase 2
+      # precondition not yet met; see Phase 2 evidence).
+      - name: Build and run Playwright smoke suite
+        run: pnpm exec playwright test
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 
       - name: Scan for committed secrets
         run: |
