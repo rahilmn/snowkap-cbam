@@ -1,0 +1,17 @@
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.example
+data/processed
+data/validation
+supabase/.temp
+test-results
+playwright-report
+blob-report
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+scripts/regulatory/__pycache__
+.venv
+venv
