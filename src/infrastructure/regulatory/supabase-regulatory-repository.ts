@@ -1,0 +1,522 @@
+import type {
+  CodeLevel,
+  DefaultValueResolutionInput,
+  RegulatoryRecord,
+  ValueStatus,
+} from "../../domain/regulatory/types.js";
+
+import type {
+  RegulatoryRepository,
+} from "./regulatory-repository.js";
+
+import type {
+  RegulatoryCountryRow,
+  RegulatoryDatasetRow,
+  RegulatoryEmissionValueRow,
+  RegulatoryGoodRow,
+  RegulatoryRouteRow,
+} from "./regulatory-database-types.js";
+
+import {
+  supabase,
+} from "../supabase/client.js";
+
+
+const DATASET_TYPE =
+  "DEFAULT_EMISSION_VALUES";
+
+
+function normalizeCode(
+  value: string,
+): string {
+  return value.replace(
+    /\s+/g,
+    "",
+  );
+}
+
+
+function mapCodeLevel(
+  tradeCodeType: string,
+): CodeLevel {
+  switch (tradeCodeType) {
+    case "HS_HEADING":
+      return "HS4";
+
+    case "HS_SUBHEADING":
+      return "HS6";
+
+    case "CN":
+      return "CN8";
+
+    case "TARIC":
+      return "TARIC10";
+
+    default:
+      throw new Error(
+        `Unsupported trade code type: ${tradeCodeType}`,
+      );
+  }
+}
+
+
+function mapValueStatus(
+  status: string,
+): ValueStatus {
+  switch (status) {
+    case "AVAILABLE":
+    case "UNAVAILABLE":
+    case "REFERENCE_REQUIRED":
+    case "NOT_APPLICABLE":
+    case "SOURCE_TEXT":
+      return status;
+
+    default:
+      throw new Error(
+        `Unsupported regulatory value status: ${status}`,
+      );
+  }
+}
+
+
+function toStringOrNull(
+  value: unknown,
+): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return String(value);
+}
+
+
+function mapRecord(
+  dataset: RegulatoryDatasetRow,
+  country: RegulatoryCountryRow,
+  good: RegulatoryGoodRow,
+  emission: RegulatoryEmissionValueRow,
+  route: RegulatoryRouteRow | null,
+): RegulatoryRecord {
+  return {
+    dataset_id:
+      dataset.id,
+
+    origin_country_name:
+      country.name,
+
+    source_sheet:
+      emission.source_sheet,
+
+    source_row:
+      emission.source_row,
+
+    source_trade_code:
+      emission.source_trade_code,
+
+    normalized_trade_code:
+      normalizeCode(
+        good.trade_code,
+      ),
+
+    code_level:
+      mapCodeLevel(
+        good.trade_code_type,
+      ),
+
+    sector:
+      good.sector,
+
+    product_name:
+      good.description,
+
+    emission_unit:
+      emission.emission_unit,
+
+    direct_emissions: {
+      value:
+        toStringOrNull(
+          emission.direct_value,
+        ),
+
+      status:
+        mapValueStatus(
+          emission.direct_status,
+        ),
+
+      raw_source_value:
+        emission.direct_raw_source_value,
+    },
+
+    indirect_emissions: {
+      value:
+        toStringOrNull(
+          emission.indirect_value,
+        ),
+
+      status:
+        mapValueStatus(
+          emission.indirect_status,
+        ),
+
+      raw_source_value:
+        emission.indirect_raw_source_value,
+    },
+
+    total_emissions: {
+      value:
+        toStringOrNull(
+          emission.total_value,
+        ),
+
+      status:
+        mapValueStatus(
+          emission.total_status,
+        ),
+
+      raw_source_value:
+        emission.total_raw_source_value,
+    },
+
+    source_production_route_code:
+      route?.source_route_indicator
+      ?? null,
+
+    production_route:
+      route?.name
+      ?? null,
+  };
+}
+
+
+export class SupabaseRegulatoryRepository
+  implements RegulatoryRepository
+{
+  async findActiveDefaultEmissionCandidates(
+    input: DefaultValueResolutionInput,
+  ): Promise<RegulatoryRecord[]> {
+    const normalizedCode =
+      normalizeCode(
+        input.trade_code,
+      );
+
+
+    // --------------------------------------------------------
+    // 1. Find the single ACTIVE regulatory dataset
+    // --------------------------------------------------------
+
+    const {
+      data: datasetData,
+      error: datasetError,
+    } = await supabase
+      .from(
+        "regulatory_datasets",
+      )
+      .select(
+        "id, dataset_type, version, status",
+      )
+      .eq(
+        "dataset_type",
+        DATASET_TYPE,
+      )
+      .eq(
+        "status",
+        "ACTIVE",
+      )
+      .limit(2);
+
+    if (datasetError) {
+      throw new Error(
+        `Failed to load active regulatory dataset: ${datasetError.message}`,
+      );
+    }
+
+    const datasets =
+      (datasetData ?? []) as unknown as RegulatoryDatasetRow[];
+
+    if (datasets.length === 0) {
+      throw new Error(
+        "No ACTIVE DEFAULT_EMISSION_VALUES dataset exists.",
+      );
+    }
+
+    if (datasets.length > 1) {
+      throw new Error(
+        "More than one ACTIVE DEFAULT_EMISSION_VALUES dataset exists.",
+      );
+    }
+
+    const dataset =
+      datasets[0];
+
+    if (!dataset) {
+      throw new Error(
+        "Active regulatory dataset could not be resolved.",
+      );
+    }
+
+
+    // --------------------------------------------------------
+    // 2. Resolve exact country
+    // --------------------------------------------------------
+
+    const {
+      data: countryData,
+      error: countryError,
+    } = await supabase
+      .from(
+        "countries",
+      )
+      .select(
+        "id, name",
+      )
+      .eq(
+        "name",
+        input.origin_country_name,
+      )
+      .limit(2);
+
+    if (countryError) {
+      throw new Error(
+        `Failed to load regulatory country: ${countryError.message}`,
+      );
+    }
+
+    const countries =
+      (countryData ?? []) as unknown as RegulatoryCountryRow[];
+
+    if (countries.length === 0) {
+      return [];
+    }
+
+    if (countries.length > 1) {
+      throw new Error(
+        `Multiple country rows match ${input.origin_country_name}`,
+      );
+    }
+
+    const country =
+      countries[0];
+
+    if (!country) {
+      return [];
+    }
+
+
+    // --------------------------------------------------------
+    // 3. Resolve exact trade-code candidates
+    // --------------------------------------------------------
+
+    const {
+      data: goodData,
+      error: goodError,
+    } = await supabase
+      .from(
+        "cbam_goods",
+      )
+      .select(
+        "id, trade_code, trade_code_type, record_level, sector, description",
+      )
+      .eq(
+        "trade_code",
+        normalizedCode,
+      )
+      .limit(100);
+
+    if (goodError) {
+      throw new Error(
+        `Failed to load CBAM goods: ${goodError.message}`,
+      );
+    }
+
+    const goods =
+      (goodData ?? []) as unknown as RegulatoryGoodRow[];
+
+    if (goods.length === 0) {
+      return [];
+    }
+
+    const goodIds =
+      goods.map(
+        (good) => good.id,
+      );
+
+    if (goodIds.length === 0) {
+      return [];
+    }
+
+
+    // --------------------------------------------------------
+    // 4. Load all matching active emission records
+    // --------------------------------------------------------
+
+    const {
+      data: emissionData,
+      error: emissionError,
+    } = await supabase
+      .from(
+        "default_emission_values",
+      )
+      .select(
+        `
+          dataset_id,
+          good_id,
+          country_id,
+
+          direct_value,
+          direct_status,
+          direct_raw_source_value,
+
+          indirect_value,
+          indirect_status,
+          indirect_raw_source_value,
+
+          total_value,
+          total_status,
+          total_raw_source_value,
+
+          production_route_id,
+
+          source_sheet,
+          source_row,
+          source_trade_code,
+
+          emission_unit
+        `,
+      )
+      .eq(
+        "dataset_id",
+        dataset.id,
+      )
+      .eq(
+        "country_id",
+        country.id,
+      )
+      .in(
+        "good_id",
+        goodIds,
+      )
+      .limit(1000);
+
+    if (emissionError) {
+      throw new Error(
+        `Failed to load regulatory emission values: ${emissionError.message}`,
+      );
+    }
+
+    const emissions =
+      (emissionData ?? []) as unknown as RegulatoryEmissionValueRow[];
+
+    if (emissions.length === 0) {
+      return [];
+    }
+
+
+    // --------------------------------------------------------
+    // 5. Load route definitions used by candidates
+    // --------------------------------------------------------
+
+    const routeIds = [
+      ...new Set(
+        emissions
+          .map(
+            (emission) =>
+              emission.production_route_id,
+          )
+          .filter(
+            (
+              routeId,
+            ): routeId is string =>
+              routeId !== null,
+          ),
+      ),
+    ];
+
+    const routesById =
+      new Map<
+        string,
+        RegulatoryRouteRow
+      >();
+
+    if (routeIds.length > 0) {
+      const {
+        data: routeData,
+        error: routeError,
+      } = await supabase
+        .from(
+          "production_routes",
+        )
+        .select(
+          "id, name, source_route_indicator",
+        )
+        .in(
+          "id",
+          routeIds,
+        );
+
+      if (routeError) {
+        throw new Error(
+          `Failed to load production routes: ${routeError.message}`,
+        );
+      }
+
+      const routes =
+        (routeData ?? []) as unknown as RegulatoryRouteRow[];
+
+      for (const route of routes) {
+        routesById.set(
+          route.id,
+          route,
+        );
+      }
+    }
+
+
+    // --------------------------------------------------------
+    // 6. Map database rows to domain records
+    // --------------------------------------------------------
+
+    const goodsById =
+      new Map<
+        string,
+        RegulatoryGoodRow
+      >();
+
+    for (const good of goods) {
+      goodsById.set(
+        good.id,
+        good,
+      );
+    }
+
+    return emissions.map(
+      (emission) => {
+        const good =
+          goodsById.get(
+            emission.good_id,
+          );
+
+        if (!good) {
+          throw new Error(
+            `Emission record references unknown CBAM good ${emission.good_id}`,
+          );
+        }
+
+        const route =
+          emission.production_route_id
+            ? routesById.get(
+                emission.production_route_id,
+              )
+            ?? null
+            : null;
+
+        return mapRecord(
+          dataset,
+          country,
+          good,
+          emission,
+          route,
+        );
+      },
+    );
+  }
+}
