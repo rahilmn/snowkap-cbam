@@ -26,3 +26,12 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+# Python
+__pycache__/
+*.py[cod]
+
+# Generated regulatory artifacts
+data/processed/
+
+# Generated validation reports
+data/validation/
