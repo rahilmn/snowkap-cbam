@@ -6,7 +6,8 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "regulatory:verify": "python scripts/regulatory/verify-definitive-regulatory-data.py"
   },
   "keywords": [],
   "author": "",
