@@ -1,0 +1,234 @@
+@import "tailwindcss";
+
+/*
+ * Snowkap CBAM design tokens.
+ *
+ * Grounded in live-verified Snowkap brand colors (inspected directly
+ * against the rendered snowkap.com marketing site's computed styles —
+ * not guessed): a charcoal-black neutral base (#222222 observed as the
+ * page's dark surface) with white, and a distinct orange (#DF5900,
+ * observed on the site's "Contact"/CTA elements) as the brand accent.
+ * See docs/adr/ADR-0003-web-stack-nextjs.md and
+ * docs/plans/MASTER_PLAN.md §24 for the brand-fidelity rule this
+ * follows ("use the official/current Snowkap logo and wordmark; never
+ * invent, redraw, approximate, distort, or arbitrarily recolor").
+ *
+ * Everything below the two verified anchors (the neutral ramp and the
+ * brand-orange ramp) is this product's own considered extension for an
+ * enterprise compliance UI, not claimed as pulled from an official
+ * design system -- there isn't one available yet. In particular:
+ * `--color-interactive` is a distinct cool blue deliberately chosen
+ * apart from the brand orange, because a dense compliance UI needs a
+ * link/focus/informational color that never gets confused with the
+ * amber "REFERENCE_REQUIRED" regulatory-status color or the orange
+ * brand accent used for primary actions.
+ *
+ * Design direction: "precision instrument, glacial calm" (see
+ * docs/plans/MASTER_PLAN.md §25) -- futuristic through restraint and
+ * precision, not through gradient noise or glassmorphism.
+ */
+
+@theme {
+  /* --font-inter / --font-jetbrains-mono come from next/font/google in
+     app/layout.tsx, applied as classes on <html> -- self-hosted, no
+     runtime dependency on Google's font CDN once built. */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", monospace;
+
+  /* Neutral ramp -- anchored at neutral-800 = the verified #222222. */
+  --color-neutral-950: #0a0a0b;
+  --color-neutral-900: #16161a;
+  --color-neutral-800: #222222;
+  --color-neutral-700: #34343a;
+  --color-neutral-600: #4b4b52;
+  --color-neutral-500: #6b6b73;
+  --color-neutral-400: #91919a;
+  --color-neutral-300: #b8b8c0;
+  --color-neutral-200: #d8d8de;
+  --color-neutral-100: #ededf0;
+  --color-neutral-50: #f7f7f9;
+  --color-white: #ffffff;
+
+  /* Brand accent -- anchored at brand-600 = the verified #DF5900. */
+  --color-brand-800: #8f3900;
+  --color-brand-700: #b84a00;
+  --color-brand-600: #df5900;
+  --color-brand-500: #f0680a;
+  --color-brand-400: #f68b3f;
+  --color-brand-100: #fde7d6;
+  --color-brand-50: #fef4ec;
+
+  /* Interactive accent -- this product's own choice (see file header). */
+  --color-interactive-700: #075566;
+  --color-interactive-600: #0b7285;
+  --color-interactive-500: #1594ab;
+  --color-interactive-300: #60a3b0;
+  --color-interactive-100: #d9f0f4;
+  --color-interactive-50: #eefaf9;
+
+  /* Semantic status. -700 = light-mode text-on-pale-surface (AA verified
+     against its paired -100 below); -300 = dark-mode text-on-neutral-800
+     (AA verified against #222222); -600 = the "true" mid-tone hue, used
+     for swatches/decoration, never alone as small text on a tint. */
+  --color-success-700: #0b7653;
+  --color-success-600: #0f9d6e;
+  --color-success-300: #63bfa1;
+  --color-success-100: #d6f5e6;
+  --color-warning-700: #8d6103;
+  --color-warning-600: #ca8a04;
+  --color-warning-300: #ddb35c;
+  --color-warning-100: #fdefc7;
+  --color-danger-700: #a11616;
+  --color-danger-600: #dc2626;
+  --color-danger-300: #e87272;
+  --color-danger-100: #fbdada;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --shadow-raised: 0 1px 2px 0 rgb(0 0 0 / 0.06), 0 1px 1px 0 rgb(0 0 0 / 0.04);
+  --shadow-overlay: 0 8px 24px -4px rgb(0 0 0 / 0.18), 0 2px 8px -2px rgb(0 0 0 / 0.12);
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/*
+ * Semantic surface/text tokens. Defined on bare :root for light (the
+ * default), overridden under [data-theme="dark"] for dark. Exactly two
+ * unconditional blocks, no @media(prefers-color-scheme) involved: the
+ * inline script in app/layout.tsx resolves stored-preference-or-OS-preference
+ * into a concrete data-theme attribute before first paint, so CSS never
+ * needs to derive theme itself. (An earlier version used
+ * `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {...} }`
+ * to let the OS preference apply without JS involvement; that pattern
+ * did not reliably take effect in this project's actual rendering
+ * environment during Phase 2 verification, so it was replaced with
+ * this simpler, JS-resolved approach -- see
+ * docs/adr/ADR-0016-theme-resolution-in-js-not-css-media-query.md.)
+ */
+:root {
+  --surface-page: var(--color-neutral-50);
+  --surface-raised: var(--color-white);
+  --surface-sunken: var(--color-neutral-100);
+  --surface-overlay: var(--color-white);
+  --surface-inset: var(--color-neutral-100);
+
+  --border-default: var(--color-neutral-200);
+  --border-strong: var(--color-neutral-300);
+
+  --text-primary: var(--color-neutral-900);
+  --text-secondary: var(--color-neutral-600);
+  --text-tertiary: var(--color-neutral-400);
+  --text-on-brand: var(--color-white);
+  --text-on-dark: var(--color-white);
+
+  /* brand-700/800 (not the "true" brand-600) -- brand-600 (#DF5900,
+     the verified real color) only reaches 3.77:1 white-text contrast,
+     below WCAG AA's 4.5:1 for normal-size text. Verified directly
+     against the rendered button (docs/adr/ADR-0015). brand-600 remains
+     the correct choice for large-scale/non-text brand moments (logo
+     surfaces, marketing) where the 3:1 threshold applies. */
+  --accent-brand: var(--color-brand-700);
+  --accent-brand-hover: var(--color-brand-800);
+  /* Text-only usage (links, informational icons) -- never used as a
+     filled background with light text; see docs/adr/ADR-0015. */
+  --accent-interactive: var(--color-interactive-600);
+  --accent-interactive-hover: var(--color-interactive-700);
+
+  --focus-ring: var(--color-interactive-500);
+}
+
+:root[data-theme="dark"] {
+  --surface-page: var(--color-neutral-950);
+  --surface-raised: var(--color-neutral-900);
+  --surface-sunken: var(--color-neutral-800);
+  --surface-overlay: var(--color-neutral-900);
+  --surface-inset: var(--color-neutral-800);
+
+  --border-default: var(--color-neutral-700);
+  --border-strong: var(--color-neutral-600);
+
+  --text-primary: var(--color-neutral-50);
+  --text-secondary: var(--color-neutral-300);
+  --text-tertiary: var(--color-neutral-500);
+  --text-on-brand: var(--color-white);
+  --text-on-dark: var(--color-white);
+
+  --accent-brand: var(--color-brand-700);
+  --accent-brand-hover: var(--color-brand-800);
+  --accent-interactive: var(--color-interactive-500);
+  --accent-interactive-hover: var(--color-interactive-300);
+
+  --focus-ring: var(--color-interactive-500);
+}
+
+/*
+ * Regulatory-status color mapping (docs/plans/MASTER_PLAN.md §26):
+ * a dedicated vocabulary so a RESOLVED value, a fallback, and a
+ * REFERENCE_REQUIRED/UNAVAILABLE/AMBIGUOUS state are never visually
+ * ambiguous with each other or with generic success/danger.
+ *
+ * Every text/surface pair below is WCAG AA-verified (>= 4.5:1) against
+ * the *exact* rendered combination, computed directly against the live
+ * page (not estimated) -- see docs/adr/ADR-0015-status-badge-contrast-fix.md.
+ * This is why text and surface are NOT simply "the -600 hue" in both
+ * themes: light mode needs a darker text tier (-700) against a pale
+ * surface (-100); dark mode needs a lighter text tier (-300) against a
+ * flat, moderately-dark surface (neutral-800) -- a translucent tint of
+ * the *same* hue as the text (the original approach) converges toward
+ * the text color as opacity rises, which lowers contrast rather than
+ * raising it, and was the actual defect this fixes.
+ */
+:root {
+  --status-resolved: var(--color-success-700);
+  --status-resolved-surface: var(--color-success-100);
+  --status-fallback: var(--color-interactive-700);
+  --status-fallback-surface: var(--color-interactive-100);
+  --status-reference-required: var(--color-warning-700);
+  --status-reference-required-surface: var(--color-warning-100);
+  --status-unavailable: var(--color-neutral-500);
+  --status-unavailable-surface: var(--color-neutral-100);
+  --status-ambiguous: var(--color-danger-700);
+  --status-ambiguous-surface: var(--color-danger-100);
+}
+
+:root[data-theme="dark"] {
+  --status-resolved: var(--color-success-300);
+  --status-resolved-surface: var(--color-neutral-800);
+  --status-fallback: var(--color-interactive-300);
+  --status-fallback-surface: var(--color-neutral-800);
+  --status-reference-required: var(--color-warning-300);
+  --status-reference-required-surface: var(--color-neutral-800);
+  --status-unavailable: var(--color-neutral-400);
+  --status-unavailable-surface: var(--color-neutral-800);
+  --status-ambiguous: var(--color-danger-300);
+  --status-ambiguous-surface: var(--color-neutral-800);
+}
+
+body {
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  border-color: var(--border-default);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
