@@ -31,6 +31,7 @@ export interface RegulatoryValue {
 
 export interface RegulatoryRecord {
   dataset_id: string;
+  dataset_version: string;
 
   origin_country_name: string;
   source_sheet: string;

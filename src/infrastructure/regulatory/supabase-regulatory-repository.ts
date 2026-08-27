@@ -115,6 +115,9 @@ function mapRecord(
     dataset_id:
       dataset.id,
 
+    dataset_version:
+      dataset.version,
+
     origin_country_name:
       country.name,
 

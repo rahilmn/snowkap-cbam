@@ -47,6 +47,11 @@ function loadDataset(): RegulatoryRecord[] {
     "utf-8",
   );
 
+  // The canonical JSON predates the dataset_version field added to
+  // RegulatoryRecord (see docs/adr/ADR-0010-...); this cast tolerates
+  // its absence here because no test in this file asserts on it. The
+  // canonical JSON itself is not regenerated for this — it is the
+  // parser's/pipeline's output, not something this test suite owns.
   return JSON.parse(
     raw,
   ) as RegulatoryRecord[];

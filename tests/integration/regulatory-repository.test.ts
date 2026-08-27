@@ -50,6 +50,16 @@ describe.skipIf(!hasSupabaseEnvironment)(
           ),
         ).toBe(true);
 
+        // A stored result must be able to record which dataset VERSION
+        // produced it without a second query (SOURCE_REGISTER.md rule 6).
+        expect(
+          records.every(
+            (record) =>
+              record.dataset_version ===
+              "2026-definitive-corrected",
+          ),
+        ).toBe(true);
+
         expect(
           records.every(
             (record) =>
