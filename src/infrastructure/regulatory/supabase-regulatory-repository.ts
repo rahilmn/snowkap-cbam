@@ -369,13 +369,17 @@ export class SupabaseRegulatoryRepository
     }
 
 
-    if (
-      !countriesByName.has(
-        requestedCountryName,
-      )
-    ) {
-      return [];
-    }
+    // Rule R7 clause 1: "If the country or territory is not explicitly
+    // listed, use the value from: Other countries and territories." An
+    // origin country absent from `countriesByName` here is exactly that
+    // case -- it must still fall through to whatever candidates were
+    // fetched for OTHER_TERRITORIES above, not return early. See
+    // docs/adr/ADR-0010-emission-provenance-and-route-contract.md and
+    // docs/architecture/REGULATORY_RESOLUTION_RULES.md Rule R7. The
+    // resolver (src/domain/regulatory/resolve-default-value.ts) already
+    // implements the fallback correctly given those candidates; this
+    // adapter's job is only to fetch them, never to pre-filter by
+    // whether the requested country happens to be known.
 
 
     const candidateCountryIds =

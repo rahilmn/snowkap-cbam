@@ -637,6 +637,93 @@ describe(
 
 
     it(
+      "falls back to Other Countries and Territories for a country the resolver has never heard of (R7 clause 1)",
+      () => {
+        // This test documents that the DOMAIN resolver already implements
+        // Rule R7 clause 1 correctly ("If the country or territory is not
+        // explicitly listed, use the value from: Other countries and
+        // territories") for an origin country with NO regulatory identity
+        // at all -- not even a "known but absent" one. The resolver never
+        // looks up or validates origin_country_name against any list; it
+        // only reasons about the candidate records it's handed. The
+        // corresponding integration test
+        // (tests/integration/regulatory-resolution.test.ts, "uses the real
+        // Other Countries and Territories fallback for an unlisted country
+        // (Kiribati)") proves the *adapter* previously defeated this by
+        // returning zero candidates before ever reaching this logic -- see
+        // docs/adr/ADR-0005-protected-regulatory-subsystem.md and Rule R7
+        // in docs/architecture/REGULATORY_RESOLUTION_RULES.md.
+        const fallback = record({
+          origin_country_name:
+            "_Other Countries and Territorie",
+
+          source_sheet:
+            "_Other Countries and Territorie",
+
+          source_trade_code:
+            "2507008080",
+
+          normalized_trade_code:
+            "2507008080",
+
+          code_level:
+            "TARIC10",
+
+          source_production_route_code:
+            null,
+
+          production_route:
+            null,
+
+          total_emissions: {
+            value:
+              "0.28",
+
+            status:
+              "AVAILABLE",
+
+            raw_source_value:
+              "0.28",
+          },
+        });
+
+        const result =
+          resolveDefaultValue(
+            [
+              fallback,
+            ],
+            {
+              origin_country_name:
+                "Kiribati",
+
+              trade_code:
+                "2507008080",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe("RESOLVED");
+
+        expect(
+          result.reason,
+        ).toBe(
+          "OTHER_COUNTRIES_FALLBACK",
+        );
+
+        expect(
+          result.record?.origin_country_name,
+        ).toBe(
+          "_Other Countries and Territorie",
+        );
+
+        expect(
+          result.record?.total_emissions.value,
+        ).toBe("0.28");
+      },
+    );
+
+    it(
       "prefers the requested country over Other Countries and Territories",
       () => {
         const requestedCountry = record({

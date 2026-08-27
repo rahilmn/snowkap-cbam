@@ -140,6 +140,81 @@ describe.skipIf(!hasSupabaseEnvironment)(
     );
 
     it(
+      "uses the real Other Countries and Territories fallback for an unlisted country (Kiribati)",
+      async () => {
+        // Kiribati has no row in the countries table at all (verified via
+        // a read-only query against the live dataset) -- this is the R7
+        // clause-1 case: "If the country or territory is not explicitly
+        // listed, use the value from: Other countries and territories."
+        // See docs/architecture/REGULATORY_RESOLUTION_RULES.md Rule R7
+        // and docs/adr/ADR-0005-protected-regulatory-subsystem.md.
+        const repository =
+          new SupabaseRegulatoryRepository();
+
+        const result =
+          await resolveActiveDefaultValue(
+            repository,
+            {
+              origin_country_name:
+                "Kiribati",
+
+              trade_code:
+                "2507008080",
+
+              production_route:
+                null,
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe("RESOLVED");
+
+        expect(
+          result.reason,
+        ).toBe(
+          "OTHER_COUNTRIES_FALLBACK",
+        );
+
+        expect(
+          result.record,
+        ).not.toBeNull();
+
+        expect(
+          result.record?.origin_country_name,
+        ).toBe(
+          "_Other Countries and Territorie",
+        );
+
+        expect(
+          result.record?.normalized_trade_code,
+        ).toBe(
+          "2507008080",
+        );
+
+        expect(
+          result.record?.total_emissions.status,
+        ).toBe(
+          "AVAILABLE",
+        );
+
+        expect(
+          result.record?.total_emissions.value,
+        ).toBe(
+          "0.28",
+        );
+
+        expect(
+          result.trace.some(
+            (step) =>
+              step.step ===
+              "COUNTRY_FALLBACK",
+          ),
+        ).toBe(true);
+      },
+    );
+
+    it(
       "preserves REFERENCE_REQUIRED for a real fallback record",
       async () => {
         const repository =
