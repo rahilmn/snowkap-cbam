@@ -14,12 +14,13 @@ export type ValueStatus =
 export type ResolutionReason =
   | "EXACT_TARIC_MATCH"
   | "EXACT_CN8_MATCH"
-  | "HS6_REFERENCE"
-  | "HS4_REFERENCE"
+  | "EXACT_HS6_MATCH"
+  | "EXACT_HS4_MATCH"
   | "OTHER_COUNTRIES_FALLBACK"
-  | "UNAVAILABLE"
   | "REFERENCE_REQUIRED"
+  | "UNAVAILABLE"
   | "NOT_APPLICABLE"
+  | "AMBIGUOUS"
   | "NO_MATCH";
 
 export interface RegulatoryValue {
@@ -53,10 +54,14 @@ export interface RegulatoryRecord {
 }
 
 export interface DefaultValueResolutionInput {
-  origin_country: string;
+  origin_country_name: string;
   trade_code: string;
-
   production_route?: string | null;
+}
+
+export interface ResolutionTraceStep {
+  step: string;
+  outcome: string;
 }
 
 export interface DefaultValueResolutionResult {
@@ -69,9 +74,4 @@ export interface DefaultValueResolutionResult {
   record: RegulatoryRecord | null;
 
   trace: ResolutionTraceStep[];
-}
-
-export interface ResolutionTraceStep {
-  step: string;
-  outcome: string;
 }

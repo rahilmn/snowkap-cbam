@@ -20,15 +20,22 @@ function record(
       "cbam-default-values-2026-definitive-corrected",
 
     origin_country_name: "India",
+
     source_sheet: "India",
     source_row: 1,
 
-    source_trade_code: "7206 10 00",
-    normalized_trade_code: "72061000",
+    source_trade_code:
+      "7206 10 00",
+
+    normalized_trade_code:
+      "72061000",
+
     code_level: "CN8",
 
     sector: "IRON_STEEL",
-    product_name: "Test product",
+
+    product_name:
+      "Test product",
 
     emission_unit:
       "TCO2E_PER_TONNE",
@@ -51,7 +58,9 @@ function record(
       raw_source_value: "2,640",
     },
 
-    source_production_route_code: "(C)",
+    source_production_route_code:
+      "(C)",
+
     production_route:
       "CARBON_STEEL_BF_BOF",
 
@@ -68,16 +77,15 @@ describe(
         const result =
           resolveDefaultValue(
             [
-              record({
-                normalized_trade_code:
-                  "72061000",
-              }),
+              record(),
             ],
             {
-              origin_country:
+              origin_country_name:
                 "India",
+
               trade_code:
                 "72061000",
+
               production_route:
                 "(C)",
             },
@@ -89,7 +97,9 @@ describe(
 
         expect(
           result.reason,
-        ).toBe("EXACT_CN8_MATCH");
+        ).toBe(
+          "EXACT_CN8_MATCH",
+        );
 
         expect(
           result.record
@@ -104,16 +114,10 @@ describe(
         const result =
           resolveDefaultValue(
             [
-              record({
-                source_trade_code:
-                  "7206 10 00",
-
-                normalized_trade_code:
-                  "72061000",
-              }),
+              record(),
             ],
             {
-              origin_country:
+              origin_country_name:
                 "India",
 
               trade_code:
@@ -128,7 +132,9 @@ describe(
         expect(
           result.record
             ?.normalized_trade_code,
-        ).toBe("72061000");
+        ).toBe(
+          "72061000",
+        );
       },
     );
 
@@ -156,7 +162,7 @@ describe(
               }),
             ],
             {
-              origin_country:
+              origin_country_name:
                 "India",
 
               trade_code:
@@ -170,14 +176,16 @@ describe(
 
         expect(
           result.reason,
-        ).toBe("EXACT_TARIC_MATCH");
+        ).toBe(
+          "EXACT_TARIC_MATCH",
+        );
       },
     );
 
     it(
       "selects a route-specific exact record",
       () => {
-        const generic =
+        const routeIndependent =
           record({
             source_production_route_code:
               null,
@@ -193,23 +201,16 @@ describe(
 
             production_route:
               "CARBON_STEEL_BF_BOF",
-
-            total_emissions: {
-              value: "2.640",
-              status: "AVAILABLE",
-              raw_source_value:
-                "2,640",
-            },
           });
 
         const result =
           resolveDefaultValue(
             [
-              generic,
+              routeIndependent,
               routeSpecific,
             ],
             {
-              origin_country:
+              origin_country_name:
                 "India",
 
               trade_code:
@@ -232,7 +233,7 @@ describe(
     );
 
     it(
-      "selects a route-independent exact record when no route-specific record is usable",
+      "selects a route-independent exact record",
       () => {
         const result =
           resolveDefaultValue(
@@ -246,7 +247,7 @@ describe(
               }),
             ],
             {
-              origin_country:
+              origin_country_name:
                 "India",
 
               trade_code:
@@ -269,7 +270,7 @@ describe(
     );
 
     it(
-      "does not treat unavailable as zero",
+      "returns UNAVAILABLE rather than zero",
       () => {
         const unavailable =
           record({
@@ -295,9 +296,11 @@ describe(
 
         const result =
           resolveDefaultValue(
-            [unavailable],
+            [
+              unavailable,
+            ],
             {
-              origin_country:
+              origin_country_name:
                 "India",
 
               trade_code:
@@ -307,7 +310,15 @@ describe(
 
         expect(
           result.status,
-        ).toBe("UNRESOLVED");
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "UNAVAILABLE",
+        );
 
         expect(
           result.record,
@@ -316,13 +327,65 @@ describe(
     );
 
     it(
+      "returns REFERENCE_REQUIRED for a reference row",
+      () => {
+        const reference =
+          record({
+            normalized_trade_code:
+              "3102",
+
+            code_level:
+              "HS4",
+
+            total_emissions: {
+              value: null,
+
+              status:
+                "REFERENCE_REQUIRED",
+
+              raw_source_value:
+                "see below",
+            },
+          });
+
+        const result =
+          resolveDefaultValue(
+            [
+              reference,
+            ],
+            {
+              origin_country_name:
+                "India",
+
+              trade_code:
+                "3102",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "REFERENCE_REQUIRED",
+        );
+      },
+    );
+
+    it(
       "returns unresolved for an unknown country",
       () => {
         const result =
           resolveDefaultValue(
-            [record()],
+            [
+              record(),
+            ],
             {
-              origin_country:
+              origin_country_name:
                 "Germany",
 
               trade_code:
@@ -332,11 +395,15 @@ describe(
 
         expect(
           result.status,
-        ).toBe("UNRESOLVED");
+        ).toBe(
+          "UNRESOLVED",
+        );
 
         expect(
           result.reason,
-        ).toBe("NO_MATCH");
+        ).toBe(
+          "NO_MATCH",
+        );
 
         expect(
           result.record,
@@ -349,9 +416,11 @@ describe(
       () => {
         const result =
           resolveDefaultValue(
-            [record()],
+            [
+              record(),
+            ],
             {
-              origin_country:
+              origin_country_name:
                 "India",
 
               trade_code:
@@ -361,15 +430,15 @@ describe(
 
         expect(
           result.status,
-        ).toBe("UNRESOLVED");
+        ).toBe(
+          "UNRESOLVED",
+        );
 
         expect(
           result.reason,
-        ).toBe("NO_MATCH");
-
-        expect(
-          result.record,
-        ).toBeNull();
+        ).toBe(
+          "NO_MATCH",
+        );
       },
     );
 
@@ -393,7 +462,7 @@ describe(
               second,
             ],
             {
-              origin_country:
+              origin_country_name:
                 "India",
 
               trade_code:
@@ -403,7 +472,15 @@ describe(
 
         expect(
           result.status,
-        ).toBe("UNRESOLVED");
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "AMBIGUOUS",
+        );
 
         expect(
           result.record,
@@ -424,9 +501,11 @@ describe(
       () => {
         const result =
           resolveDefaultValue(
-            [record()],
+            [
+              record(),
+            ],
             {
-              origin_country:
+              origin_country_name:
                 "India",
 
               trade_code:

@@ -16,63 +16,6 @@ import type {
   RegulatoryRecord,
 } from "./types.js";
 
-interface DatasetFileRecord {
-  dataset_id: string;
-
-  origin_country_name: string;
-  source_sheet: string;
-  source_row: number;
-
-  source_trade_code: string;
-  normalized_trade_code: string;
-  code_level:
-    | "HS4"
-    | "HS6"
-    | "CN8"
-    | "TARIC10";
-
-  sector: string;
-  product_name: string;
-
-  emission_unit: string;
-
-  direct_emissions: {
-    value: string | null;
-    status:
-      | "AVAILABLE"
-      | "UNAVAILABLE"
-      | "REFERENCE_REQUIRED"
-      | "NOT_APPLICABLE"
-      | "SOURCE_TEXT";
-    raw_source_value: string | null;
-  };
-
-  indirect_emissions: {
-    value: string | null;
-    status:
-      | "AVAILABLE"
-      | "UNAVAILABLE"
-      | "REFERENCE_REQUIRED"
-      | "NOT_APPLICABLE"
-      | "SOURCE_TEXT";
-    raw_source_value: string | null;
-  };
-
-  total_emissions: {
-    value: string | null;
-    status:
-      | "AVAILABLE"
-      | "UNAVAILABLE"
-      | "REFERENCE_REQUIRED"
-      | "NOT_APPLICABLE"
-      | "SOURCE_TEXT";
-    raw_source_value: string | null;
-  };
-
-  source_production_route_code: string | null;
-  production_route: string | null;
-}
-
 const DATASET_PATH =
   "data/processed/default-emission-values-definitive.json";
 
@@ -125,10 +68,12 @@ describe(
           resolveDefaultValue(
             records,
             {
-              origin_country:
+              origin_country_name:
                 "India",
+
               trade_code:
                 "72061000",
+
               production_route:
                 "(C)",
             },
@@ -139,14 +84,24 @@ describe(
         ).toBe("RESOLVED");
 
         expect(
+          result.reason,
+        ).toBe(
+          "EXACT_CN8_MATCH",
+        );
+
+        expect(
           result.record
             ?.normalized_trade_code,
-        ).toBe("72061000");
+        ).toBe(
+          "72061000",
+        );
 
         expect(
           result.record
             ?.total_emissions.status,
-        ).toBe("AVAILABLE");
+        ).toBe(
+          "AVAILABLE",
+        );
       },
     );
 
@@ -157,8 +112,9 @@ describe(
           resolveDefaultValue(
             records,
             {
-              origin_country:
+              origin_country_name:
                 "India",
+
               trade_code:
                 "31021012",
             },
@@ -171,17 +127,21 @@ describe(
         expect(
           result.record
             ?.normalized_trade_code,
-        ).toBe("31021012");
+        ).toBe(
+          "31021012",
+        );
 
         expect(
           result.record
             ?.total_emissions.value,
-        ).toBe("0.740");
+        ).toBe(
+          "0.740",
+        );
       },
     );
 
     it(
-      "finds the TARIC product in India",
+      "finds the India TARIC record",
       () => {
         const matches =
           records.filter(
@@ -197,13 +157,16 @@ describe(
         ).toBe(1);
 
         expect(
-          matches[0]?.code_level,
-        ).toBe("TARIC10");
+          matches[0]
+            ?.code_level,
+        ).toBe(
+          "TARIC10",
+        );
       },
     );
 
     it(
-      "does not convert an unavailable TARIC value to zero",
+      "does not convert unavailable TARIC to zero",
       () => {
         const matches =
           records.filter(
@@ -218,41 +181,50 @@ describe(
           matches.length,
         ).toBe(1);
 
-        const record = matches[0];
+        const sourceRecord =
+          matches[0];
 
-        if (!record) {
+        if (!sourceRecord) {
           throw new Error(
             "Expected India 2507008080 record",
           );
         }
 
-        const totalStatus =
-          record.total_emissions.status;
-
         const result =
           resolveDefaultValue(
             records,
             {
-              origin_country:
+              origin_country_name:
                 "India",
+
               trade_code:
                 "2507008080",
             },
           );
 
         if (
-          totalStatus ===
+          sourceRecord
+            .total_emissions
+            .status ===
           "UNAVAILABLE"
         ) {
           expect(
             result.status,
-          ).toBe("UNRESOLVED");
+          ).toBe(
+            "UNRESOLVED",
+          );
+
+          expect(
+            result.reason,
+          ).toBe(
+            "UNAVAILABLE",
+          );
         }
       },
     );
 
     it(
-      "preserves the 3102 reference row",
+      "preserves the India 3102 reference row",
       () => {
         const matches =
           records.filter(
@@ -271,15 +243,19 @@ describe(
 
         expect(
           matches[0]
-            ?.direct_emissions.status,
+            ?.direct_emissions
+            .status,
         ).toBe(
           "REFERENCE_REQUIRED",
         );
 
         expect(
           matches[0]
-            ?.total_emissions.raw_source_value,
-        ).toBe("see below");
+            ?.total_emissions
+            .raw_source_value,
+        ).toBe(
+          "see below",
+        );
       },
     );
   },
