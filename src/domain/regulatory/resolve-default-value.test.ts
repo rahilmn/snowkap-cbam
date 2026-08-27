@@ -541,6 +541,607 @@ describe(
           ),
         ).toBe(true);
       },
+
     );
-  },
+
+        it(
+      "falls back to Other Countries and Territories when the requested country has no exact record",
+      () => {
+        const fallback = record({
+          origin_country_name:
+            "_Other Countries and Territorie",
+
+          source_sheet:
+            "_Other Countries and Territorie",
+
+          source_trade_code:
+            "7219",
+
+          normalized_trade_code:
+            "7219",
+
+          code_level:
+            "HS4",
+
+          source_production_route_code:
+            null,
+
+          production_route:
+            null,
+
+          total_emissions: {
+            value:
+              "3.000",
+
+            status:
+              "AVAILABLE",
+
+            raw_source_value:
+              "3.000",
+          },
+        });
+
+        const result =
+          resolveDefaultValue(
+            [
+              fallback,
+            ],
+            {
+              origin_country_name:
+                "Albania",
+
+              trade_code:
+                "7219",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe("RESOLVED");
+
+        expect(
+          result.reason,
+        ).toBe(
+          "OTHER_COUNTRIES_FALLBACK",
+        );
+
+        expect(
+          result.record?.origin_country_name,
+        ).toBe(
+          "_Other Countries and Territorie",
+        );
+
+        expect(
+          result.record?.normalized_trade_code,
+        ).toBe("7219");
+
+        expect(
+          result.record?.total_emissions.value,
+        ).toBe("3.000");
+
+        expect(
+          result.trace.some(
+            (step) =>
+              step.step ===
+                "COUNTRY_FALLBACK" &&
+              step.outcome.includes(
+                "_Other Countries and Territorie",
+              ),
+          ),
+        ).toBe(true);
+      },
+    );
+
+
+    it(
+      "prefers the requested country over Other Countries and Territories",
+      () => {
+        const requestedCountry = record({
+          origin_country_name:
+            "Albania",
+
+          source_sheet:
+            "Albania",
+
+          source_trade_code:
+            "7219",
+
+          normalized_trade_code:
+            "7219",
+
+          code_level:
+            "HS4",
+
+          source_row:
+            10,
+
+          source_production_route_code:
+            null,
+
+          production_route:
+            null,
+
+          total_emissions: {
+            value:
+              "4.000",
+
+            status:
+              "AVAILABLE",
+
+            raw_source_value:
+              "4.000",
+          },
+        });
+
+        const fallback = record({
+          origin_country_name:
+            "_Other Countries and Territorie",
+
+          source_sheet:
+            "_Other Countries and Territorie",
+
+          source_trade_code:
+            "7219",
+
+          normalized_trade_code:
+            "7219",
+
+          code_level:
+            "HS4",
+
+          source_row:
+            11,
+
+          source_production_route_code:
+            null,
+
+          production_route:
+            null,
+
+          total_emissions: {
+            value:
+              "3.000",
+
+            status:
+              "AVAILABLE",
+
+            raw_source_value:
+              "3.000",
+          },
+        });
+
+        const result =
+          resolveDefaultValue(
+            [
+              fallback,
+              requestedCountry,
+            ],
+            {
+              origin_country_name:
+                "Albania",
+
+              trade_code:
+                "7219",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe("RESOLVED");
+
+        expect(
+          result.reason,
+        ).toBe(
+          "EXACT_HS4_MATCH",
+        );
+
+        expect(
+          result.record?.origin_country_name,
+        ).toBe(
+          "Albania",
+        );
+
+        expect(
+          result.record?.total_emissions.value,
+        ).toBe("4.000");
+      },
+    );
+
+
+    it(
+      "returns REFERENCE_REQUIRED when the fallback record requires a reference",
+      () => {
+        const fallback = record({
+          origin_country_name:
+            "_Other Countries and Territorie",
+
+          source_sheet:
+            "_Other Countries and Territorie",
+
+          source_trade_code:
+            "7219",
+
+          normalized_trade_code:
+            "7219",
+
+          code_level:
+            "HS4",
+
+          source_production_route_code:
+            null,
+
+          production_route:
+            null,
+
+          total_emissions: {
+            value:
+              null,
+
+            status:
+              "REFERENCE_REQUIRED",
+
+            raw_source_value:
+              "see below",
+          },
+        });
+
+        const result =
+          resolveDefaultValue(
+            [
+              fallback,
+            ],
+            {
+              origin_country_name:
+                "Albania",
+
+              trade_code:
+                "7219",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "REFERENCE_REQUIRED",
+        );
+
+        expect(
+          result.record,
+        ).toBeNull();
+      },
+    );
+
+
+    it(
+      "returns UNAVAILABLE when the fallback record is unavailable",
+      () => {
+        const fallback = record({
+          origin_country_name:
+            "_Other Countries and Territorie",
+
+          source_sheet:
+            "_Other Countries and Territorie",
+
+          source_trade_code:
+            "7219",
+
+          normalized_trade_code:
+            "7219",
+
+          code_level:
+            "HS4",
+
+          source_production_route_code:
+            null,
+
+          production_route:
+            null,
+
+          total_emissions: {
+            value:
+              null,
+
+            status:
+              "UNAVAILABLE",
+
+            raw_source_value:
+              "-",
+          },
+        });
+
+        const result =
+          resolveDefaultValue(
+            [
+              fallback,
+            ],
+            {
+              origin_country_name:
+                "Albania",
+
+              trade_code:
+                "7219",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "UNAVAILABLE",
+        );
+
+        expect(
+          result.record,
+        ).toBeNull();
+      },
+    );
+
+
+    it(
+      "returns AMBIGUOUS when multiple usable fallback records remain",
+      () => {
+        const first = record({
+          origin_country_name:
+            "_Other Countries and Territorie",
+
+          source_sheet:
+            "_Other Countries and Territorie",
+
+          source_trade_code:
+            "7219",
+
+          normalized_trade_code:
+            "7219",
+
+          code_level:
+            "HS4",
+
+          source_row:
+            20,
+
+          source_production_route_code:
+            null,
+
+          production_route:
+            null,
+
+          total_emissions: {
+            value:
+              "3.000",
+
+            status:
+              "AVAILABLE",
+
+            raw_source_value:
+              "3.000",
+          },
+        });
+
+        const second = record({
+          origin_country_name:
+            "_Other Countries and Territorie",
+
+          source_sheet:
+            "_Other Countries and Territorie",
+
+          source_trade_code:
+            "7219",
+
+          normalized_trade_code:
+            "7219",
+
+          code_level:
+            "HS4",
+
+          source_row:
+            21,
+
+          source_production_route_code:
+            null,
+
+          production_route:
+            null,
+
+          total_emissions: {
+            value:
+              "4.000",
+
+            status:
+              "AVAILABLE",
+
+            raw_source_value:
+              "4.000",
+          },
+        });
+
+        const result =
+          resolveDefaultValue(
+            [
+              first,
+              second,
+            ],
+            {
+              origin_country_name:
+                "Albania",
+
+              trade_code:
+                "7219",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "AMBIGUOUS",
+        );
+
+        expect(
+          result.record,
+        ).toBeNull();
+      },
+    );
+
+
+    it(
+      "does not use a different fallback production route when one is explicitly requested",
+      () => {
+        const fallbackDifferentRoute =
+          record({
+            origin_country_name:
+              "_Other Countries and Territorie",
+
+            source_sheet:
+              "_Other Countries and Territorie",
+
+            source_trade_code:
+              "7219",
+
+            normalized_trade_code:
+              "7219",
+
+            code_level:
+              "HS4",
+
+            source_production_route_code:
+              "(F)",
+
+            production_route:
+              "LOW_ALLOY_STEEL_BF_BOF",
+
+            total_emissions: {
+              value:
+                "3.000",
+
+              status:
+                "AVAILABLE",
+
+              raw_source_value:
+                "3.000",
+            },
+          });
+
+        const result =
+          resolveDefaultValue(
+            [
+              fallbackDifferentRoute,
+            ],
+            {
+              origin_country_name:
+                "Albania",
+
+              trade_code:
+                "7219",
+
+              production_route:
+                "(C)",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "NO_MATCH",
+        );
+
+        expect(
+          result.record,
+        ).toBeNull();
+      },
+    );
+
+
+    it(
+      "does not treat a fallback NOT_APPLICABLE value as zero",
+      () => {
+        const fallback = record({
+          origin_country_name:
+            "_Other Countries and Territorie",
+
+          source_sheet:
+            "_Other Countries and Territorie",
+
+          source_trade_code:
+            "7219",
+
+          normalized_trade_code:
+            "7219",
+
+          code_level:
+            "HS4",
+
+          source_production_route_code:
+            null,
+
+          production_route:
+            null,
+
+          total_emissions: {
+            value:
+              null,
+
+            status:
+              "NOT_APPLICABLE",
+
+            raw_source_value:
+              "n/a",
+          },
+        });
+
+        const result =
+          resolveDefaultValue(
+            [
+              fallback,
+            ],
+            {
+              origin_country_name:
+                "Albania",
+
+              trade_code:
+                "7219",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "NOT_APPLICABLE",
+        );
+
+        expect(
+          result.record,
+        ).toBeNull();
+      },
+    );
+
+},
+
 );
