@@ -18,22 +18,16 @@ const hasSupabaseEnvironment =
     process.env.SUPABASE_SERVICE_ROLE_KEY,
   );
 
-describe(
+// Skipped (not silently run-and-passed) when Supabase credentials are not
+// configured, e.g. a fresh clone or a CI job without secrets. See
+// tests/integration/module-load.test.ts for the corresponding guarantee
+// that importing the repository module itself never throws.
+describe.skipIf(!hasSupabaseEnvironment)(
   "resolveActiveDefaultValue",
   () => {
     it(
       "resolves an active real regulatory record",
       async () => {
-        if (!hasSupabaseEnvironment) {
-          console.warn(
-            "Skipping Supabase integration test: " +
-              "SUPABASE_URL or " +
-              "SUPABASE_SERVICE_ROLE_KEY is not configured.",
-          );
-
-          return;
-        }
-
         const repository =
           new SupabaseRegulatoryRepository();
 
@@ -73,16 +67,6 @@ describe(
     it(
       "uses the real Other Countries and Territories fallback for Bahrain",
       async () => {
-        if (!hasSupabaseEnvironment) {
-          console.warn(
-            "Skipping Supabase integration test: " +
-              "SUPABASE_URL or " +
-              "SUPABASE_SERVICE_ROLE_KEY is not configured.",
-          );
-
-          return;
-        }
-
         const repository =
           new SupabaseRegulatoryRepository();
 
@@ -158,16 +142,6 @@ describe(
     it(
       "preserves REFERENCE_REQUIRED for a real fallback record",
       async () => {
-        if (!hasSupabaseEnvironment) {
-          console.warn(
-            "Skipping Supabase integration test: " +
-              "SUPABASE_URL or " +
-              "SUPABASE_SERVICE_ROLE_KEY is not configured.",
-          );
-
-          return;
-        }
-
         const repository =
           new SupabaseRegulatoryRepository();
 

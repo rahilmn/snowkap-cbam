@@ -3,32 +3,41 @@ import {
   type SupabaseClient,
 } from "@supabase/supabase-js";
 
-const supabaseUrl =
-  process.env.SUPABASE_URL;
+import {
+  loadSupabaseEnv,
+} from "../config/env.js";
 
-const supabaseServiceRoleKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY;
+let cachedClient:
+  SupabaseClient | undefined;
 
-if (!supabaseUrl) {
-  throw new Error(
-    "SUPABASE_URL is not configured.",
-  );
+/**
+ * Returns a memoized Supabase client, constructed on first use.
+ *
+ * Deliberately lazy: environment validation must not happen at module
+ * import time, or every static importer of this module (and anything
+ * that transitively imports it) fails to load in an environment without
+ * SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY configured — including test
+ * files that intend to skip themselves gracefully when those variables
+ * are absent. This function is the only export; there must be no other
+ * top-level side effects in this module.
+ */
+export function getSupabaseClient(): SupabaseClient {
+  if (!cachedClient) {
+    const env =
+      loadSupabaseEnv();
+
+    cachedClient =
+      createClient(
+        env.SUPABASE_URL,
+        env.SUPABASE_SERVICE_ROLE_KEY,
+        {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+          },
+        },
+      );
+  }
+
+  return cachedClient;
 }
-
-if (!supabaseServiceRoleKey) {
-  throw new Error(
-    "SUPABASE_SERVICE_ROLE_KEY is not configured.",
-  );
-}
-
-export const supabase: SupabaseClient =
-  createClient(
-    supabaseUrl,
-    supabaseServiceRoleKey,
-    {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    },
-  );

@@ -18,7 +18,7 @@ import type {
 } from "./regulatory-database-types.js";
 
 import {
-  supabase,
+  getSupabaseClient,
 } from "../supabase/client.js";
 
 
@@ -208,6 +208,9 @@ export class SupabaseRegulatoryRepository
   async findActiveDefaultEmissionCandidates(
     input: DefaultValueResolutionInput,
   ): Promise<RegulatoryRecord[]> {
+    const supabase =
+      getSupabaseClient();
+
     const requestedCountryName =
       input.origin_country_name;
 
