@@ -25,6 +25,9 @@ import {
 const DATASET_TYPE =
   "DEFAULT_EMISSION_VALUES";
 
+const OTHER_TERRITORIES =
+  "_Other Countries and Territorie";
+
 
 function normalizeCode(
   value: string,
@@ -65,11 +68,19 @@ function mapValueStatus(
 ): ValueStatus {
   switch (status) {
     case "AVAILABLE":
+      return "AVAILABLE";
+
     case "UNAVAILABLE":
+      return "UNAVAILABLE";
+
     case "REFERENCE_REQUIRED":
+      return "REFERENCE_REQUIRED";
+
     case "NOT_APPLICABLE":
+      return "NOT_APPLICABLE";
+
     case "SOURCE_TEXT":
-      return status;
+      return "SOURCE_TEXT";
 
     default:
       throw new Error(
@@ -82,7 +93,10 @@ function mapValueStatus(
 function toStringOrNull(
   value: unknown,
 ): string | null {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return null;
   }
 
@@ -178,12 +192,12 @@ function mapRecord(
     },
 
     source_production_route_code:
-      route?.source_route_indicator
-      ?? null,
+      route?.source_route_indicator ??
+      null,
 
     production_route:
-      route?.name
-      ?? null,
+      route?.name ??
+      null,
   };
 }
 
@@ -194,15 +208,18 @@ export class SupabaseRegulatoryRepository
   async findActiveDefaultEmissionCandidates(
     input: DefaultValueResolutionInput,
   ): Promise<RegulatoryRecord[]> {
+    const requestedCountryName =
+      input.origin_country_name;
+
     const normalizedCode =
       normalizeCode(
         input.trade_code,
       );
 
 
-    // --------------------------------------------------------
+    // ========================================================
     // 1. Find the single ACTIVE regulatory dataset
-    // --------------------------------------------------------
+    // ========================================================
 
     const {
       data: datasetData,
@@ -233,13 +250,19 @@ export class SupabaseRegulatoryRepository
     const datasets =
       (datasetData ?? []) as unknown as RegulatoryDatasetRow[];
 
-    if (datasets.length === 0) {
+    if (
+      datasets.length ===
+      0
+    ) {
       throw new Error(
         "No ACTIVE DEFAULT_EMISSION_VALUES dataset exists.",
       );
     }
 
-    if (datasets.length > 1) {
+    if (
+      datasets.length >
+      1
+    ) {
       throw new Error(
         "More than one ACTIVE DEFAULT_EMISSION_VALUES dataset exists.",
       );
@@ -255,56 +278,117 @@ export class SupabaseRegulatoryRepository
     }
 
 
-    // --------------------------------------------------------
-    // 2. Resolve exact country
-    // --------------------------------------------------------
+    // ========================================================
+    // 2. Load requested country + fallback geography
+    // ========================================================
+
+    const countryNames =
+      requestedCountryName ===
+      OTHER_TERRITORIES
+        ? [
+            requestedCountryName,
+          ]
+        : [
+            requestedCountryName,
+            OTHER_TERRITORIES,
+          ];
 
     const {
       data: countryData,
       error: countryError,
     } = await supabase
-      .from(
-        "countries",
-      )
+      .from("countries")
       .select(
         "id, name",
       )
-      .eq(
+      .in(
         "name",
-        input.origin_country_name,
-      )
-      .limit(2);
+        countryNames,
+      );
 
     if (countryError) {
       throw new Error(
-        `Failed to load regulatory country: ${countryError.message}`,
+        `Failed to load regulatory countries: ${countryError.message}`,
       );
     }
 
     const countries =
       (countryData ?? []) as unknown as RegulatoryCountryRow[];
 
-    if (countries.length === 0) {
-      return [];
-    }
 
-    if (countries.length > 1) {
-      throw new Error(
-        `Multiple country rows match ${input.origin_country_name}`,
+    const countriesByName =
+      new Map<
+        string,
+        RegulatoryCountryRow
+      >();
+
+    const countriesById =
+      new Map<
+        string,
+        RegulatoryCountryRow
+      >();
+
+    for (
+      const country of countries
+    ) {
+      if (
+        countriesByName.has(
+          country.name,
+        )
+      ) {
+        throw new Error(
+          `Multiple country rows match ${country.name}`,
+        );
+      }
+
+      if (
+        countriesById.has(
+          country.id,
+        )
+      ) {
+        throw new Error(
+          `Duplicate regulatory country id ${country.id}`,
+        );
+      }
+
+      countriesByName.set(
+        country.name,
+        country,
+      );
+
+      countriesById.set(
+        country.id,
+        country,
       );
     }
 
-    const country =
-      countries[0];
 
-    if (!country) {
+    if (
+      !countriesByName.has(
+        requestedCountryName,
+      )
+    ) {
       return [];
     }
 
 
-    // --------------------------------------------------------
+    const candidateCountryIds =
+      countries.map(
+        (country) =>
+          country.id,
+      );
+
+    if (
+      candidateCountryIds.length ===
+      0
+    ) {
+      return [];
+    }
+
+
+    // ========================================================
     // 3. Resolve exact trade-code candidates
-    // --------------------------------------------------------
+    // ========================================================
 
     const {
       data: goodData,
@@ -331,23 +415,32 @@ export class SupabaseRegulatoryRepository
     const goods =
       (goodData ?? []) as unknown as RegulatoryGoodRow[];
 
-    if (goods.length === 0) {
+    if (
+      goods.length ===
+      0
+    ) {
       return [];
     }
+
 
     const goodIds =
       goods.map(
-        (good) => good.id,
+        (good) =>
+          good.id,
       );
 
-    if (goodIds.length === 0) {
+    if (
+      goodIds.length ===
+      0
+    ) {
       return [];
     }
 
 
-    // --------------------------------------------------------
+    // ========================================================
     // 4. Load all matching active emission records
-    // --------------------------------------------------------
+    //    for requested country + fallback geography
+    // ========================================================
 
     const {
       data: emissionData,
@@ -387,9 +480,9 @@ export class SupabaseRegulatoryRepository
         "dataset_id",
         dataset.id,
       )
-      .eq(
+      .in(
         "country_id",
-        country.id,
+        candidateCountryIds,
       )
       .in(
         "good_id",
@@ -406,30 +499,35 @@ export class SupabaseRegulatoryRepository
     const emissions =
       (emissionData ?? []) as unknown as RegulatoryEmissionValueRow[];
 
-    if (emissions.length === 0) {
+    if (
+      emissions.length ===
+      0
+    ) {
       return [];
     }
 
 
-    // --------------------------------------------------------
+    // ========================================================
     // 5. Load route definitions used by candidates
-    // --------------------------------------------------------
+    // ========================================================
 
-    const routeIds = [
-      ...new Set(
-        emissions
-          .map(
-            (emission) =>
-              emission.production_route_id,
-          )
-          .filter(
-            (
-              routeId,
-            ): routeId is string =>
-              routeId !== null,
-          ),
-      ),
-    ];
+    const routeIds =
+      [
+        ...new Set(
+          emissions
+            .map(
+              (emission) =>
+                emission.production_route_id,
+            )
+            .filter(
+              (
+                routeId,
+              ): routeId is string =>
+                routeId !== null,
+            ),
+        ),
+      ];
+
 
     const routesById =
       new Map<
@@ -437,7 +535,11 @@ export class SupabaseRegulatoryRepository
         RegulatoryRouteRow
       >();
 
-    if (routeIds.length > 0) {
+
+    if (
+      routeIds.length >
+      0
+    ) {
       const {
         data: routeData,
         error: routeError,
@@ -462,7 +564,19 @@ export class SupabaseRegulatoryRepository
       const routes =
         (routeData ?? []) as unknown as RegulatoryRouteRow[];
 
-      for (const route of routes) {
+      for (
+        const route of routes
+      ) {
+        if (
+          routesById.has(
+            route.id,
+          )
+        ) {
+          throw new Error(
+            `Duplicate production route id ${route.id}`,
+          );
+        }
+
         routesById.set(
           route.id,
           route,
@@ -471,28 +585,17 @@ export class SupabaseRegulatoryRepository
     }
 
 
-    // --------------------------------------------------------
+    // ========================================================
     // 6. Map database rows to domain records
-    // --------------------------------------------------------
-
-    const goodsById =
-      new Map<
-        string,
-        RegulatoryGoodRow
-      >();
-
-    for (const good of goods) {
-      goodsById.set(
-        good.id,
-        good,
-      );
-    }
+    // ========================================================
 
     return emissions.map(
       (emission) => {
         const good =
-          goodsById.get(
-            emission.good_id,
+          goods.find(
+            (candidate) =>
+              candidate.id ===
+              emission.good_id,
           );
 
         if (!good) {
@@ -501,13 +604,37 @@ export class SupabaseRegulatoryRepository
           );
         }
 
+
+        const country =
+          countriesById.get(
+            emission.country_id,
+          );
+
+        if (!country) {
+          throw new Error(
+            `Emission record references unknown country ${emission.country_id}`,
+          );
+        }
+
+
         const route =
           emission.production_route_id
             ? routesById.get(
                 emission.production_route_id,
-              )
-            ?? null
+              ) ?? null
             : null;
+
+
+        if (
+          emission.production_route_id !==
+            null
+          && route === null
+        ) {
+          throw new Error(
+            `Emission record references unknown production route ${emission.production_route_id}`,
+          );
+        }
+
 
         return mapRecord(
           dataset,
