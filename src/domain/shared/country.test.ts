@@ -6,7 +6,7 @@ import {
 
 import {
   parseCountryCode,
-} from "./country.js";
+} from "./country";
 
 describe(
   "parseCountryCode",

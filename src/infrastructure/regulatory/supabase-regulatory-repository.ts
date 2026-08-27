@@ -3,11 +3,11 @@ import type {
   DefaultValueResolutionInput,
   RegulatoryRecord,
   ValueStatus,
-} from "../../domain/regulatory/types.js";
+} from "../../domain/regulatory/types";
 
 import type {
   RegulatoryRepository,
-} from "./regulatory-repository.js";
+} from "./regulatory-repository";
 
 import type {
   RegulatoryCountryRow,
@@ -15,11 +15,11 @@ import type {
   RegulatoryEmissionValueRow,
   RegulatoryGoodRow,
   RegulatoryRouteRow,
-} from "./regulatory-database-types.js";
+} from "./regulatory-database-types";
 
 import {
   getSupabaseClient,
-} from "../supabase/client.js";
+} from "../supabase/client";
 
 
 const DATASET_TYPE =

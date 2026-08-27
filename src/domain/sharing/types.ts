@@ -3,11 +3,11 @@ import type {
   OrganizationId,
   SharingGrantId,
   UserId,
-} from "../shared/ids.js";
+} from "../shared/ids";
 
 import type {
   IsoTimestamp,
-} from "../shared/reporting-period.js";
+} from "../shared/reporting-period";
 
 /**
  * INVITED -> ACTIVE -> REVOKED | EXPIRED. See docs/architecture,

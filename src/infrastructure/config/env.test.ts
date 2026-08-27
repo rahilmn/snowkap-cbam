@@ -6,7 +6,7 @@ import {
 
 import {
   loadSupabaseEnv,
-} from "./env.js";
+} from "./env";
 
 describe(
   "loadSupabaseEnv",

@@ -17,7 +17,7 @@ import {
 import {
   checkLayering,
   type SourceFile,
-} from "./layering-rules.js";
+} from "./layering-rules";
 
 // Repository root, resolved from this file's own location rather than
 // process.cwd() (see the same pattern in
@@ -118,7 +118,7 @@ describe(
             {
               path: "src/domain/widgets/service.ts",
               content:
-                `import { getSupabaseClient } from "../../infrastructure/supabase/client.js";`,
+                `import { getSupabaseClient } from "../../infrastructure/supabase/client";`,
             },
           ];
 
@@ -149,7 +149,7 @@ describe(
             {
               path: "src/domain/widgets/service.ts",
               content:
-                `import { doThing } from "../../application/widgets/do-thing.js";`,
+                `import { doThing } from "../../application/widgets/do-thing";`,
             },
           ];
 
@@ -303,7 +303,7 @@ describe(
             {
               path: "src/application/widgets/create-widget.ts",
               content:
-                `import { SupabaseWidgetRepository } from "../../infrastructure/widgets/supabase-widget-repository.js";`,
+                `import { SupabaseWidgetRepository } from "../../infrastructure/widgets/supabase-widget-repository";`,
             },
           ];
 
@@ -325,7 +325,7 @@ describe(
             {
               path: "src/application/regulatory/resolve-active-default-value.ts",
               content:
-                `import type { RegulatoryRepository } from "../../infrastructure/regulatory/regulatory-repository.js";`,
+                `import type { RegulatoryRepository } from "../../infrastructure/regulatory/regulatory-repository";`,
             },
           ];
 
@@ -347,7 +347,7 @@ describe(
             {
               path: "src/domain/widgets/service.test.ts",
               content:
-                `import { getSupabaseClient } from "../../infrastructure/supabase/client.js";`,
+                `import { getSupabaseClient } from "../../infrastructure/supabase/client";`,
             },
           ];
 

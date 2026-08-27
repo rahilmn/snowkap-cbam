@@ -1,10 +1,10 @@
 import type {
   Shipment,
-} from "./types.js";
+} from "./types";
 
 import {
   isLineComplete,
-} from "./invariants.js";
+} from "./invariants";
 
 export type ShipmentTransitionAction =
   | "MARK_READY"

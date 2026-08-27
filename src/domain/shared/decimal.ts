@@ -4,7 +4,7 @@ import {
 
 import type {
   Brand,
-} from "./ids.js";
+} from "./ids";
 
 /**
  * This is the only file in src/domain that imports decimal.js (see

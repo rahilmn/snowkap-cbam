@@ -3,20 +3,20 @@ import type {
   OrganizationId,
   ShipmentId,
   ShipmentLineId,
-} from "../shared/ids.js";
+} from "../shared/ids";
 
 import type {
   DecimalString,
   MoneyEUR,
-} from "../shared/decimal.js";
+} from "../shared/decimal";
 
 import type {
   IsoTimestamp,
-} from "../shared/reporting-period.js";
+} from "../shared/reporting-period";
 
 import type {
   EmissionDetermination,
-} from "../emissions/types.js";
+} from "../emissions/types";
 
 /**
  * Identifies one ACTIVE regulatory dataset the calculation engine read

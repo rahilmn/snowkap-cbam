@@ -4,25 +4,25 @@ import type {
   OrganizationId,
   SharingGrantId,
   UserId,
-} from "../shared/ids.js";
+} from "../shared/ids";
 
 import type {
   IsoTimestamp,
-} from "../shared/reporting-period.js";
+} from "../shared/reporting-period";
 
 import type {
   DecimalString,
-} from "../shared/decimal.js";
+} from "../shared/decimal";
 
 import type {
   ReportingPeriod,
-} from "../shared/reporting-period.js";
+} from "../shared/reporting-period";
 
 import type {
   RegulatoryValue,
   ResolutionReason,
   ResolutionTraceStep,
-} from "../regulatory/types.js";
+} from "../regulatory/types";
 
 /**
  * A frozen copy of a regulatory default-value resolution, taken at the

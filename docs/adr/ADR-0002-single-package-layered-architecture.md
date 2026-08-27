@@ -2,7 +2,13 @@
 
 ## Status
 
-Accepted
+Accepted. **Amended by [ADR-0014](./ADR-0014-drop-js-extensions-for-turbopack.md)**:
+the "relative imports always use `.js` extensions" rule below was
+dropped once Turbopack (Next.js's bundler) proved unable to resolve
+them — see ADR-0014 for the evidence and the replacement convention
+(extension-less relative imports, `moduleResolution: "bundler"`). The
+"folders not packages" and "no path aliases" decisions below are
+unaffected and still in force.
 
 ## Context
 

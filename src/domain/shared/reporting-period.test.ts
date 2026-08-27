@@ -8,7 +8,7 @@ import {
   formatReportingPeriod,
   parseIsoDate,
   reportingPeriodForReleaseDate,
-} from "./reporting-period.js";
+} from "./reporting-period";
 
 describe(
   "reportingPeriodForReleaseDate",

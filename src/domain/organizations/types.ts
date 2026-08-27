@@ -2,15 +2,15 @@ import type {
   MembershipId,
   OrganizationId,
   UserId,
-} from "../shared/ids.js";
+} from "../shared/ids";
 
 import type {
   CountryCode,
-} from "../shared/country.js";
+} from "../shared/country";
 
 import type {
   IsoTimestamp,
-} from "../shared/reporting-period.js";
+} from "../shared/reporting-period";
 
 /**
  * What an organization is set up to do on Snowkap. An organization may

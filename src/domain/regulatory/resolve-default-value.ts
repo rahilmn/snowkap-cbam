@@ -3,7 +3,7 @@ import type {
   DefaultValueResolutionResult,
   RegulatoryRecord,
   ResolutionTraceStep,
-} from "./types.js";
+} from "./types";
 
 
 const OTHER_TERRITORIES =

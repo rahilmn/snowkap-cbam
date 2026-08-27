@@ -5,7 +5,7 @@ import {
 
 import {
   loadSupabaseEnv,
-} from "../config/env.js";
+} from "../config/env";
 
 let cachedClient:
   SupabaseClient | undefined;

@@ -6,7 +6,7 @@
 
 import {
   SupabaseRegulatoryRepository,
-} from "../../src/infrastructure/regulatory/supabase-regulatory-repository.js";
+} from "../../src/infrastructure/regulatory/supabase-regulatory-repository";
 
 const hasSupabaseEnvironment =
   Boolean(

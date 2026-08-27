@@ -7,12 +7,12 @@ import {
 import type {
   ActualEmissionSnapshot,
   RegulatoryResolutionSnapshot,
-} from "./types.js";
+} from "./types";
 
 import {
   checkActualEmissionSnapshotCompleteness,
   checkRegulatoryResolutionSnapshotCompleteness,
-} from "./snapshot-completeness.js";
+} from "./snapshot-completeness";
 
 function completeRegulatoryResolutionSnapshot(): RegulatoryResolutionSnapshot {
   return {

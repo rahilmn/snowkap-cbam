@@ -8,7 +8,7 @@ import {
   parseDecimalString,
   toDecimal,
   toDecimalString,
-} from "./decimal.js";
+} from "./decimal";
 
 describe(
   "parseDecimalString",

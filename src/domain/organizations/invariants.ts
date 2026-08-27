@@ -1,11 +1,11 @@
 import type {
   MembershipId,
-} from "../shared/ids.js";
+} from "../shared/ids";
 
 import type {
   Membership,
   MembershipRole,
-} from "./types.js";
+} from "./types";
 
 export type MembershipInvariantRejectionReason =
   | "LAST_OWNER"

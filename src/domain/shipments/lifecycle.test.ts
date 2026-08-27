@@ -7,11 +7,11 @@ import {
 import type {
   Shipment,
   ShipmentLine,
-} from "./types.js";
+} from "./types";
 
 import {
   transitionShipment,
-} from "./lifecycle.js";
+} from "./lifecycle";
 
 function completeLine(
   overrides: Partial<ShipmentLine> = {},

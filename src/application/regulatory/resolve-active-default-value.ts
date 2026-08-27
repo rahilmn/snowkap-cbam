@@ -1,15 +1,15 @@
 import type {
   DefaultValueResolutionInput,
   DefaultValueResolutionResult,
-} from "../../domain/regulatory/types.js";
+} from "../../domain/regulatory/types";
 
 import {
   resolveDefaultValue,
-} from "../../domain/regulatory/resolve-default-value.js";
+} from "../../domain/regulatory/resolve-default-value";
 
 import type {
   RegulatoryRepository,
-} from "../../infrastructure/regulatory/regulatory-repository.js";
+} from "../../infrastructure/regulatory/regulatory-repository";
 
 export async function resolveActiveDefaultValue(
   repository: RegulatoryRepository,

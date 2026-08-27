@@ -2,11 +2,11 @@ import type {
   AuditEventId,
   OrganizationId,
   UserId,
-} from "../shared/ids.js";
+} from "../shared/ids";
 
 import type {
   IsoTimestamp,
-} from "../shared/reporting-period.js";
+} from "../shared/reporting-period";
 
 export type AuditActor =
   | { type: "USER"; user_id: UserId }

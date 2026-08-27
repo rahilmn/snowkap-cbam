@@ -6,15 +6,15 @@ import {
 
 import {
   SupabaseRegulatoryRepository,
-} from "../../src/infrastructure/regulatory/supabase-regulatory-repository.js";
+} from "../../src/infrastructure/regulatory/supabase-regulatory-repository";
 
 import {
   resolveActiveDefaultValue,
-} from "../../src/application/regulatory/resolve-active-default-value.js";
+} from "../../src/application/regulatory/resolve-active-default-value";
 
 import {
   getSupabaseClient,
-} from "../../src/infrastructure/supabase/client.js";
+} from "../../src/infrastructure/supabase/client";
 
 const hasSupabaseEnvironment =
   Boolean(

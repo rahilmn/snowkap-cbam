@@ -52,12 +52,18 @@ not a package boundary but:
 3. the golden/unit test suites;
 4. this document, plus the protected-zone policy in `CLAUDE.md`.
 
-Two standing rules keep a future workspace split mechanical if it ever
-becomes worth doing: every relative import uses `.js` extensions
-(NodeNext convention — the codebase is already consistent about this),
-and no `tsconfig.json` path aliases are used anywhere. When that day
-comes, the move is a `git mv` of folders into `packages/*/src`, not a
-rewrite.
+One standing rule keeps a future workspace split mechanical if it ever
+becomes worth doing: no `tsconfig.json` path aliases are used anywhere
+(imports are always relative). When that day comes, the move is a
+`git mv` of folders into `packages/*/src`, not a rewrite.
+
+Relative imports are extension-less (`from "./types"`, not
+`from "./types.js"`) — a Phase 2 correction from the original NodeNext
+convention, after Turbopack (Next.js's bundler) proved unable to
+resolve `.js`-suffixed specifiers to their `.ts`/`.tsx` source files.
+See [`ADR-0014`](../adr/ADR-0014-drop-js-extensions-for-turbopack.md)
+for the evidence; `tsconfig.json` uses `module: "preserve"` /
+`moduleResolution: "bundler"` accordingly.
 
 ## The layering test
 

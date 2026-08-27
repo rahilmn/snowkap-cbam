@@ -1,7 +1,7 @@
 import type {
   DefaultValueResolutionInput,
   RegulatoryRecord,
-} from "../../domain/regulatory/types.js";
+} from "../../domain/regulatory/types";
 
 export interface RegulatoryRepository {
   findActiveDefaultEmissionCandidates(

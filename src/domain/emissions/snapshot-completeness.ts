@@ -1,7 +1,7 @@
 import type {
   ActualEmissionSnapshot,
   RegulatoryResolutionSnapshot,
-} from "./types.js";
+} from "./types";
 
 export type SnapshotCompletenessResult =
   | { status: "COMPLETE" }

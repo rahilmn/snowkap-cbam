@@ -1,6 +1,6 @@
 import type {
   ShipmentLine,
-} from "./types.js";
+} from "./types";
 
 /**
  * True when exactly one of net_mass_tonnes / quantity_mwh is set to a

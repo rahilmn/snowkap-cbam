@@ -6,12 +6,12 @@ import {
 
 import type {
   Membership,
-} from "./types.js";
+} from "./types";
 
 import {
   changeMembershipRole,
   removeMembership,
-} from "./invariants.js";
+} from "./invariants";
 
 const ORG_A =
   "org-a" as Membership["org_id"];

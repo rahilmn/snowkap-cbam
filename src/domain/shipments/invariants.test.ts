@@ -6,13 +6,13 @@ import {
 
 import type {
   ShipmentLine,
-} from "./types.js";
+} from "./types";
 
 import {
   hasDenseUniqueLineNumbers,
   isLineComplete,
   isLineQuantityValid,
-} from "./invariants.js";
+} from "./invariants";
 
 function line(
   overrides: Partial<ShipmentLine> = {},

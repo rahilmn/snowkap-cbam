@@ -3,15 +3,15 @@ import type {
   OperatorId,
   OrganizationId,
   SupplierId,
-} from "../shared/ids.js";
+} from "../shared/ids";
 
 import type {
   CountryCode,
-} from "../shared/country.js";
+} from "../shared/country";
 
 import type {
   IsoTimestamp,
-} from "../shared/reporting-period.js";
+} from "../shared/reporting-period";
 
 /**
  * Distinguishes a record entered directly by the producer that owns it

@@ -2,25 +2,25 @@ import type {
   OrganizationId,
   ShipmentId,
   ShipmentLineId,
-} from "../shared/ids.js";
+} from "../shared/ids";
 
 import type {
   CountryCode,
-} from "../shared/country.js";
+} from "../shared/country";
 
 import type {
   DecimalString,
-} from "../shared/decimal.js";
+} from "../shared/decimal";
 
 import type {
   IsoDate,
   IsoTimestamp,
   ReportingPeriod,
-} from "../shared/reporting-period.js";
+} from "../shared/reporting-period";
 
 import type {
   EmissionDetermination,
-} from "../emissions/types.js";
+} from "../emissions/types";
 
 export type ShipmentStatus =
   | "DRAFT"

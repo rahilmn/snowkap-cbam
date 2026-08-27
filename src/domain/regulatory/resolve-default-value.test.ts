@@ -6,11 +6,11 @@ import {
 
 import {
   resolveDefaultValue,
-} from "./resolve-default-value.js";
+} from "./resolve-default-value";
 
 import type {
   RegulatoryRecord,
-} from "./types.js";
+} from "./types";
 
 function record(
   overrides: Partial<RegulatoryRecord> = {},

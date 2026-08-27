@@ -16,11 +16,11 @@ import {
 
 import {
   resolveDefaultValue,
-} from "./resolve-default-value.js";
+} from "./resolve-default-value";
 
 import type {
   RegulatoryRecord,
-} from "./types.js";
+} from "./types";
 
 // Anchored to this file's location (not process.cwd()) so the test works
 // regardless of which directory vitest is invoked from.

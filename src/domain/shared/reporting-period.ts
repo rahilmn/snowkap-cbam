@@ -1,6 +1,6 @@
 import type {
   Brand,
-} from "./ids.js";
+} from "./ids";
 
 export type IsoDate =
   Brand<string, "IsoDate">;
