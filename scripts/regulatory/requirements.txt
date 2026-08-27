@@ -1,0 +1,18 @@
+# Python dependencies for the regulatory data pipeline
+# (scripts/regulatory/*.py). Not a Railway runtime dependency — this
+# pipeline is dev-side/CI tooling only (parse -> validate -> reconcile
+# -> load -> verify the CBAM default-emission-values dataset).
+#
+# Install with: pip install -r scripts/regulatory/requirements.txt
+# Requires Python 3.13 (matches the version this was pinned against;
+# see CLAUDE.md).
+#
+# pandas + openpyxl: reading the source .xlsx workbooks
+# (pandas.read_excel relies on openpyxl as its .xlsx engine, even
+# though no script imports openpyxl directly).
+# psycopg[binary]: connecting to Postgres for load/verify/reconcile
+# against the live database. The [binary] extra bundles a prebuilt
+# libpq so no system Postgres client library is required.
+pandas==2.2.3
+openpyxl==3.1.5
+psycopg[binary]==3.3.4
