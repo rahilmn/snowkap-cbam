@@ -12,6 +12,10 @@ import {
   resolveActiveDefaultValue,
 } from "../../src/application/regulatory/resolve-active-default-value.js";
 
+import {
+  getSupabaseClient,
+} from "../../src/infrastructure/supabase/client.js";
+
 const hasSupabaseEnvironment =
   Boolean(
     process.env.SUPABASE_URL &&
@@ -148,6 +152,37 @@ describe.skipIf(!hasSupabaseEnvironment)(
         // listed, use the value from: Other countries and territories."
         // See docs/architecture/REGULATORY_RESOLUTION_RULES.md Rule R7
         // and docs/adr/ADR-0005-protected-regulatory-subsystem.md.
+        //
+        // This test's premise -- that "Kiribati" is genuinely unlisted --
+        // is asserted directly rather than assumed, so a future reseed of
+        // the `countries` table (e.g. broadening it to a full ISO country
+        // list for product-layer dropdowns) makes this test fail loudly
+        // instead of silently degrading into a duplicate of the
+        // already-listed-country fallback case below.
+        const supabase =
+          getSupabaseClient();
+
+        const {
+          data: kiribatiRows,
+          error: kiribatiLookupError,
+        } = await supabase
+          .from("countries")
+          .select("id")
+          .eq(
+            "name",
+            "Kiribati",
+          );
+
+        if (kiribatiLookupError) {
+          throw kiribatiLookupError;
+        }
+
+        expect(
+          kiribatiRows,
+        ).toHaveLength(
+          0,
+        );
+
         const repository =
           new SupabaseRegulatoryRepository();
 
