@@ -565,6 +565,27 @@ describe.skipIf(!localSupabaseReachable)(
           expect(membershipError).toBeNull();
           expect(membership?.role).toBe("OWNER");
 
+          // ...and the RPC recorded an organization.created audit
+          // event for it, attributed to the caller
+          // (20260828090000_audit_organization_creation.sql).
+          const { data: auditEvent, error: auditEventError } =
+            await clientOnboarding
+              .from("audit_events")
+              .select("actor_type, event_type, aggregate_type, aggregate_id, payload")
+              .eq("org_id", newOrgId)
+              .eq("event_type", "organization.created")
+              .single();
+
+          expect(auditEventError).toBeNull();
+          expect(auditEvent?.actor_type).toBe("USER");
+          expect(auditEvent?.aggregate_type).toBe("ORGANIZATION");
+          expect(auditEvent?.aggregate_id).toBe(newOrgId);
+          expect(auditEvent?.payload).toMatchObject(
+            {
+              slug: `onboarding-test-org-${runId}`,
+            },
+          );
+
           // ...and an unrelated user (A) still cannot see it (isolation
           // holds for orgs created via the RPC too, not just fixtures
           // inserted directly by the service role).
@@ -578,6 +599,13 @@ describe.skipIf(!localSupabaseReachable)(
           expect(fromA).toHaveLength(0);
 
           // Cleanup: service role bypasses RLS for teardown.
+          // audit_events.org_id is `on delete restrict`, so it must go
+          // before organizations or the delete below fails.
+          await serviceClient
+            .from("audit_events")
+            .delete()
+            .eq("org_id", newOrgId);
+
           await serviceClient
             .from("memberships")
             .delete()
