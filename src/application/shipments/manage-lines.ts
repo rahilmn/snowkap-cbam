@@ -16,6 +16,14 @@ import type {
 } from "../../domain/shipments/types";
 
 import type {
+  EmissionDetermination,
+} from "../../domain/emissions/types";
+
+import {
+  summarizeDeterminationForAudit,
+} from "../../domain/emissions/summarize-determination-for-audit";
+
+import type {
   OrganizationId,
   ShipmentId,
   ShipmentLineId,
@@ -534,6 +542,12 @@ export async function updateLine(
         line_number: line.line_number,
         cn_code: line.cn_code,
         determination_cleared: existingDetermination !== null,
+        // What was actually cleared, not just whether something was --
+        // see summarizeDeterminationForAudit's own doc comment (found
+        // missing in P7's mandatory review).
+        cleared_determination: summarizeDeterminationForAudit(
+          existingDetermination as EmissionDetermination | null,
+        ),
       },
     },
   );

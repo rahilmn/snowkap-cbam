@@ -110,6 +110,7 @@ function mockSupabase(
     deleteResult,
     updatePayloads = [] as unknown[],
     deleteCalls = [] as unknown[],
+    auditPayloads = [] as unknown[],
   }: {
     shipmentResult?: { data: unknown; error: unknown };
     lineFetchResult?: { data: unknown; error: unknown };
@@ -120,6 +121,7 @@ function mockSupabase(
     deleteResult?: { data: unknown; error: unknown };
     updatePayloads?: unknown[];
     deleteCalls?: unknown[];
+    auditPayloads?: unknown[];
   },
 ) {
   return {
@@ -128,10 +130,17 @@ function mockSupabase(
     ) => {
       if (table === "audit_events") {
         return {
-          insert: () =>
-            Promise.resolve(
+          insert: (
+            payload: unknown,
+          ) => {
+            auditPayloads.push(
+              payload,
+            );
+
+            return Promise.resolve(
               { error: null },
-            ),
+            );
+          },
         };
       }
 
@@ -472,6 +481,64 @@ describe(
 
         expect(result.status).toBe(
           "OK",
+        );
+      },
+    );
+
+    it(
+      "records what determination was cleared, not just that one was",
+      async () => {
+        const auditPayloads: unknown[] =
+          [];
+
+        await updateLine(
+          mockSupabase(
+            {
+              lineFetchResult: {
+                data: {
+                  org_id: "org-1",
+                  shipment_id: "ship-1",
+                  shipments: { release_date: "2026-03-15" },
+                  emission_determination: {
+                    method: "ACTUAL",
+                    snapshot: {
+                      emission_data_id: "cleared-emission-data-1",
+                      emission_data_version: 5,
+                      sharing_grant_id: null,
+                    },
+                  },
+                },
+                error: null,
+              },
+              updateResult: { data: lineRow, error: null },
+              auditPayloads,
+            },
+          ),
+          mockRepository(),
+          orgId,
+          actorUserId,
+          lineId,
+          validInput,
+        );
+
+        expect(auditPayloads).toHaveLength(
+          1,
+        );
+
+        const payload =
+          auditPayloads[0] as { payload: { determination_cleared: boolean; cleared_determination: unknown } };
+
+        expect(payload.payload.determination_cleared).toBe(
+          true,
+        );
+
+        expect(payload.payload.cleared_determination).toEqual(
+          {
+            method: "ACTUAL",
+            emission_data_id: "cleared-emission-data-1",
+            emission_data_version: 5,
+            sharing_grant_id: null,
+          },
         );
       },
     );

@@ -8,6 +8,10 @@ import type {
   EmissionDetermination,
 } from "../../domain/emissions/types";
 
+import {
+  summarizeDeterminationForAudit,
+} from "../../domain/emissions/summarize-determination-for-audit";
+
 import type {
   IsoTimestamp,
 } from "../../domain/shared/reporting-period";
@@ -447,6 +451,13 @@ async function performDetermination(
         emission_data_version: snapshot.emission_data_version,
         sharing_grant_id: snapshot.sharing_grant_id,
         determination_method: "ACTUAL",
+        // Null on a first-time determination; the prior determination's
+        // method/reason/emission_data_id on a redetermine -- see
+        // summarizeDeterminationForAudit's own doc comment (found
+        // missing in P7's mandatory review).
+        previous_determination: summarizeDeterminationForAudit(
+          line.emission_determination,
+        ),
       },
     },
   );

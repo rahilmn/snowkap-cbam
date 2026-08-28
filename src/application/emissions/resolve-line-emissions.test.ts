@@ -124,11 +124,13 @@ function mockSupabase(
     recheckFetchResult,
     updateResult,
     updateCalls = [] as { predicate: "none" | "is_null"; payload: unknown }[],
+    auditPayloads = [] as unknown[],
   }: {
     lineFetchResult?: { data: unknown; error: unknown };
     recheckFetchResult?: { data: unknown; error: unknown };
     updateResult?: { data: unknown; error: unknown };
     updateCalls?: { predicate: "none" | "is_null"; payload: unknown }[];
+    auditPayloads?: unknown[];
   },
 ) {
   let selectCallCount =
@@ -140,10 +142,17 @@ function mockSupabase(
     ) => {
       if (table === "audit_events") {
         return {
-          insert: () =>
-            Promise.resolve(
+          insert: (
+            payload: unknown,
+          ) => {
+            auditPayloads.push(
+              payload,
+            );
+
+            return Promise.resolve(
               { error: null },
-            ),
+            );
+          },
         };
       }
 
@@ -788,6 +797,68 @@ describe(
 
         expect(result.status).toBe(
           "DETERMINED",
+        );
+      },
+    );
+
+    it(
+      "records the prior determination on the audit payload, not just the new one",
+      async () => {
+        const auditPayloads: unknown[] =
+          [];
+
+        const priorDetermination =
+          {
+            method: "ACTUAL",
+            snapshot: {
+              emission_data_id: "prior-emission-data-1",
+              emission_data_version: 3,
+              sharing_grant_id: "prior-grant-1",
+            },
+          };
+
+        await redetermineLineEmissions(
+          mockSupabase(
+            {
+              lineFetchResult: {
+                data: {
+                  ...lineRow,
+                  emission_determination: priorDetermination,
+                },
+                error: null,
+              },
+              updateResult: {
+                data: { ...lineRow, id: "line-1", emission_determination: { method: "DEFAULT", resolution: {} } },
+                error: null,
+              },
+              auditPayloads,
+            },
+          ),
+          mockRepository(
+            [record()],
+          ),
+          mockMapper(
+            { status: "MAPPED", regulatory_country_name: "China" },
+          ),
+          orgId,
+          actorUserId,
+          lineId,
+        );
+
+        expect(auditPayloads).toHaveLength(
+          1,
+        );
+
+        const payload =
+          auditPayloads[0] as { payload: { previous_determination: unknown } };
+
+        expect(payload.payload.previous_determination).toEqual(
+          {
+            method: "ACTUAL",
+            emission_data_id: "prior-emission-data-1",
+            emission_data_version: 3,
+            sharing_grant_id: "prior-grant-1",
+          },
         );
       },
     );

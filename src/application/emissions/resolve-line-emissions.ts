@@ -14,6 +14,10 @@ import {
   buildResolutionSnapshot,
 } from "../../domain/emissions/build-resolution-snapshot";
 
+import {
+  summarizeDeterminationForAudit,
+} from "../../domain/emissions/summarize-determination-for-audit";
+
 import type {
   CountryMappingOutcome,
   EmissionDetermination,
@@ -322,6 +326,15 @@ async function performResolution(
         reason: resolution.reason,
         dataset_version: snapshot.dataset_version,
         country_mapping_status: countryMapping.status,
+        // Null on a first-time determination (nothing to summarize);
+        // the prior determination's method/reason/emission_data_id on a
+        // redetermine -- see summarizeDeterminationForAudit's own doc
+        // comment for why this exists (found missing in P7's mandatory
+        // review: without it, an auditor can't tell what a line's
+        // determination changed FROM, only what it changed TO).
+        previous_determination: summarizeDeterminationForAudit(
+          line.emission_determination,
+        ),
       },
     },
   );

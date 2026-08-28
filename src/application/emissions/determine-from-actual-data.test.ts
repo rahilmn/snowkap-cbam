@@ -742,5 +742,53 @@ describe(
         );
       },
     );
+
+    it(
+      "records the prior determination on the audit payload, not just the new one",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const priorDetermination =
+          {
+            method: "DEFAULT",
+            resolution: { reason: "EXACT_CN8_MATCH", dataset_version: "2026-definitive-corrected" },
+          };
+
+        await redetermineLineFromActualData(
+          makeMockSupabase(
+            {
+              shipment_lines: [
+                { data: { ...lineRow, emission_determination: priorDetermination }, error: null },
+                { data: updatedLineRow, error: null },
+              ],
+              emission_data: { data: verifiedActiveRow, error: null },
+              audit_events: { data: null, error: null },
+            },
+            recorder,
+          ),
+          orgId,
+          actorUserId,
+          lineId,
+          emissionDataId,
+        );
+
+        const auditOp =
+          recorder.ops.find(
+            (op) => op.table === "audit_events" && op.op === "insert",
+          );
+
+        const payload =
+          auditOp?.payload as { payload: { previous_determination: unknown } };
+
+        expect(payload.payload.previous_determination).toEqual(
+          {
+            method: "DEFAULT",
+            reason: "EXACT_CN8_MATCH",
+            dataset_version: "2026-definitive-corrected",
+          },
+        );
+      },
+    );
   },
 );
