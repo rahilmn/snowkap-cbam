@@ -469,7 +469,7 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
-      "a user cannot write to organizations (no INSERT policy exists yet)",
+      "a user cannot INSERT into organizations directly (must go through the onboarding RPC)",
       async () => {
         const { error } =
           await clientA
@@ -482,12 +482,171 @@ describe.skipIf(!localSupabaseReachable)(
               },
             );
 
-        // Deliberate: no INSERT policy exists for organizations yet
-        // (see the migration header comment) -- RLS-enabled + zero
-        // matching policy denies by default. This test locks in that
-        // posture so it fails loudly if a future migration adds a
-        // too-permissive policy without updating this expectation.
+        // Deliberate: no direct INSERT policy exists for organizations
+        // -- app.create_organization_with_owner() (20260828080000) is
+        // the only sanctioned creation path, since a bare policy can't
+        // also insert the matching OWNER membership row atomically.
+        // This test locks in that posture so it fails loudly if a
+        // future migration adds a too-permissive direct-insert policy
+        // without updating this expectation.
         expect(error).not.toBeNull();
+      },
+    );
+
+    it(
+      "onboarding RPC atomically creates an organization and makes the caller its OWNER",
+      async () => {
+        const onboardingUserEmail =
+          `isolation-onboarding-${runId}@example.com`;
+
+        const onboardingPassword =
+          `isolation-test-password-${runId}!`;
+
+        const { data: onboardingUser, error: onboardingUserError } =
+          await serviceClient.auth.admin.createUser(
+            {
+              email: onboardingUserEmail,
+              password: onboardingPassword,
+              email_confirm: true,
+            },
+          );
+
+        if (onboardingUserError || !onboardingUser.user) {
+          throw new Error(
+            `Failed to create onboarding user: ${onboardingUserError?.message}`,
+          );
+        }
+
+        const onboardingUserId =
+          onboardingUser.user.id;
+
+        const clientOnboarding =
+          await signInAnonClient(
+            onboardingUserEmail,
+            onboardingPassword,
+          );
+
+        try {
+          const { data: newOrg, error: rpcError } =
+            await clientOnboarding.rpc(
+              "create_organization_with_owner",
+              {
+                p_name: `Onboarding Test Org ${runId}`,
+                p_slug: `onboarding-test-org-${runId}`,
+                p_capabilities: ["IMPORTER_DECLARANT"],
+              },
+            );
+
+          expect(rpcError).toBeNull();
+          expect(newOrg?.id).toBeDefined();
+
+          const newOrgId: string =
+            newOrg.id;
+
+          // The caller can now see the org they just created...
+          const { data: visibleOrg, error: visibleOrgError } =
+            await clientOnboarding
+              .from("organizations")
+              .select("id")
+              .eq("id", newOrgId);
+
+          expect(visibleOrgError).toBeNull();
+          expect(visibleOrg).toHaveLength(1);
+
+          // ...as its OWNER...
+          const { data: membership, error: membershipError } =
+            await clientOnboarding
+              .from("memberships")
+              .select("role")
+              .eq("org_id", newOrgId)
+              .eq("user_id", onboardingUserId)
+              .single();
+
+          expect(membershipError).toBeNull();
+          expect(membership?.role).toBe("OWNER");
+
+          // ...and an unrelated user (A) still cannot see it (isolation
+          // holds for orgs created via the RPC too, not just fixtures
+          // inserted directly by the service role).
+          const { data: fromA, error: fromAError } =
+            await clientA
+              .from("organizations")
+              .select("id")
+              .eq("id", newOrgId);
+
+          expect(fromAError).toBeNull();
+          expect(fromA).toHaveLength(0);
+
+          // Cleanup: service role bypasses RLS for teardown.
+          await serviceClient
+            .from("memberships")
+            .delete()
+            .eq("org_id", newOrgId);
+
+          await serviceClient
+            .from("organizations")
+            .delete()
+            .eq("id", newOrgId);
+        } finally {
+          await serviceClient.auth.admin.deleteUser(
+            onboardingUserId,
+          );
+        }
+      },
+    );
+
+    it(
+      "OWNER/ADMIN can update their own org; a member of a different org cannot",
+      async () => {
+        const { error: ownUpdateError } =
+          await clientA
+            .from("organizations")
+            .update(
+              { name: `Isolation Test Org A ${runId} (renamed)` },
+            )
+            .eq("id", orgAId);
+
+        expect(ownUpdateError).toBeNull();
+
+        const { data: renamed, error: renamedReadError } =
+          await clientA
+            .from("organizations")
+            .select("name")
+            .eq("id", orgAId)
+            .single();
+
+        expect(renamedReadError).toBeNull();
+        expect(renamed?.name).toBe(
+          `Isolation Test Org A ${runId} (renamed)`,
+        );
+
+        // clientB is a member of org B only -- attempting to update org
+        // A must affect zero rows (RLS filters it out of the UPDATE's
+        // target set entirely; this is not a permission error, just no
+        // matching row from B's perspective).
+        const { data: crossOrgUpdateResult, error: crossOrgUpdateError } =
+          await clientB
+            .from("organizations")
+            .update(
+              { name: "Should not be renamed by org B" },
+            )
+            .eq("id", orgAId)
+            .select("id");
+
+        expect(crossOrgUpdateError).toBeNull();
+        expect(crossOrgUpdateResult).toHaveLength(0);
+
+        const { data: stillOriginal, error: stillOriginalError } =
+          await serviceClient
+            .from("organizations")
+            .select("name")
+            .eq("id", orgAId)
+            .single();
+
+        expect(stillOriginalError).toBeNull();
+        expect(stillOriginal?.name).toBe(
+          `Isolation Test Org A ${runId} (renamed)`,
+        );
       },
     );
   },
