@@ -75,7 +75,7 @@ const PRODUCER_NAV: NavItem[] = [
 
 const SETTINGS_NAV: NavItem[] = [
   { label: "Team", icon: Users, href: "/team" },
-  { label: "Organization", icon: Building2 },
+  { label: "Organization", icon: Building2, href: "/organization" },
   { label: "Settings", icon: Settings },
 ];
 
