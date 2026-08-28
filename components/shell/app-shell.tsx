@@ -33,6 +33,36 @@ export interface AppShellProps {
 }
 
 /**
+ * Derives which primary nav set to show from the org's actual
+ * capabilities when a screen hasn't explicitly forced one. A
+ * producer-only org gets the producer nav; everyone else (importer-
+ * only, both capabilities, or no org yet) gets the importer nav --
+ * matching the master plan's own release order (§37: "Importer MVP
+ * first... Producer MVP is the V1 centerpiece"). A real experience
+ * switcher for dual-capability orgs is not yet built; this is a
+ * reasonable default until it is, not the final word on that case.
+ */
+export function deriveExperience(
+  capabilities: string[] | undefined,
+): Experience {
+  const hasProducer =
+    capabilities?.includes(
+      "PRODUCER_OPERATOR",
+    ) ??
+    false;
+
+  const hasImporter =
+    capabilities?.includes(
+      "IMPORTER_DECLARANT",
+    ) ??
+    false;
+
+  return hasProducer && !hasImporter
+    ? "producer"
+    : "importer";
+}
+
+/**
  * The application shell every screen (both experiences) renders
  * inside, per docs/plans/MASTER_PLAN.md §26 ("shell = topbar + sidebar
  * + breadcrumbs + optional inspector"). `inspector` is the slot the
@@ -42,8 +72,11 @@ export interface AppShellProps {
  * shell in the meantime.
  *
  * Async: resolves the current org summary once per render so Topbar
- * shows the real signed-in user's organization, not the Phase 2 static
- * placeholder -- every existing call site keeps working unchanged.
+ * shows the real signed-in user's organization (not the Phase 2 static
+ * placeholder) and Sidebar shows the nav for what the org can actually
+ * do, not always the importer set -- every existing call site keeps
+ * working unchanged. `experience` stays an explicit override: a screen
+ * that's inherently one experience or the other can still force it.
  */
 export async function AppShell(
   {
@@ -70,7 +103,12 @@ export async function AppShell(
 
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
-          experience={experience}
+          experience={
+            experience ??
+            deriveExperience(
+              orgSummary?.context.capabilities,
+            )
+          }
           activeLabel={activeNavLabel}
         />
 
