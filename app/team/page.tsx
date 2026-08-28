@@ -21,9 +21,21 @@ import {
 } from "../../src/application/organizations/org-context";
 
 import {
+  listPendingInvitationsForOrg,
+} from "../../src/application/organizations/invitations";
+
+import {
   TeamMemberList,
   type TeamMemberRow,
 } from "./team-member-list";
+
+import {
+  InviteMemberForm,
+} from "./invite-member-form";
+
+import {
+  PendingInvitationsList,
+} from "./pending-invitations-list";
 
 export default async function TeamPage() {
   const supabase =
@@ -67,6 +79,19 @@ export default async function TeamPage() {
           ),
         );
 
+  const canManage =
+    hasAdminAccess(
+      orgSummary.context,
+    );
+
+  const pendingInvitations =
+    canManage
+      ? await listPendingInvitationsForOrg(
+          supabase,
+          orgSummary.context.org_id,
+        )
+      : [];
+
   return (
     <AppShell
       breadcrumbs={[
@@ -79,12 +104,26 @@ export default async function TeamPage() {
       </h1>
 
       <Card className="max-w-2xl">
+        {canManage ? (
+          <InviteMemberForm />
+        ) : null}
+
+        <PendingInvitationsList
+          invitations={pendingInvitations.map(
+            (invitation) => (
+              {
+                invitationId: invitation.id,
+                email: invitation.email,
+                role: invitation.role,
+              }
+            ),
+          )}
+        />
+
         <TeamMemberList
           members={memberRows}
           currentUserId={orgSummary.context.user_id}
-          canManage={hasAdminAccess(
-            orgSummary.context,
-          )}
+          canManage={canManage}
         />
       </Card>
     </AppShell>

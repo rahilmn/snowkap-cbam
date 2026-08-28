@@ -2,8 +2,12 @@ import {
   createBrowserClient,
 } from "@supabase/ssr";
 
+import type {
+  SupabaseClient,
+} from "@supabase/supabase-js";
+
 let cachedClient:
-  ReturnType<typeof createBrowserClient> | undefined;
+  SupabaseClient | undefined;
 
 /**
  * The browser-side, session-scoped Supabase client -- for "use client"
@@ -18,7 +22,7 @@ let cachedClient:
  * env vars (even NEXT_PUBLIC_ ones) at module load time would break
  * any test that imports this module before they're configured.
  */
-export function getBrowserSupabaseClient() {
+export function getBrowserSupabaseClient(): SupabaseClient {
   if (!cachedClient) {
     const url =
       process.env.NEXT_PUBLIC_SUPABASE_URL;

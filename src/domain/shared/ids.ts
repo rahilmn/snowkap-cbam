@@ -16,6 +16,9 @@ export type UserId =
 export type MembershipId =
   Brand<string, "MembershipId">;
 
+export type InvitationId =
+  Brand<string, "InvitationId">;
+
 export type SupplierId =
   Brand<string, "SupplierId">;
 

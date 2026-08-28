@@ -178,13 +178,20 @@ const APPLICATION_GRANDFATHERED_INFRASTRUCTURE_IMPORT =
  * way SupabaseRegulatoryRepository has. UI (Server Components, Server
  * Actions, middleware) legitimately constructs a session-scoped client
  * directly; nothing else under src/infrastructure gets this exception
- * -- the service-role client and any real adapter (regulatory,
- * eventually shipments/emissions/etc.) still must not be reached from
- * UI code directly.
+ * -- the general-purpose service-role client and any real adapter
+ * (regulatory, eventually shipments/emissions/etc.) still must not be
+ * reached from UI code directly.
+ *
+ * admin-client is a third, narrower exception: a service-role client
+ * scoped by convention to the Auth admin API only (currently just
+ * inviteUserByEmail, for the Team screen's invite action), not general
+ * table access -- see that file's doc comment for why this is kept
+ * separate from src/infrastructure/supabase/client.ts.
  */
 const UI_ALLOWED_INFRASTRUCTURE_IMPORTS = [
   "src/infrastructure/supabase/server-client",
   "src/infrastructure/supabase/browser-client",
+  "src/infrastructure/supabase/admin-client",
 ];
 
 /**

@@ -16,6 +16,19 @@ const nextConfig: NextConfig = {
       process.env.GIT_SHA ??
       "dev",
   },
+
+  // Supabase's local Auth config (supabase/config.toml's site_url) uses
+  // 127.0.0.1, not localhost -- browsing the dev server via 127.0.0.1
+  // is therefore required for Auth email-link redirects (invite,
+  // password reset, etc.) to land on an origin GoTrue's redirect
+  // allowlist actually accepts. Without this, Next's dev-only
+  // cross-origin protection silently blocks HMR and static chunk
+  // requests from that origin, breaking client hydration everywhere
+  // (not just on Auth screens) -- this is dev-only and has no
+  // production effect (output: "standalone" never reads this).
+  allowedDevOrigins: [
+    "127.0.0.1",
+  ],
 };
 
 export default nextConfig;

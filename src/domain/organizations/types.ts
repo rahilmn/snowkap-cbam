@@ -1,4 +1,5 @@
 import type {
+  InvitationId,
   MembershipId,
   OrganizationId,
   UserId,
@@ -57,4 +58,28 @@ export interface Membership {
   user_id: UserId;
   role: MembershipRole;
   created_at: IsoTimestamp;
+}
+
+// OWNER is deliberately excluded from what an invite can grant --
+// granting ownership is a separate, more deliberate action than a
+// routine invite (see the migration's header comment).
+export type InvitableRole =
+  | "ADMIN"
+  | "MEMBER";
+
+export type InvitationStatus =
+  | "PENDING"
+  | "ACCEPTED"
+  | "REVOKED"
+  | "EXPIRED";
+
+export interface Invitation {
+  id: InvitationId;
+  org_id: OrganizationId;
+  email: string;
+  role: InvitableRole;
+  status: InvitationStatus;
+  invited_by: UserId;
+  created_at: IsoTimestamp;
+  expires_at: IsoTimestamp;
 }
