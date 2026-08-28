@@ -11,15 +11,18 @@ export interface RegulatoryRepository {
   ): Promise<RegulatoryRecord[]>;
 
   /**
-   * Every cbam_goods row (any record_level) whose trade_code exactly
-   * equals `tradeCode` -- an array, not a single value or null,
-   * because cbam_goods has no DB-level uniqueness constraint on
-   * trade_code, so the caller (the pure classifyGood domain function)
-   * decides what 0 / 1 / 2+ matches means, rather than this adapter
-   * guessing. For P4 shipment-line classification (§20).
+   * TRADE_GOOD-level cbam_goods rows, effective as of `asOfDate` (a
+   * shipment's own release_date, never "today" -- a line entered now
+   * may declare a past release date), whose trade_code exactly equals
+   * `tradeCode`. An array, not a single value or null: cbam_goods has
+   * no DB-level uniqueness constraint on trade_code, so the caller
+   * (the pure classifyGood domain function) decides what 0 / 1 / 2+
+   * matches means, rather than this adapter guessing. For P4
+   * shipment-line classification (§20).
    */
   findCbamGoodsByCode(
     tradeCode: string,
+    asOfDate: string,
   ): Promise<CbamGoodSummary[]>;
 
   /**

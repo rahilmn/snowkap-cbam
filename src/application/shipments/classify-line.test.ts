@@ -79,6 +79,7 @@ describe(
           await classifyLine(
             repository,
             "not-a-code",
+            "2026-03-15",
           );
 
         expect(result).toEqual(
@@ -100,6 +101,7 @@ describe(
               [cementGood],
             ),
             "25232100",
+            "2026-03-15",
           );
 
         expect(result).toEqual(
@@ -122,6 +124,7 @@ describe(
               [],
             ),
             "99999999",
+            "2026-03-15",
           );
 
         expect(result).toEqual(
@@ -145,6 +148,7 @@ describe(
               [cementGood, duplicate],
             ),
             "25232100",
+            "2026-03-15",
           );
 
         expect(result).toEqual(
@@ -169,6 +173,7 @@ describe(
               [tenDigitGood],
             ),
             "2523210099",
+            "2026-03-15",
           );
 
         expect(result).toMatchObject(

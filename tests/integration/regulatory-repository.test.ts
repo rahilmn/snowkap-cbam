@@ -96,6 +96,7 @@ describe.skipIf(!hasSupabaseEnvironment)(
         const goods =
           await repository.findCbamGoodsByCode(
             "25232100",
+            "2026-03-15",
           );
 
         expect(goods).toHaveLength(
@@ -123,6 +124,7 @@ describe.skipIf(!hasSupabaseEnvironment)(
         const goods =
           await repository.findCbamGoodsByCode(
             "99999999",
+            "2026-03-15",
           );
 
         expect(goods).toEqual(

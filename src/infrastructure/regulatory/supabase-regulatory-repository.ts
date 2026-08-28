@@ -695,6 +695,7 @@ export class SupabaseRegulatoryRepository
 
   async findCbamGoodsByCode(
     tradeCode: string,
+    asOfDate: string,
   ): Promise<CbamGoodSummary[]> {
     const supabase =
       getSupabaseClient();
@@ -704,6 +705,16 @@ export class SupabaseRegulatoryRepository
         tradeCode,
       );
 
+    // record_level = 'TRADE_GOOD' (a classification declared on a
+    // shipment line is always leaf-level -- see
+    // src/domain/shipments/classify-good.ts's own doc comment on why
+    // an already-format-valid 8/10-digit input can only ever match
+    // TRADE_GOOD rows anyway; the filter is still explicit here rather
+    // than relied upon implicitly) and effective-dated against the
+    // caller-supplied asOfDate (never "today" -- a shipment entered
+    // now may declare a past release date), not just "currently
+    // active", so a superseded classification row is never returned
+    // as a match for historical goods.
     const { data, error } =
       await supabase
         .from(
@@ -715,6 +726,16 @@ export class SupabaseRegulatoryRepository
         .eq(
           "trade_code",
           normalizedCode,
+        )
+        .eq(
+          "record_level",
+          "TRADE_GOOD",
+        )
+        .or(
+          `active_from.is.null,active_from.lte.${asOfDate}`,
+        )
+        .or(
+          `active_to.is.null,active_to.gte.${asOfDate}`,
         )
         .limit(10);
 

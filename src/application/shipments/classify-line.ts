@@ -41,6 +41,11 @@ export type ClassifyLineResult =
 export async function classifyLine(
   repository: RegulatoryRepository,
   declaredCode: string,
+  // The shipment's own release_date, never "today" -- a line entered
+  // now may declare a past release date, and a superseded
+  // classification row must not be treated as a match for it. See
+  // findCbamGoodsByCode's own doc comment.
+  asOfDate: string,
 ): Promise<ClassifyLineResult> {
   const formatResult =
     validateCnCodeFormat(
@@ -56,6 +61,7 @@ export async function classifyLine(
   const candidates =
     await repository.findCbamGoodsByCode(
       declaredCode,
+      asOfDate,
     );
 
   const classification =
