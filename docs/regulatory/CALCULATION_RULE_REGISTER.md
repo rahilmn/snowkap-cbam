@@ -393,19 +393,44 @@ the paragraph above.
   digits" states a precision *ceiling*, not an algorithm. Per the owner's explicit rule
   ("If authoritative evidence is insufficient for a rule: STOP ONLY THAT RULE and
   escalate. Do NOT infer or invent the formula."), this sub-point is **not** inferred and
-  **not** implemented here. Two candidate resolution paths for a human/Sonnet review
-  before P7 implementation, neither adopted as fact in this pass: (a) treat the 5-decimal
-  ceiling as a *reporting/declaration-time* transformation only — consistent with this
-  rule's own long-standing interim design below and RULE-EE-001's "never rounded before
-  P9" posture, i.e. `CalculationResult` keeps full `Decimal` precision, and a
-  presentation-layer step not yet built applies an explicitly-confirmed method at
-  declaration time; or (b) fetch Commission Implementing Regulation (EU) 2018/2066 (the
-  EU ETS Monitoring and Reporting Regulation that Implementing Regulation (EU) 2025/2547's
-  own recital (1) says CBAM's calculation methods "build upon") to check whether it
-  defines a rounding method by cross-reference — **not fetched or read in this pass**,
-  since it was outside this task's scoped source set, and inferring its content from its
-  title/relationship alone would violate the same never-invent rule this note exists to
-  honor.
+  **not** implemented here.
+  **2026-08-29, third check (same-day follow-up)**: Commission Implementing Regulation
+  (EU) 2018/2066 (the EU ETS Monitoring and Reporting Regulation ("MRR") that Implementing
+  Regulation (EU) 2025/2547's own recital (1) says CBAM's calculation methods "build
+  upon") was fetched and its full rendered text searched directly (292,021 characters,
+  via the Browser, not a single-shot AI summary — an initial WebFetch summarization pass
+  on this same document incorrectly reported no rounding provision existed at all,
+  apparently from truncating a document this long; the actual text was then located by
+  direct in-page string search, which is why this document is read this way rather than
+  trusted to a summarizer, same as Annex IV's own embedded-image formulas). Found: MRR
+  Article 72, "Rounding of data" (verbatim): "1. Total annual emissions shall be reported
+  as rounded tonnes of CO2 or CO2(e). Tonne-kilometres shall be reported as rounded values
+  of tonne-kilometres. 2. All variables used to calculate the emissions shall be rounded
+  to include all significant digits for the purpose of calculating and reporting
+  emissions. 3. All data per flights shall be rounded to include all significant digits
+  for the purpose of calculating the distance and payload..." This is the direct textual
+  ancestor of Implementing Regulation (EU) 2025/2547 Annex II point A.1(6)-(7)'s near-
+  identical wording ("rounded to full tonnes" / "rounded to include all significant
+  digits") — confirming the "builds upon" relationship the recital states — but Article 72
+  **also never specifies a rounding method**, using the exact same precision-only language
+  CBAM's own act uses. This closes the specific follow-up flagged in this rule's own prior
+  finding with a definitive answer, not merely "not checked": the rounding method is
+  genuinely absent from all three sources now directly read in full (Regulation (EU)
+  2023/956, Implementing Regulation (EU) 2025/2547, and Implementing Regulation (EU)
+  2018/2066) — this is a real, structural gap in the published EU regulatory text across
+  the entire lineage CBAM's methodology derives from, not a research shortfall. Two
+  candidate resolution paths remain, for a human/owner decision before P7 implementation,
+  neither adopted as fact in this pass: (a) treat the 5-decimal ceiling as a
+  *reporting/declaration-time* transformation only — consistent with this rule's own
+  long-standing interim design below and RULE-EE-001's "never rounded before P9" posture,
+  i.e. `CalculationResult` keeps full `Decimal` precision, and a presentation-layer step
+  not yet built applies an explicitly-confirmed method at declaration time; or (b) adopt
+  HALF_UP as an explicit APPLICATION DESIGN DECISION (not a REGULATORY FACT) on the
+  reasoning that it is already this codebase's own standing default everywhere else
+  (`src/domain/shared/decimal.ts`'s `Decimal.clone({precision: 40, rounding: HALF_UP})`)
+  and is the conventional default absent a stated regulatory method — but this path
+  requires an explicit owner sign-off to adopt, since it is a genuine judgment call in the
+  absence of a cited fact, not itself derived from the Regulation.
 - **Interim rule** (DESIGN, not FACT, unchanged by this pass): full `Decimal` precision
   (`src/domain/shared/decimal.ts`) is maintained through every calculation step and
   persisted in `CalculationResult`; no rounding is applied anywhere in `src/domain/
@@ -417,7 +442,11 @@ the paragraph above.
 - **Source URL**: `https://eur-lex.europa.eu/eli/reg/2023/956/oj/eng` (searched in full;
   Article 7(7), Article 2a/Annex VII — original P6 finding, no rounding method found);
   `https://eur-lex.europa.eu/eli/reg_impl/2025/2547/oj/eng` (Annex II point A.1(6)-(8) —
-  2026-08-29 finding, no rounding method found there either).
+  2026-08-29 finding, no rounding method found there either);
+  `https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32018R2066` (Article 72
+  "Rounding of data" — 2026-08-29 same-day follow-up, full text searched directly, no
+  rounding method found there either; this is the act CBAM's own rounding language
+  derives from per 2025/2547's recital (1)).
 - **Golden regression fixture**: `src/domain/calculations/calculate-line-emissions.test.ts`'s
   "preserves exact decimal precision" case (0.1 × 0.2 = 0.02 exactly, not the
   floating-point-drifted 0.020000000000000004 a native-number multiplication would give).
