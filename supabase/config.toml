@@ -93,8 +93,15 @@ enabled = true
 # The maximum length in bytes of HTTP request headers. (default: 4096)
 # max_header_length = 4096
 
+# Disabled: the pulled Studio image (2026.08.17-sha-0c1da8f as of this
+# writing) has a broken package.json under Node 22, causing
+# `supabase start` to fail its health check and tear down every
+# container -- not something fixable in this repo. Nothing here uses
+# Studio's web UI; direct psql/the app itself cover local inspection.
+# Re-enable once the upstream image is fixed, or if a Studio-dependent
+# workflow is actually needed.
 [studio]
-enabled = true
+enabled = false
 # Port to use for Supabase Studio.
 port = 54323
 # External URL of the API server that frontend connects to.
@@ -114,8 +121,12 @@ port = 54324
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# Disabled: same reason as [studio] above -- the storage container also
+# fails its local health check on this image/Node combination, and
+# file uploads aren't implemented yet (P4+ scope). Re-enable when
+# upload work actually starts.
 [storage]
-enabled = true
+enabled = false
 # The maximum file size allowed (e.g. "5MB", "500KB").
 file_size_limit = "50MiB"
 
