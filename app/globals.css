@@ -119,7 +119,13 @@
 
   --text-primary: var(--color-neutral-900);
   --text-secondary: var(--color-neutral-600);
-  --text-tertiary: var(--color-neutral-400);
+  /* neutral-400 (2.67-3.13:1 across surface-page/sunken/raised) failed
+     WCAG AA on every real usage of this token -- see
+     docs/adr/ADR-0017-text-tertiary-contrast-fix.md. #61616a is not a
+     named ramp step; it was chosen to clear 4.5:1 with real margin
+     (5.2-6.1:1) against every surface this token is actually used on,
+     while staying visually distinct from text-secondary. */
+  --text-tertiary: #61616a;
   --text-on-brand: var(--color-white);
   --text-on-dark: var(--color-white);
 
@@ -151,7 +157,13 @@
 
   --text-primary: var(--color-neutral-50);
   --text-secondary: var(--color-neutral-300);
-  --text-tertiary: var(--color-neutral-500);
+  /* neutral-500 (3.01-3.75:1 across surface-page/raised/sunken) failed
+     WCAG AA on every real usage of this token -- see
+     docs/adr/ADR-0017-text-tertiary-contrast-fix.md. #93939c is not a
+     named ramp step; it was chosen to clear 4.5:1 with real margin
+     (5.2-6.5:1) against every surface this token is actually used on,
+     while staying visually distinct from text-secondary. */
+  --text-tertiary: #93939c;
   --text-on-brand: var(--color-white);
   --text-on-dark: var(--color-white);
 
