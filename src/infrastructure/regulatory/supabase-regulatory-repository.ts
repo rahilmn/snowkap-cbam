@@ -468,6 +468,21 @@ export class SupabaseRegulatoryRepository
     //    for requested country + fallback geography
     // ========================================================
 
+    // direct_value/indirect_value/total_value are unconstrained
+    // Postgres `numeric` columns. Without an explicit ::text cast,
+    // PostgREST serializes `numeric` in its JSON response as a bare
+    // (unquoted) number literal, and @supabase/postgrest-js parses that
+    // response body with JSON.parse -- which collapses e.g. "0.280" to
+    // the JS double 0.28, permanently losing the trailing-zero scale
+    // (JSON numbers carry no scale; ADR-0006 requires these values
+    // never touch a native `number` at rest or in transit, for exactly
+    // this class of reason). Casting to ::text makes Postgres perform
+    // the numeric-to-text conversion server-side instead, which
+    // preserves the stored scale exactly, so the value arrives as an
+    // already-correct string and never becomes a JS number at all.
+    // direct_raw_source_value/indirect_raw_source_value/
+    // total_raw_source_value are plain `text` columns already immune to
+    // this -- only the three `numeric` columns need the cast.
     const {
       data: emissionData,
       error: emissionError,
@@ -481,15 +496,15 @@ export class SupabaseRegulatoryRepository
           good_id,
           country_id,
 
-          direct_value,
+          direct_value::text,
           direct_status,
           direct_raw_source_value,
 
-          indirect_value,
+          indirect_value::text,
           indirect_status,
           indirect_raw_source_value,
 
-          total_value,
+          total_value::text,
           total_status,
           total_raw_source_value,
 

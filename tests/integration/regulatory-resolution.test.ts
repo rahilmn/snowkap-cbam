@@ -127,10 +127,18 @@ describe.skipIf(!hasSupabaseEnvironment)(
           "AVAILABLE",
         );
 
+        // The canonical source value for this record is "0.280" (3
+        // decimal places -- see data/processed/default-emission-values-definitive.json).
+        // Regression guard: the adapter must preserve that scale, not
+        // silently truncate it to "0.28" via an unconstrained numeric
+        // column round-tripping through PostgREST's JSON serialization
+        // as a JS number. See the adapter's .select() -- direct_value/
+        // indirect_value/total_value are cast to ::text specifically to
+        // prevent this.
         expect(
           result.record?.total_emissions.value,
         ).toBe(
-          "0.28",
+          "0.280",
         );
 
         expect(
@@ -233,10 +241,18 @@ describe.skipIf(!hasSupabaseEnvironment)(
           "AVAILABLE",
         );
 
+        // The canonical source value for this record is "0.280" (3
+        // decimal places -- see data/processed/default-emission-values-definitive.json).
+        // Regression guard: the adapter must preserve that scale, not
+        // silently truncate it to "0.28" via an unconstrained numeric
+        // column round-tripping through PostgREST's JSON serialization
+        // as a JS number. See the adapter's .select() -- direct_value/
+        // indirect_value/total_value are cast to ::text specifically to
+        // prevent this.
         expect(
           result.record?.total_emissions.value,
         ).toBe(
-          "0.28",
+          "0.280",
         );
 
         expect(
