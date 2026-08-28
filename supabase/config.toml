@@ -121,10 +121,35 @@ port = 54324
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# Disabled: same reason as [studio] above -- the storage container also
-# fails its local health check on this image/Node combination, and
-# file uploads aren't implemented yet (P4+ scope). Re-enable when
-# upload work actually starts.
+# Re-enabling attempted for P7-C (evidence file upload, the work this
+# comment was waiting for): confirmed live that the documented failure
+# still reproduces exactly as described -- the storage container exits
+# immediately (no log output, exit 0, restart-looped, health check
+# never runs) and `supabase start` tears down the ENTIRE local stack
+# (including Postgres) as a result, not just the storage container.
+# Reverted to disabled so the rest of the local stack (Postgres, Auth,
+# REST, ...) stays usable.
+#
+# Consequence: the `storage` schema exists locally (created by the
+# Supabase CLI's own bootstrap) but with ZERO tables in it --
+# storage.buckets/storage.objects are never created without the
+# Storage service actually running. P7-C's migration
+# (20260829240000_p7c_evidence_files_schema.sql) Part 5 unconditionally
+# targets those tables (bucket insert + storage.objects RLS policies)
+# and could NOT have literally executed locally -- confirmed directly
+# via `select tablename from pg_tables where schemaname = 'storage'`
+# returning zero rows even after the migration is marked applied in
+# supabase_migrations.schema_migrations. This is a local-dev-only
+# tracking wrinkle, not a defect in the migration file itself. Part
+# 5's RLS logic was verified by applying the migration's actual,
+# unmodified policy SQL against a hand-built stand-in schema
+# (replicating storage.objects' columns and storage.foldername()'s
+# logic exactly, in a schema the local `postgres` role can create
+# objects in) and running adversarial role-simulated psql tests
+# against it -- NOT against the real storage.objects table, which
+# does not exist in this environment. Staging/production (real
+# Supabase-hosted Storage) will apply Part 5 literally and should be
+# spot-checked there before relying on it end-to-end.
 [storage]
 enabled = false
 # The maximum file size allowed (e.g. "5MB", "500KB").
