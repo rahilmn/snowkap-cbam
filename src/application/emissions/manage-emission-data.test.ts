@@ -139,6 +139,7 @@ function makeMockSupabase(
         return chain;
       },
       order: () => chain,
+      limit: () => chain,
       insert: (payload: unknown) => {
         recorder.ops.push({ table, op: "insert", payload, filters });
         return chain;
@@ -298,6 +299,52 @@ describe(
           (insertOp?.payload as { version: number; predecessor_id: string }).predecessor_id,
         ).toBe(
           "emission-data-prior",
+        );
+      },
+    );
+
+    it(
+      "computes version from the latest row in the lineage regardless of status -- not just the currently-ACTIVE one, so two DRAFT corrections recorded before either is activated don't collide on the same version number",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        // No row is ACTIVE here -- the latest row in the lineage is a
+        // DRAFT correction at version 2. Before the fix, the old
+        // status='ACTIVE'-only lookup would have found nothing (since
+        // nothing is ACTIVE yet) and computed version=1 / predecessor=null
+        // again, colliding with the version-1 row that already exists.
+        await recordEmissionData(
+          makeMockSupabase(
+            {
+              installations: { data: { org_id: "org-1" }, error: null },
+              emission_data: [
+                { data: { id: "emission-data-draft-2", version: 2 }, error: null },
+                { data: { ...baseRow, version: 3, predecessor_id: "emission-data-draft-2" }, error: null },
+              ],
+            },
+            recorder,
+          ),
+          orgId,
+          actorUserId,
+          validInput,
+        );
+
+        const insertOp =
+          recorder.ops.find(
+            (op) => op.table === "emission_data" && op.op === "insert",
+          );
+
+        expect(
+          (insertOp?.payload as { version: number; predecessor_id: string }).version,
+        ).toBe(
+          3,
+        );
+
+        expect(
+          (insertOp?.payload as { version: number; predecessor_id: string }).predecessor_id,
+        ).toBe(
+          "emission-data-draft-2",
         );
       },
     );

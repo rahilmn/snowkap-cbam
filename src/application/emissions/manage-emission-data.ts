@@ -204,7 +204,20 @@ export async function recordEmissionData(
       input.period,
     );
 
-  let existingActiveQuery =
+  // Deliberately NOT filtered to status='ACTIVE' -- version/predecessor_id
+  // must be computed from the LATEST row in the (installation, period)
+  // lineage regardless of status, not just the currently-ACTIVE one
+  // (found in P7's mandatory review: two DRAFT corrections recorded in a
+  // row, before either is ever activated, both looked up "the current
+  // ACTIVE row" -- which hadn't changed between them -- and both got the
+  // SAME version number with the SAME predecessor_id, forking the
+  // lineage into two same-numbered rows instead of a chain). Ordering by
+  // version descending with limit(1) keeps this a single-row lookup
+  // (.maybeSingle() would otherwise error on 2+ matching rows once the
+  // status filter is gone) -- see emission_data_version_uq and
+  // emission_data_predecessor_id_uq (20260829290000) for the DB-level
+  // backstop against this same class of collision.
+  let latestVersionQuery =
     supabase
       .from("emission_data")
       .select(
@@ -212,36 +225,38 @@ export async function recordEmissionData(
       )
       .eq("installation_id", input.installationId)
       .eq("entered_by_org_id", orgId)
-      .eq("status", "ACTIVE")
       .eq("reporting_period_kind", periodColumns.reporting_period_kind)
       .eq("reporting_period_year", periodColumns.reporting_period_year);
 
-  existingActiveQuery =
+  latestVersionQuery =
     periodColumns.reporting_period_quarter === null
-      ? existingActiveQuery.is("reporting_period_quarter", null)
-      : existingActiveQuery.eq("reporting_period_quarter", periodColumns.reporting_period_quarter);
+      ? latestVersionQuery.is("reporting_period_quarter", null)
+      : latestVersionQuery.eq("reporting_period_quarter", periodColumns.reporting_period_quarter);
 
-  const { data: existingActive, error: existingActiveError } =
-    await existingActiveQuery.maybeSingle();
+  const { data: latestVersionRow, error: latestVersionError } =
+    await latestVersionQuery
+      .order("version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  if (existingActiveError) {
+  if (latestVersionError) {
     return {
       status: "REJECTED",
       reason: "PERSIST_FAILED",
     };
   }
 
-  const existingActiveRecord =
-    existingActive as { id: string; version: number } | null;
+  const latestRecord =
+    latestVersionRow as { id: string; version: number } | null;
 
   const version =
-    existingActiveRecord
-      ? existingActiveRecord.version + 1
+    latestRecord
+      ? latestRecord.version + 1
       : 1;
 
   const predecessorId =
-    existingActiveRecord
-      ? existingActiveRecord.id
+    latestRecord
+      ? latestRecord.id
       : null;
 
   const { data, error } =

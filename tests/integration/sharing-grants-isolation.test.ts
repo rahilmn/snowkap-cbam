@@ -345,7 +345,7 @@ describe.skipIf(!localSupabaseReachable)(
           { status: "DISCARDED", verification_status: "UNVERIFIED", direct_specific: "1.6" },
         ] as const;
 
-      for (const fixture of emissionDataFixtures) {
+      for (const [index, fixture] of emissionDataFixtures.entries()) {
         const { data, error } =
           await serviceClient
             .from("emission_data")
@@ -364,6 +364,15 @@ describe.skipIf(!localSupabaseReachable)(
                 verification_status: fixture.verification_status,
                 verifier_user_id:
                   fixture.verification_status === "VERIFIED" ? producerOwnerId : null,
+                // All 7 fixtures share the same installation+period
+                // lineage on purpose (this suite is testing the read
+                // boundary by status/verification_status, not distinct
+                // periods) -- explicit, distinct version numbers avoid
+                // colliding with emission_data_version_uq
+                // (20260829290000), which -- correctly -- no longer
+                // allows two rows in the same lineage to share a
+                // version number.
+                version: index + 1,
               },
             )
             .select("id")
