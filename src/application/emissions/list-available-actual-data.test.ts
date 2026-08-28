@@ -49,6 +49,11 @@ const installationRows =
     { id: "installation-2", name: "Steel Works B", country: "IN" },
   ];
 
+const activeGrantForInstallation2 =
+  [
+    { installation_id: "installation-2", expires_at: null },
+  ];
+
 interface Op {
   table: string;
   op: "select";
@@ -148,7 +153,7 @@ describe(
     );
 
     it(
-      "labels a row entered by a different org as SHARED",
+      "labels a row entered by a different org as SHARED, when the caller's active org genuinely holds an ACTIVE grant for it",
       async () => {
         const result =
           await listAvailableActualEmissionData(
@@ -156,6 +161,7 @@ describe(
               {
                 emission_data: { data: [sharedRow], error: null },
                 installations: { data: installationRows, error: null },
+                sharing_grants: { data: activeGrantForInstallation2, error: null },
               },
             ),
             orgId,
@@ -172,6 +178,57 @@ describe(
     );
 
     it(
+      "excludes a row entered by a different org when the caller's ACTIVE org holds no ACTIVE grant for it -- even though RLS's own membership-based visibility (app.user_org_ids() returning ALL of a user's org memberships, not just the active one) could otherwise have returned it, e.g. when the caller happens to also be a member of the entering org itself (found in P7's mandatory cross-organization-sharing review: master plan §14 explicitly designs for a user belonging to both an importer org and a producer org, so this is a reachable, not merely theoretical, scenario)",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await listAvailableActualEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: [sharedRow], error: null },
+                installations: { data: installationRows, error: null },
+                sharing_grants: { data: [], error: null },
+              },
+              recorder,
+            ),
+            orgId,
+          );
+
+        expect(result).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "excludes a row shared via a grant that has already expired, even though its status column may still read ACTIVE",
+      async () => {
+        const result =
+          await listAvailableActualEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: [sharedRow], error: null },
+                installations: { data: installationRows, error: null },
+                sharing_grants: {
+                  data: [
+                    { installation_id: "installation-2", expires_at: "2020-01-01T00:00:00Z" },
+                  ],
+                  error: null,
+                },
+              },
+            ),
+            orgId,
+          );
+
+        expect(result).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
       "returns both own and shared rows together, each labeled correctly",
       async () => {
         const result =
@@ -180,6 +237,7 @@ describe(
               {
                 emission_data: { data: [ownRow, sharedRow], error: null },
                 installations: { data: installationRows, error: null },
+                sharing_grants: { data: activeGrantForInstallation2, error: null },
               },
             ),
             orgId,
