@@ -81,12 +81,37 @@ implementation, not assumed.
 - **Exceptions**: none at this rule's level — REFERENCE_REQUIRED/UNAVAILABLE/
   NOT_APPLICABLE/AMBIGUOUS/NO_MATCH resolutions never reach this rule at all (P5 never
   persists a determination for them; RULE-EE-005 governs the explicit non-computable
-  states the engine must return instead).
+  states the engine must return instead). **Added after the mandatory P6 engine
+  review**: P4's `QUANTITY_UNIT_MISMATCH` check validates the *good's* `functional_unit`
+  (`cbam_goods`) against the declared quantity kind, but nothing validated the *emission
+  record's own* `emission_unit` (`default_emission_values`, a separate table, free-form
+  text) against that same basis — a record carrying a mismatched unit would have
+  multiplied silently. The engine now returns `UNIT_UNSUPPORTED` (added to
+  `CalculationStatus`) when `resolution.emission_unit` doesn't contain "TONNE" for a
+  mass line or "MWH" for an electricity line. In the currently loaded dataset every
+  `emission_unit` value is `TCO2E_PER_TONNE` and no electricity-sector good is loaded at
+  all (verified live), so this is a defense-in-depth guard against a state that cannot
+  currently occur, not a fix for an observed failure.
 - **Source URL**: `https://eur-lex.europa.eu/eli/reg/2023/956/oj/eng` (Article 7, Annex
   IV points 1(c) and 4.1).
-- **Golden regression fixture**: `src/domain/calculations/*.test.ts` (to be authored with
-  the engine) — exact CN8 match with a MAPPED country (mass good), OTHER_COUNTRIES_FALLBACK
-  with an UNLISTED country (mass good), and an electricity good (MWh basis).
+- **Golden regression fixture**: `src/domain/calculations/calculate-line-emissions.test.ts`
+  — exact CN8 match with a MAPPED country (mass good), OTHER_COUNTRIES_FALLBACK with an
+  UNLISTED country (mass good), an electricity good (MWh basis), exact decimal precision,
+  and every non-computable status including UNIT_UNSUPPORTED.
+- **Known gaps from the mandatory P6 engine review** (2026-08-28), tracked rather than
+  fixed in this pass: (1) `calculation_results`' RLS policy constrains org/actor/line/
+  shipment-status scope but not the *correctness* of the written values — any
+  authenticated member of the line's org can INSERT an arbitrary
+  `embedded_emissions_tco2e` directly via PostgREST, bypassing this engine entirely; a
+  `correlation_id` shared with the row's `calculation.computed` audit event was added as
+  a cheap detectability measure, but the real fix (a `security definer` RPC that
+  recomputes and compares, or a reproduction check comparing stored results against
+  fresh recomputation from frozen inputs) is materially larger and tracked as a P11
+  security-hardening item, not implemented here. (2) No standing two-org isolation test
+  exists yet for `calculation_results` (unlike `shipment_lines`'
+  `tests/integration/shipments-isolation.test.ts`) — the LOCKED/VOID insert gate was
+  verified live via direct role-simulated psql (both the block and the READY-still-works
+  case), not via an automated test.
 
 ## RULE-EE-002 — Actual specific embedded emissions, simple goods
 
@@ -195,8 +220,14 @@ implementation, not assumed.
   `NOT_APPLICABLE`, `AMBIGUOUS_INPUT`, `PARAMETER_DATASET_UNAVAILABLE`,
   `UNIT_UNSUPPORTED`) and must never substitute zero, a default, or an estimate.
 - **Source URL**: n/a (application-layer safety rule, not a citation to the Regulation).
-- **Golden regression fixture**: to be authored with the engine — a line with no
-  `emission_determination` must produce `INPUT_UNRESOLVED`, never a computed value.
+- **Golden regression fixture**: `src/domain/calculations/calculate-line-emissions.test.ts`
+  — a line with no `emission_determination` produces `INPUT_UNRESOLVED`; a non-AVAILABLE
+  resolved total produces `VALUE_UNAVAILABLE`; an ACTUAL-method determination produces
+  `ACTUAL_METHOD_NOT_YET_SUPPORTED`; a unit/quantity-basis mismatch produces
+  `UNIT_UNSUPPORTED` (added post-review, see RULE-EE-001) — none of these ever return a
+  computed value. `REFERENCE_REQUIRED_UNRESOLVED`, `AMBIGUOUS_INPUT`, and
+  `PARAMETER_DATASET_UNAVAILABLE` remain unimplemented (unreachable in P6's DEFAULT-only
+  scope; relevant once P7/future-parameter-dataset work lands).
 
 ## RULE-EE-006 — Precision and rounding (interim)
 
@@ -217,8 +248,16 @@ implementation, not assumed.
   must fetch and cite the actual implementing act before implementing any rounding.
 - **Source URL**: `https://eur-lex.europa.eu/eli/reg/2023/956/oj/eng` (searched in full;
   Article 7(7), Article 2a/Annex VII).
-- **Golden regression fixture**: a determinism/precision test asserting the engine never
-  truncates or rounds a `DecimalString` value.
+- **Golden regression fixture**: `src/domain/calculations/calculate-line-emissions.test.ts`'s
+  "preserves exact decimal precision" case (0.1 × 0.2 = 0.02 exactly, not the
+  floating-point-drifted 0.020000000000000004 a native-number multiplication would give).
+- **Noted in the mandatory P6 engine review**: "no rounding" is bounded, not unlimited —
+  `src/domain/shared/decimal.ts`'s `Decimal.clone({precision: 40, ...})` rounds any
+  intermediate result to 40 significant digits (HALF_UP), and no intake-time digit cap
+  exists on `net_mass_tonnes`/`quantity_mwh` (`text` columns, only `> 0` is checked).
+  Not fixed here: no realistic CBAM shipment quantity approaches a value where this
+  40-digit ceiling would matter, so this is recorded as a known, accepted bound rather
+  than a rounding rule requiring its own register entry.
 
 ---
 

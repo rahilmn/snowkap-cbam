@@ -146,6 +146,9 @@ function calculationStatusMessageFor(
     case "ACTUAL_METHOD_NOT_YET_SUPPORTED":
       return "Calculation from actual emissions data isn't available yet.";
 
+    case "UNIT_UNSUPPORTED":
+      return "The resolved emission unit doesn't match this line's quantity -- this needs review before it can be calculated.";
+
     default:
       return "This line could not be calculated.";
   }
@@ -637,7 +640,9 @@ export async function calculateLineAction(
       message:
         result.reason === "LINE_NOT_FOUND"
           ? "That line could not be found."
-          : "Something went wrong. Please try again.",
+          : result.reason === "SHIPMENT_NOT_EDITABLE"
+            ? "This shipment is locked or void and can no longer be recalculated."
+            : "Something went wrong. Please try again.",
     };
   }
 
