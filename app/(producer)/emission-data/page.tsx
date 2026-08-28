@@ -39,6 +39,10 @@ import {
 } from "../../../src/application/evidence/upload-evidence";
 
 import {
+  checkEmissionDataEvidenceCompleteness,
+} from "../../../src/domain/emissions/snapshot-completeness";
+
+import {
   formatReportingPeriod,
 } from "../../../src/domain/shared/reporting-period";
 
@@ -155,8 +159,21 @@ export default async function EmissionDataPage() {
           <EmissionDataList
             isAdmin={hasAdminAccess(orgSummary.context)}
             records={records.map(
-              (record) => (
-                {
+              (record) => {
+                // LIVE, re-derived from the record's CURRENT
+                // evidence_file_ids on every render -- never a stored
+                // flag -- so the "Incomplete" state here always matches
+                // exactly what verifyEmissionData/activateEmissionData/
+                // fetchAuthorizedEmissionData would themselves decide
+                // right now (src/application/emissions). See the owner's
+                // blocking-model directive and this function's own doc
+                // comment (src/domain/emissions/snapshot-completeness.ts).
+                const completeness =
+                  checkEmissionDataEvidenceCompleteness(
+                    record,
+                  );
+
+                return {
                   id: record.id,
                   installationName: installationNameById.get(record.installation_id) ?? "Unknown installation",
                   cnScope: record.cn_scope,
@@ -169,6 +186,8 @@ export default async function EmissionDataPage() {
                   status: record.status,
                   rejectionReason: record.rejection_reason,
                   version: record.version,
+                  evidenceComplete: completeness.status === "COMPLETE",
+                  missingEvidenceFields: completeness.status === "INCOMPLETE" ? completeness.missingFields : [],
                   evidenceFiles: (evidenceFilesByEmissionDataId.get(record.id) ?? []).map(
                     (file) => (
                       {
@@ -180,8 +199,8 @@ export default async function EmissionDataPage() {
                       }
                     ),
                   ),
-                }
-              ),
+                };
+              },
             )}
           />
         </Card>

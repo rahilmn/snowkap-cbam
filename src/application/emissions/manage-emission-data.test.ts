@@ -604,11 +604,15 @@ describe(
 describe(
   "verifyEmissionData",
   () => {
+    // Complete evidence (at least one file attached) -- the baseline
+    // fixture for a record that IS eligible to be verified. Tests that
+    // specifically exercise the EVIDENCE_INCOMPLETE gate below override
+    // evidence_file_ids back to [].
     const pendingRow =
-      { ...baseRow, verification_status: "VERIFICATION_PENDING" };
+      { ...baseRow, verification_status: "VERIFICATION_PENDING", evidence_file_ids: ["evidence-1"] };
 
     it(
-      "verifies a VERIFICATION_PENDING record when the caller is ADMIN",
+      "verifies a VERIFICATION_PENDING record with evidence attached when the caller is ADMIN",
       async () => {
         const result =
           await verifyEmissionData(
@@ -626,6 +630,36 @@ describe(
             status: "OK",
             record: expect.objectContaining({ verification_status: "VERIFIED", verifier_user_id: "admin-1" }),
           },
+        );
+      },
+    );
+
+    it(
+      "rejects EVIDENCE_INCOMPLETE for a VERIFICATION_PENDING record with no evidence attached, as ADMIN, without persisting the transition -- the owner's blocking-model directive: incomplete evidence must not permit an emission record to become a verified ACTUAL determination",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await verifyEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: { ...pendingRow, evidence_file_ids: [] }, error: null },
+              },
+              recorder,
+            ),
+            adminContext,
+            "emission-data-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "EVIDENCE_INCOMPLETE" },
+        );
+
+        expect(
+          recorder.ops.some((op) => op.table === "emission_data" && op.op === "update"),
+        ).toBe(
+          false,
         );
       },
     );
@@ -790,11 +824,17 @@ describe(
 describe(
   "activateEmissionData",
   () => {
+    // Complete evidence -- the baseline fixture for a record that IS
+    // eligible to be activated. The dedicated EVIDENCE_INCOMPLETE test
+    // below overrides evidence_file_ids back to [] to cover the defense-
+    // in-depth re-check (evidence can be removed between verification
+    // and activation -- this gate does not assume verification's own
+    // check is still valid).
     const verifiedDraftRow =
-      { ...baseRow, verification_status: "VERIFIED" };
+      { ...baseRow, verification_status: "VERIFIED", evidence_file_ids: ["evidence-1"] };
 
     it(
-      "activates a DRAFT+VERIFIED record when no prior ACTIVE record exists for the installation+period",
+      "activates a DRAFT+VERIFIED record with evidence attached when no prior ACTIVE record exists for the installation+period",
       async () => {
         const recorder: Recorder =
           { fromCalls: [], ops: [] };
@@ -979,6 +1019,37 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "NOT_VERIFIED" },
+        );
+      },
+    );
+
+    it(
+      "rejects EVIDENCE_INCOMPLETE for a DRAFT+VERIFIED record whose evidence was removed after verification, without touching the supersede/activate updates -- defense in depth: activation must not assume verification's own completeness check is still valid",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await activateEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: { ...verifiedDraftRow, evidence_file_ids: [] }, error: null },
+              },
+              recorder,
+            ),
+            orgId,
+            actorUserId,
+            "emission-data-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "EVIDENCE_INCOMPLETE" },
+        );
+
+        expect(
+          recorder.ops.some((op) => op.table === "emission_data" && op.op === "update"),
+        ).toBe(
+          false,
         );
       },
     );

@@ -444,6 +444,32 @@ describe(
     );
 
     it(
+      "reports EMISSION_DATA_NOT_FOUND for an ACTIVE+VERIFIED row whose evidence was removed after verification -- the LIVE completeness re-check (owner's blocking-model directive: importer shipment calculations must not consume an incomplete actual record as verified ACTUAL, even though verification_status still reads VERIFIED)",
+      async () => {
+        const result =
+          await determineLineFromActualData(
+            makeMockSupabase(
+              {
+                shipment_lines: { data: lineRow, error: null },
+                emission_data: {
+                  data: { ...verifiedActiveRow, evidence_file_ids: [] },
+                  error: null,
+                },
+              },
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+            emissionDataId,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "EMISSION_DATA_NOT_FOUND" },
+        );
+      },
+    );
+
+    it(
       "reports DATA_INTEGRITY_ERROR when the row is cross-org visible but no matching ACTIVE sharing grant is found",
       async () => {
         const crossOrgRow =

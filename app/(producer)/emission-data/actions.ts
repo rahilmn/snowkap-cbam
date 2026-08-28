@@ -108,6 +108,16 @@ function transitionMessageFor(
     case "NOT_VERIFIED":
       return "This record must be verified before it can be activated.";
 
+    // Exact copy required by the owner's blocking-model directive
+    // (2026-08-28) -- surfaced here as the server-side source of truth
+    // for both verifyEmissionData and activateEmissionData rejections
+    // (manage-emission-data.ts), in addition to the persistent
+    // client-side "Incomplete" panel emission-data-list.tsx already
+    // renders from the same live completeness check, so the message is
+    // never only a one-time toast.
+    case "EVIDENCE_INCOMPLETE":
+      return "Additional evidence is required before these actual emissions can be used as verified data.";
+
     case "REJECTION_REASON_REQUIRED":
       return "Enter a reason for rejecting this record.";
 

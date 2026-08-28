@@ -6,11 +6,13 @@ import {
 
 import type {
   ActualEmissionSnapshot,
+  EmissionData,
   RegulatoryResolutionSnapshot,
 } from "./types";
 
 import {
   checkActualEmissionSnapshotCompleteness,
+  checkEmissionDataEvidenceCompleteness,
   checkRegulatoryResolutionSnapshotCompleteness,
 } from "./snapshot-completeness";
 
@@ -307,6 +309,72 @@ describe(
             "verification.verifier_user_id",
           );
         }
+      },
+    );
+  },
+);
+
+describe(
+  "checkEmissionDataEvidenceCompleteness",
+  () => {
+    it(
+      "reports COMPLETE when at least one evidence file is attached",
+      () => {
+        expect(
+          checkEmissionDataEvidenceCompleteness(
+            { evidence_file_ids: ["evidence-1"] } as Pick<EmissionData, "evidence_file_ids">,
+          ),
+        ).toEqual(
+          {
+            status: "COMPLETE",
+          },
+        );
+      },
+    );
+
+    it(
+      "reports INCOMPLETE with evidence_file_ids as the missing field when no evidence is attached",
+      () => {
+        const result =
+          checkEmissionDataEvidenceCompleteness(
+            { evidence_file_ids: [] } as Pick<EmissionData, "evidence_file_ids">,
+          );
+
+        expect(
+          result,
+        ).toEqual(
+          {
+            status: "INCOMPLETE",
+            missingFields: ["evidence_file_ids"],
+          },
+        );
+      },
+    );
+
+    it(
+      "is a LIVE check re-derived from whatever evidence_file_ids currently holds -- not a one-time flag -- so calling it again after evidence is removed reports INCOMPLETE even though it previously reported COMPLETE",
+      () => {
+        const record: Pick<EmissionData, "evidence_file_ids"> =
+          { evidence_file_ids: ["evidence-1"] };
+
+        expect(
+          checkEmissionDataEvidenceCompleteness(
+            record,
+          ).status,
+        ).toBe(
+          "COMPLETE",
+        );
+
+        record.evidence_file_ids =
+          [];
+
+        expect(
+          checkEmissionDataEvidenceCompleteness(
+            record,
+          ).status,
+        ).toBe(
+          "INCOMPLETE",
+        );
       },
     );
   },

@@ -8,6 +8,10 @@ import {
   type EmissionDataTransitionRejectionReason,
 } from "../../domain/emissions/emission-data-lifecycle";
 
+import {
+  checkEmissionDataEvidenceCompleteness,
+} from "../../domain/emissions/snapshot-completeness";
+
 import type {
   EmissionData,
   EmissionDataMethodology,
@@ -324,7 +328,17 @@ export type EmissionDataActionResult =
         | "NOT_FOUND"
         | "FETCH_FAILED"
         | "PERSIST_FAILED"
-        | "PERMISSION_DENIED";
+        | "PERMISSION_DENIED"
+        // Owner's blocking-model directive (2026-08-28): incomplete
+        // evidence must not permit an emission record to become a
+        // verified/consumable ACTUAL determination. Checked live via
+        // checkEmissionDataEvidenceCompleteness (snapshot-completeness.ts)
+        // at both VERIFY (applyTransition, below) and ACTIVATE
+        // (activateEmissionData, below) -- the latter as defense in
+        // depth, since evidence can be removed between verification and
+        // activation and this gate must not assume verification's own
+        // check is still valid.
+        | "EVIDENCE_INCOMPLETE";
     };
 
 /**
@@ -421,6 +435,27 @@ async function applyTransition(
 
   if (transition.status === "REJECTED") {
     return transition;
+  }
+
+  // Evidence-completeness gate, checked AFTER the pure state-machine
+  // transition succeeds (so a record in the wrong verification_status
+  // still reports the more fundamental VERIFICATION_NOT_PENDING, not
+  // this) but BEFORE anything is persisted -- VERIFICATION_PENDING ->
+  // VERIFIED must never happen while required evidence is missing (the
+  // owner's blocking-model directive). Checked against fetched.record
+  // (the CURRENT row, live), not any assumption baked into `action`.
+  if (action.action === "VERIFY") {
+    const completeness =
+      checkEmissionDataEvidenceCompleteness(
+        fetched.record,
+      );
+
+    if (completeness.status === "INCOMPLETE") {
+      return {
+        status: "REJECTED",
+        reason: "EVIDENCE_INCOMPLETE",
+      };
+    }
   }
 
   const { error } =
@@ -629,6 +664,25 @@ export async function activateEmissionData(
 
   if (transition.status === "REJECTED") {
     return transition;
+  }
+
+  // Evidence-completeness gate -- defense in depth, re-checked here
+  // even though verifyEmissionData already checked it once: evidence
+  // can be removed (removeEvidenceFile, upload-evidence.ts) at any
+  // point between a record being VERIFIED and this ACTIVATE call, so
+  // activation must not assume verification's own completeness check
+  // is still valid. Checked against fetched.record (the CURRENT row,
+  // live) before either the supersede or the activate update below.
+  const completeness =
+    checkEmissionDataEvidenceCompleteness(
+      fetched.record,
+    );
+
+  if (completeness.status === "INCOMPLETE") {
+    return {
+      status: "REJECTED",
+      reason: "EVIDENCE_INCOMPLETE",
+    };
   }
 
   const periodColumns =

@@ -12,6 +12,10 @@ import {
   summarizeDeterminationForAudit,
 } from "../../domain/emissions/summarize-determination-for-audit";
 
+import {
+  checkEmissionDataEvidenceCompleteness,
+} from "../../domain/emissions/snapshot-completeness";
+
 import type {
   IsoTimestamp,
 } from "../../domain/shared/reporting-period";
@@ -187,6 +191,37 @@ async function fetchAuthorizedEmissionData(
     );
 
   if (record.status !== "ACTIVE" || record.verification_status !== "VERIFIED") {
+    return {
+      status: "REJECTED",
+      reason: "EMISSION_DATA_NOT_FOUND",
+    };
+  }
+
+  // LIVE evidence-completeness re-check, not a one-time gate trusted
+  // from whenever verification/activation happened -- the owner's
+  // blocking-model directive is explicit that a consumer must not use
+  // an incomplete actual record as verified ACTUAL in present tense,
+  // not "was complete once". verifyEmissionData and activateEmissionData
+  // (manage-emission-data.ts) already check this at their own gates,
+  // but evidence_file_ids can still shrink AFTER activation
+  // (removeEvidenceFile in upload-evidence.ts does not itself gate
+  // removal against verification_status -- a separate, tracked gap), so
+  // a stale verification_status='VERIFIED' alone must never be trusted
+  // here. Collapsed into the SAME EMISSION_DATA_NOT_FOUND reason as
+  // every other ineligibility above, deliberately -- this function's own
+  // doc comment already establishes that no failure mode short of a
+  // genuine FETCH_FAILED may be distinguishable from any other by a
+  // caller (own-org or cross-org via a sharing grant); "evidence was
+  // since removed" joins "doesn't exist" / "exists but unverified" /
+  // "exists but belongs to someone else with no grant" in that same
+  // non-leaky posture rather than introducing an EVIDENCE_INCOMPLETE
+  // reason here that would let a caller distinguish this specific case.
+  const completeness =
+    checkEmissionDataEvidenceCompleteness(
+      record,
+    );
+
+  if (completeness.status === "INCOMPLETE") {
     return {
       status: "REJECTED",
       reason: "EMISSION_DATA_NOT_FOUND",

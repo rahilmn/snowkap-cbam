@@ -45,7 +45,45 @@ export interface EmissionDataListItem {
   status: "DRAFT" | "ACTIVE" | "SUPERSEDED" | "DISCARDED";
   rejectionReason: string | null;
   version: number;
+  // LIVE completeness, re-derived server-side (page.tsx) from THIS
+  // record's current evidence_file_ids on every render via
+  // checkEmissionDataEvidenceCompleteness -- never a stored, one-time
+  // flag. Shown regardless of verificationStatus/status (owner's
+  // blocking-model directive: "preserve auditability of the incomplete
+  // state"), including for a nominally VERIFIED/ACTIVE record whose
+  // evidence was later removed -- that case must be surfaced honestly,
+  // not hidden behind a stale-looking VERIFIED badge.
+  evidenceComplete: boolean;
+  missingEvidenceFields: string[];
   evidenceFiles: EvidenceFileListItem[];
+}
+
+// Required exact copy from the owner's blocking-model directive
+// (2026-08-28) -- shown as a persistent, always-visible state on the
+// record while it remains incomplete (never a dismissible one-time
+// toast), matching the same string manage-emission-data.ts's
+// EVIDENCE_INCOMPLETE rejection surfaces server-side (actions.ts's
+// transitionMessageFor) if the Verify control is ever reached anyway.
+const EVIDENCE_INCOMPLETE_NOTICE =
+  "Additional evidence is required before these actual emissions can be used as verified data.";
+
+/**
+ * Maps a domain missingFields entry (snapshot-completeness.ts's own
+ * field-path vocabulary, e.g. "evidence_file_ids") to the specific,
+ * human-readable description the directive requires ("identify what
+ * evidence is missing"). checkEmissionDataEvidenceCompleteness
+ * currently only ever reports "evidence_file_ids" -- the fallback below
+ * exists so a future additive field on that check degrades to its raw
+ * name instead of silently vanishing from this list.
+ */
+function describeMissingEvidenceField(
+  field: string,
+): string {
+  if (field === "evidence_file_ids") {
+    return "No evidence attached.";
+  }
+
+  return field;
 }
 
 const STATUS_TONE: Record<EmissionDataListItem["status"], BadgeProps["tone"]> =
@@ -121,6 +159,22 @@ function EmissionDataRow(
             <Badge tone={VERIFICATION_TONE[record.verificationStatus]}>
               {record.verificationStatus.replace(/_/g, " ")}
             </Badge>
+
+            {/*
+              Shown regardless of verificationStatus/status -- see this
+              file's own EmissionDataListItem doc comment on
+              evidenceComplete. Not the same signal as the
+              VERIFICATION_TONE badge above: a record can be
+              VERIFICATION_PENDING (not yet gated) and Incomplete at the
+              same time, or -- in the S5 gap this check exists to make
+              harmless -- ACTIVE + VERIFIED and Incomplete at the same
+              time, if evidence was removed afterward.
+            */}
+            {!record.evidenceComplete ? (
+              <Badge tone="warning">
+                Incomplete
+              </Badge>
+            ) : null}
           </div>
 
           <span className="text-xs text-[var(--text-secondary)]">
@@ -135,6 +189,38 @@ function EmissionDataRow(
             <span className="text-xs text-[var(--color-danger-700)]">
               Rejected: {record.rejectionReason}
             </span>
+          ) : null}
+
+          {/*
+            Persistent, always-on state while the record remains
+            incomplete -- NOT a dismissible toast, and not conditioned on
+            the Verify control being visible, per the owner's
+            blocking-model directive ("Do NOT implement this as a
+            cosmetic warning-only system" / "must be a persistent,
+            visible state on the record"). Lists exactly what
+            checkEmissionDataEvidenceCompleteness currently reports
+            missing, plus the exact required explanatory copy.
+          */}
+          {!record.evidenceComplete ? (
+            <div className="flex flex-col gap-1 rounded-[var(--radius-md)] border border-[var(--color-warning-300)] bg-[var(--color-warning-100)] p-2 text-xs text-[var(--color-warning-700)]">
+              <p className="font-medium">
+                Not ready for verification
+              </p>
+
+              <ul className="list-disc pl-4">
+                {record.missingEvidenceFields.map(
+                  (field) => (
+                    <li key={field}>
+                      {describeMissingEvidenceField(field)}
+                    </li>
+                  ),
+                )}
+              </ul>
+
+              <p>
+                {EVIDENCE_INCOMPLETE_NOTICE}
+              </p>
+            </div>
           ) : null}
         </div>
 
@@ -266,6 +352,7 @@ function RecordActions(
                 emissionDataId={record.id}
                 label={action.label}
                 variant={action.variant}
+                blocked={!record.evidenceComplete}
               />
             );
           }
@@ -277,6 +364,14 @@ function RecordActions(
               action={action.kind}
               label={action.label}
               variant={action.variant}
+              // ACTIVATE also carries the block: a record can turn
+              // Incomplete again between VERIFY and ACTIVATE (evidence
+              // removed in between -- the defense-in-depth case
+              // activateEmissionData itself re-checks server-side).
+              // SUBMIT_FOR_VERIFICATION/DISCARD are unaffected -- the
+              // directive only blocks verification/activation/consumer
+              // use, never editing/submitting a draft.
+              blocked={action.kind === "ACTIVATE" && !record.evidenceComplete}
             />
           );
         },
@@ -291,11 +386,18 @@ function TransitionButton(
     action,
     label,
     variant,
+    blocked,
   }: {
     emissionDataId: string;
     action: "SUBMIT_FOR_VERIFICATION" | "ACTIVATE" | "DISCARD";
     label: string;
     variant: "primary" | "secondary" | "destructive";
+    // Genuinely disables the button (not just visual discouragement) --
+    // the server-side gate in activateEmissionData is still the actual
+    // enforcement (manage-emission-data.ts), but the owner's directive
+    // is explicit the block must not be cosmetic: a disabled control is
+    // no more clickable than a rejected submit would be.
+    blocked?: boolean;
   },
 ) {
   const [
@@ -327,8 +429,11 @@ function TransitionButton(
         variant={variant}
         size="sm"
         loading={pending}
+        disabled={blocked}
         title={
-          state.status === "error" ? state.message : undefined
+          blocked
+            ? EVIDENCE_INCOMPLETE_NOTICE
+            : state.status === "error" ? state.message : undefined
         }
       >
         {label}
@@ -348,10 +453,18 @@ function VerifyButton(
     emissionDataId,
     label,
     variant,
+    blocked,
   }: {
     emissionDataId: string;
     label: string;
     variant: "primary" | "secondary" | "destructive";
+    // Genuinely disables the button when the record is Incomplete --
+    // see TransitionButton's own doc comment on the same prop. The
+    // server-side gate (verifyEmissionData's EVIDENCE_INCOMPLETE
+    // rejection, manage-emission-data.ts) is still the actual
+    // enforcement; this is what makes the block visibly, not just
+    // cosmetically, real in the UI too.
+    blocked: boolean;
   },
 ) {
   const [
@@ -377,8 +490,11 @@ function VerifyButton(
         variant={variant}
         size="sm"
         loading={pending}
+        disabled={blocked}
         title={
-          state.status === "error" ? state.message : undefined
+          blocked
+            ? EVIDENCE_INCOMPLETE_NOTICE
+            : state.status === "error" ? state.message : undefined
         }
       >
         {label}
