@@ -19,6 +19,7 @@ import {
 } from "../../../../components/shell/get-preferred-org-id";
 
 import {
+  getRegulatoryCountryMapper,
   getRegulatoryRepository,
 } from "../../../../src/infrastructure/regulatory/get-regulatory-repository";
 
@@ -31,6 +32,11 @@ import {
   transitionShipmentStatus,
 } from "../../../../src/application/shipments/transition-shipment";
 
+import {
+  determineLineEmissions,
+  redetermineLineEmissions,
+} from "../../../../src/application/emissions/resolve-line-emissions";
+
 import type {
   ShipmentTransitionAction,
 } from "../../../../src/domain/shipments/lifecycle";
@@ -38,6 +44,10 @@ import type {
 import type {
   LineActionState,
 } from "./action-state";
+
+import type {
+  ResolveEmissionsActionState,
+} from "./resolve-emissions-action-state";
 
 function lineMessageFor(
   reason: string,
@@ -76,6 +86,47 @@ function lineMessageFor(
     default:
       return "Something went wrong. Please try again.";
   }
+}
+
+function resolveEmissionsRejectionMessageFor(
+  reason: string,
+): string {
+  switch (reason) {
+    case "LINE_NOT_FOUND":
+      return "That line could not be found.";
+
+    case "SHIPMENT_NOT_EDITABLE":
+      return "This shipment is locked or void and can no longer be edited.";
+
+    default:
+      return "Something went wrong. Please try again.";
+  }
+}
+
+const UNRESOLVED_REASON_MESSAGES: Record<string, string> = {
+  REFERENCE_REQUIRED:
+    "The regulatory dataset requires a further reference for this exact combination -- it cannot be resolved automatically.",
+
+  UNAVAILABLE:
+    "The regulatory dataset has a record for this combination, but no usable emissions value.",
+
+  NOT_APPLICABLE:
+    "The regulatory dataset marks this combination as not applicable.",
+
+  AMBIGUOUS:
+    "More than one usable regulatory record matches this combination -- a production route may need to be specified.",
+
+  NO_MATCH:
+    "No regulatory default value exists for this combination, including the Other Countries and Territories fallback.",
+};
+
+function unresolvedMessageFor(
+  reason: string,
+): string {
+  return (
+    UNRESOLVED_REASON_MESSAGES[reason] ??
+    "This line's emissions could not be determined."
+  );
 }
 
 function transitionMessageFor(
@@ -362,6 +413,128 @@ export async function transitionShipmentAction(
     return {
       status: "error",
       message: transitionMessageFor(result.reason),
+    };
+  }
+
+  revalidatePath(
+    `/shipments/${parsed.data.shipmentId}`,
+  );
+
+  return {
+    status: "idle",
+  };
+}
+
+const resolveEmissionsSchema =
+  z.object({
+    lineId:
+      z.string().min(1),
+
+    shipmentId:
+      z.string().min(1),
+  });
+
+/**
+ * One action serves both first-time determination and re-determination
+ * (docs/plans/MASTER_PLAN.md §18: re-determination must be an explicit,
+ * audited action, never automatic on its own -- not that it needs a
+ * separate button from the user's point of view). It always tries
+ * determineLineEmissions first; ALREADY_DETERMINED means a
+ * determination already exists, so it retries as an explicit
+ * redetermineLineEmissions call, which persists its own, distinct audit
+ * event type. Both calls are triggered only by this explicit user
+ * action -- nothing here runs without the user clicking "Determine
+ * emissions" / "Re-determine emissions".
+ */
+export async function resolveEmissionsAction(
+  _previousState: ResolveEmissionsActionState,
+  formData: FormData,
+): Promise<ResolveEmissionsActionState> {
+  const parsed =
+    resolveEmissionsSchema.safeParse(
+      {
+        lineId: formData.get("lineId"),
+        shipmentId: formData.get("shipmentId"),
+      },
+    );
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Invalid request.",
+    };
+  }
+
+  const supabase =
+    await getServerSupabaseClient();
+
+  const orgSummary =
+    await getCurrentOrgSummary(
+      supabase,
+      await getPreferredOrgId(),
+    );
+
+  if (!orgSummary) {
+    return {
+      status: "error",
+      message: "You are not a member of an organization.",
+    };
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(
+      "/sign-in",
+    );
+  }
+
+  const repository =
+    getRegulatoryRepository();
+
+  const mapper =
+    getRegulatoryCountryMapper();
+
+  let result =
+    await determineLineEmissions(
+      supabase,
+      repository,
+      mapper,
+      orgSummary.context.org_id,
+      user.id as never,
+      parsed.data.lineId as never,
+    );
+
+  if (
+    result.status === "REJECTED" &&
+    result.reason === "ALREADY_DETERMINED"
+  ) {
+    result =
+      await redetermineLineEmissions(
+        supabase,
+        repository,
+        mapper,
+        orgSummary.context.org_id,
+        user.id as never,
+        parsed.data.lineId as never,
+      );
+  }
+
+  if (result.status === "REJECTED") {
+    return {
+      status: "error",
+      message: resolveEmissionsRejectionMessageFor(result.reason),
+    };
+  }
+
+  if (result.status === "UNRESOLVED") {
+    return {
+      status: "unresolved",
+      reason: result.resolution.reason,
+      trace: result.resolution.trace,
+      message: unresolvedMessageFor(result.resolution.reason),
     };
   }
 

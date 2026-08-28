@@ -9,10 +9,6 @@ import {
 } from "lucide-react";
 
 import {
-  Badge,
-} from "../../../../components/ui/badge";
-
-import {
   Button,
 } from "../../../../components/ui/button";
 
@@ -23,6 +19,10 @@ import {
 import {
   initialLineActionState,
 } from "./action-state";
+
+import {
+  EmissionsCell,
+} from "./emissions-cell";
 
 import type {
   ShipmentLine,
@@ -157,15 +157,11 @@ function LineRow(
       </td>
 
       <td className="px-4 py-2.5">
-        {line.emission_determination ? (
-          <Badge tone="success">
-            Determined
-          </Badge>
-        ) : (
-          <Badge tone="warning">
-            Not determined
-          </Badge>
-        )}
+        <EmissionsCell
+          shipmentId={shipmentId}
+          line={line}
+          editable={editable}
+        />
       </td>
 
       {editable ? (

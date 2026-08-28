@@ -81,8 +81,7 @@ export function TransitionActions(
       {status === "DRAFT" && lineCount > 0 ? (
         <p className="text-xs text-[var(--text-tertiary)]">
           Ready requires every line to have a resolved emission
-          determination -- not available until regulatory resolution
-          ships.
+          determination -- use "Determine" on each line below.
         </p>
       ) : null}
     </div>
