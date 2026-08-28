@@ -390,11 +390,25 @@ export class SupabaseRegulatoryRepository
           country.id,
       );
 
+    // Reaching zero candidates here means neither the requested country
+    // NOR OTHER_TERRITORIES ("_Other Countries and Territorie") came
+    // back from the query above. The fallback territory row is expected
+    // to always exist in the ACTIVE dataset -- it is protected by the
+    // schema's uniqueness/integrity design (see
+    // docs/architecture/DATABASE_SCHEMA.md), not something a legitimate
+    // request can cause to be absent. Its absence is a seed/integrity
+    // failure, not "no regulatory match" -- silently returning []  here
+    // would let the resolver report NO_MATCH for what is actually a
+    // broken dataset, which is exactly the kind of silent
+    // no-value-treated-as-fine outcome the regulatory subsystem must
+    // never produce.
     if (
       candidateCountryIds.length ===
       0
     ) {
-      return [];
+      throw new Error(
+        `Regulatory data integrity failure: neither "${requestedCountryName}" nor the required fallback territory "${OTHER_TERRITORIES}" was found in the ACTIVE dataset's countries table.`,
+      );
     }
 
 
