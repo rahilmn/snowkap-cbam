@@ -29,6 +29,10 @@ import {
 } from "../../../../src/application/shipments/get-shipment-detail";
 
 import {
+  getLatestCalculationsByShipment,
+} from "../../../../src/application/calculations/get-latest-calculations";
+
+import {
   formatReportingPeriod,
 } from "../../../../src/domain/shared/reporting-period";
 
@@ -87,6 +91,12 @@ export default async function ShipmentDetailPage(
       "/shipments",
     );
   }
+
+  const latestCalculations =
+    await getLatestCalculationsByShipment(
+      supabase,
+      shipment.id,
+    );
 
   const editable =
     shipment.status === "DRAFT" || shipment.status === "READY";
@@ -176,6 +186,7 @@ export default async function ShipmentDetailPage(
           shipmentId={shipment.id}
           lines={shipment.lines}
           editable={editable}
+          latestCalculations={latestCalculations}
         />
       </Card>
 

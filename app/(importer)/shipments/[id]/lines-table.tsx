@@ -24,19 +24,29 @@ import {
   EmissionsCell,
 } from "./emissions-cell";
 
+import {
+  CalculationCell,
+} from "./calculation-cell";
+
 import type {
   ShipmentLine,
 } from "../../../../src/domain/shipments/types";
+
+import type {
+  LatestLineCalculation,
+} from "../../../../src/application/calculations/get-latest-calculations";
 
 export function LinesTable(
   {
     shipmentId,
     lines,
     editable,
+    latestCalculations,
   }: {
     shipmentId: string;
     lines: ShipmentLine[];
     editable: boolean;
+    latestCalculations: Record<string, LatestLineCalculation>;
   },
 ) {
   if (lines.length === 0) {
@@ -77,6 +87,10 @@ export function LinesTable(
               Emissions
             </th>
 
+            <th className="px-4 py-2.5 font-medium">
+              Calculated
+            </th>
+
             {editable ? (
               <th className="px-4 py-2.5" />
             ) : null}
@@ -91,6 +105,7 @@ export function LinesTable(
                 shipmentId={shipmentId}
                 line={line}
                 editable={editable}
+                latestCalculation={latestCalculations[line.id]}
               />
             ),
           )}
@@ -105,10 +120,12 @@ function LineRow(
     shipmentId,
     line,
     editable,
+    latestCalculation,
   }: {
     shipmentId: string;
     line: ShipmentLine;
     editable: boolean;
+    latestCalculation: LatestLineCalculation | undefined;
   },
 ) {
   const [
@@ -161,6 +178,15 @@ function LineRow(
           shipmentId={shipmentId}
           line={line}
           editable={editable}
+        />
+      </td>
+
+      <td className="px-4 py-2.5">
+        <CalculationCell
+          shipmentId={shipmentId}
+          lineId={line.id}
+          editable={editable}
+          latestCalculation={latestCalculation}
         />
       </td>
 

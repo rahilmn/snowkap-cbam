@@ -37,6 +37,10 @@ import {
   redetermineLineEmissions,
 } from "../../../../src/application/emissions/resolve-line-emissions";
 
+import {
+  calculateLine,
+} from "../../../../src/application/calculations/calculate-line";
+
 import type {
   ShipmentTransitionAction,
 } from "../../../../src/domain/shipments/lifecycle";
@@ -127,6 +131,24 @@ function unresolvedMessageFor(
     UNRESOLVED_REASON_MESSAGES[reason] ??
     "This line's emissions could not be determined."
   );
+}
+
+function calculationStatusMessageFor(
+  status: string,
+): string {
+  switch (status) {
+    case "INPUT_UNRESOLVED":
+      return "Determine this line's emissions before calculating.";
+
+    case "VALUE_UNAVAILABLE":
+      return "The resolved value isn't usable for calculation.";
+
+    case "ACTUAL_METHOD_NOT_YET_SUPPORTED":
+      return "Calculation from actual emissions data isn't available yet.";
+
+    default:
+      return "This line could not be calculated.";
+  }
 }
 
 function transitionMessageFor(
@@ -535,6 +557,96 @@ export async function resolveEmissionsAction(
       reason: result.resolution.reason,
       trace: result.resolution.trace,
       message: unresolvedMessageFor(result.resolution.reason),
+    };
+  }
+
+  revalidatePath(
+    `/shipments/${parsed.data.shipmentId}`,
+  );
+
+  return {
+    status: "idle",
+  };
+}
+
+const calculateLineSchema =
+  z.object({
+    lineId:
+      z.string().min(1),
+
+    shipmentId:
+      z.string().min(1),
+  });
+
+export async function calculateLineAction(
+  _previousState: LineActionState,
+  formData: FormData,
+): Promise<LineActionState> {
+  const parsed =
+    calculateLineSchema.safeParse(
+      {
+        lineId: formData.get("lineId"),
+        shipmentId: formData.get("shipmentId"),
+      },
+    );
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Invalid request.",
+    };
+  }
+
+  const supabase =
+    await getServerSupabaseClient();
+
+  const orgSummary =
+    await getCurrentOrgSummary(
+      supabase,
+      await getPreferredOrgId(),
+    );
+
+  if (!orgSummary) {
+    return {
+      status: "error",
+      message: "You are not a member of an organization.",
+    };
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(
+      "/sign-in",
+    );
+  }
+
+  const result =
+    await calculateLine(
+      supabase,
+      orgSummary.context.org_id,
+      user.id as never,
+      parsed.data.lineId as never,
+    );
+
+  if (result.status === "REJECTED") {
+    return {
+      status: "error",
+      message:
+        result.reason === "LINE_NOT_FOUND"
+          ? "That line could not be found."
+          : "Something went wrong. Please try again.",
+    };
+  }
+
+  if (result.calculation.status !== "COMPUTED") {
+    return {
+      status: "error",
+      message: calculationStatusMessageFor(
+        result.calculation.status,
+      ),
     };
   }
 
