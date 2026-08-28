@@ -25,6 +25,10 @@ export default function HomePage() {
         { label: "Dashboard" },
       ]}
     >
+      <h1 className="mb-4 text-2xl font-semibold text-[var(--text-primary)]">
+        Dashboard
+      </h1>
+
       <Card className="max-w-xl">
         <CardHeader>
           <CardTitle>
