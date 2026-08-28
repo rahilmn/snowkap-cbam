@@ -23,12 +23,22 @@ export interface LayeringViolation {
 }
 
 const IMPORT_SPECIFIER_PATTERN =
-  /(?:from|import)\s+["']([^"']+)["']/g;
+  /import\s+(type\s+)?[^;]*?\s+from\s+["']([^"']+)["']|import\s+["']([^"']+)["']/g;
+
+export interface ImportSpecifier {
+  specifier: string;
+  // `import type {...} from "x"` (or `import type x from "y"`) has zero
+  // runtime coupling -- erased entirely at compile time. Distinguished
+  // so a rule can treat "depends on this package's TYPES for a
+  // dependency-injection parameter" differently from "actually calls
+  // into this package" -- see the src/application @supabase/ check.
+  isTypeOnly: boolean;
+}
 
 function extractImportSpecifiers(
   content: string,
-): string[] {
-  const specifiers: string[] =
+): ImportSpecifier[] {
+  const specifiers: ImportSpecifier[] =
     [];
 
   for (
@@ -37,11 +47,14 @@ function extractImportSpecifiers(
     )
   ) {
     const specifier =
-      match[1];
+      match[2] ?? match[3];
 
     if (specifier) {
       specifiers.push(
-        specifier,
+        {
+          specifier,
+          isTypeOnly: Boolean(match[1]),
+        },
       );
     }
   }
@@ -159,6 +172,22 @@ const APPLICATION_GRANDFATHERED_INFRASTRUCTURE_IMPORT =
   "src/infrastructure/regulatory/regulatory-repository";
 
 /**
+ * The Next.js<->Supabase *session* integration layer -- functionally
+ * the App Router equivalent of next/headers or next/cookies, not
+ * business infrastructure with meaningful swappable-adapter value the
+ * way SupabaseRegulatoryRepository has. UI (Server Components, Server
+ * Actions, middleware) legitimately constructs a session-scoped client
+ * directly; nothing else under src/infrastructure gets this exception
+ * -- the service-role client and any real adapter (regulatory,
+ * eventually shipments/emissions/etc.) still must not be reached from
+ * UI code directly.
+ */
+const UI_ALLOWED_INFRASTRUCTURE_IMPORTS = [
+  "src/infrastructure/supabase/server-client",
+  "src/infrastructure/supabase/browser-client",
+];
+
+/**
  * Route handlers are the sanctioned exception for direct infrastructure
  * access (docs/plans/MASTER_PLAN.md §28: "route handlers only for
  * streams (upload/download), health, and future webhooks") -- every
@@ -223,7 +252,7 @@ export function checkLayering(
       );
 
     for (
-      const specifier of specifiers
+      const { specifier, isTypeOnly } of specifiers
     ) {
       const relativeTarget =
         resolveRelativeSpecifier(
@@ -278,14 +307,17 @@ export function checkLayering(
           if (
             specifier.startsWith(
               "@supabase/",
-            )
+            ) &&
+            !isTypeOnly
           ) {
             violations.push(
               {
                 file: file.path,
                 message:
                   `src/application must not import "${specifier}" directly — ` +
-                  `Supabase access belongs in src/infrastructure, behind a port.`,
+                  `Supabase access belongs in src/infrastructure, behind a port. ` +
+                  `(A type-only "import type" is fine -- e.g. typing a client ` +
+                  `parameter for dependency injection has zero runtime coupling.)`,
               },
             );
           }
@@ -348,6 +380,9 @@ export function checkLayering(
           isUnderDirectory(
             relativeTarget,
             "src/infrastructure",
+          ) &&
+          !UI_ALLOWED_INFRASTRUCTURE_IMPORTS.includes(
+            relativeTarget,
           )
         ) {
           violations.push(
@@ -357,7 +392,9 @@ export function checkLayering(
                 `"${file.path}" must not import from "${relativeTarget}" — ` +
                 `UI (app/** outside app/api/**, and components/**) must reach ` +
                 `infrastructure through an application service, not directly. ` +
-                `Route handlers (app/api/**) are the sanctioned exception.`,
+                `Route handlers (app/api/**) and the session-scoped Supabase ` +
+                `clients (src/infrastructure/supabase/{server-client,browser-client}) ` +
+                `are the sanctioned exceptions.`,
             },
           );
         }

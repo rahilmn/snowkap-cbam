@@ -296,6 +296,82 @@ describe(
     );
 
     it(
+      "allows an application file to import @supabase/supabase-js's TYPES only (dependency injection)",
+      () => {
+        const files: SourceFile[] =
+          [
+            {
+              path: "src/application/widgets/get-widget.ts",
+              content:
+                `import type { SupabaseClient } from "@supabase/supabase-js";\n` +
+                `export async function getWidget(supabase: SupabaseClient) {}`,
+            },
+          ];
+
+        expect(
+          checkLayering(
+            files,
+          ),
+        ).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "still catches an application file with BOTH a type-only and a value import of @supabase/supabase-js",
+      () => {
+        const files: SourceFile[] =
+          [
+            {
+              path: "src/application/widgets/mixed.ts",
+              content:
+                `import type { SupabaseClient } from "@supabase/supabase-js";\n` +
+                `import { createClient } from "@supabase/supabase-js";`,
+            },
+          ];
+
+        expect(
+          checkLayering(
+            files,
+          ),
+        ).toHaveLength(
+          1,
+        );
+      },
+    );
+
+    it(
+      "allows the multi-line import type style this codebase actually uses",
+      () => {
+        // Matches the real formatting in
+        // src/application/organizations/get-current-org-context.ts --
+        // guards the IMPORT_SPECIFIER_PATTERN regex against only
+        // handling single-line imports.
+        const files: SourceFile[] =
+          [
+            {
+              path: "src/application/widgets/get-widget.ts",
+              content:
+                `import type {\n` +
+                `  SupabaseClient,\n` +
+                `} from "@supabase/supabase-js";\n` +
+                `\n` +
+                `export async function getWidget(supabase: SupabaseClient) {}`,
+            },
+          ];
+
+        expect(
+          checkLayering(
+            files,
+          ),
+        ).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
       "catches an application file importing an infrastructure adapter that is not the grandfathered port",
       () => {
         const files: SourceFile[] =
@@ -423,6 +499,55 @@ describe(
           ),
         ).toEqual(
           [],
+        );
+      },
+    );
+
+    it(
+      "allows UI to import the session-scoped Supabase clients directly",
+      () => {
+        const files: SourceFile[] =
+          [
+            {
+              path: "app/(auth)/actions.ts",
+              content:
+                `import { getServerSupabaseClient } from "../../src/infrastructure/supabase/server-client";`,
+            },
+            {
+              path: "components/widgets/live-widget.tsx",
+              content:
+                `import { getBrowserSupabaseClient } from "../../src/infrastructure/supabase/browser-client";`,
+            },
+          ];
+
+        expect(
+          checkLayering(
+            files,
+          ),
+        ).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "still catches UI importing the service-role Supabase client (not covered by the session-client exception)",
+      () => {
+        const files: SourceFile[] =
+          [
+            {
+              path: "app/widgets/page.tsx",
+              content:
+                `import { getSupabaseClient } from "../../src/infrastructure/supabase/client";`,
+            },
+          ];
+
+        expect(
+          checkLayering(
+            files,
+          ),
+        ).toHaveLength(
+          1,
         );
       },
     );
