@@ -27,6 +27,11 @@ import {
   initialEmissionDataScreenActionState,
 } from "./action-state";
 
+import {
+  EvidenceSection,
+  type EvidenceFileListItem,
+} from "./evidence-section";
+
 export interface EmissionDataListItem {
   id: string;
   installationName: string;
@@ -40,6 +45,7 @@ export interface EmissionDataListItem {
   status: "DRAFT" | "ACTIVE" | "SUPERSEDED" | "DISCARDED";
   rejectionReason: string | null;
   version: number;
+  evidenceFiles: EvidenceFileListItem[];
 }
 
 const STATUS_TONE: Record<EmissionDataListItem["status"], BadgeProps["tone"]> =
@@ -137,6 +143,22 @@ function EmissionDataRow(
           isAdmin={isAdmin}
         />
       </div>
+
+      {/*
+        Evidence attachment is available regardless of status/
+        verification_status -- unlike RecordActions above, which only
+        renders while status is DRAFT (see availableActions), evidence
+        is an append-only supporting-documents list that must stay
+        attachable at any point in a record's lifecycle, including
+        during/after verification review (see this session's migration
+        20260829240000_p7c_evidence_files_schema.sql's header comment
+        for why evidence_file_ids was deliberately excluded from
+        emission_data's own fact-immutability trigger).
+      */}
+      <EvidenceSection
+        emissionDataId={record.id}
+        files={record.evidenceFiles}
+      />
     </li>
   );
 }

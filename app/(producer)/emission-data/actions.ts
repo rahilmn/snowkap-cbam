@@ -27,6 +27,10 @@ import {
   verifyEmissionData,
 } from "../../../src/application/emissions/manage-emission-data";
 
+import {
+  removeEvidenceFile,
+} from "../../../src/application/evidence/upload-evidence";
+
 import type {
   ReportingPeriod,
 } from "../../../src/domain/shared/reporting-period";
@@ -328,6 +332,81 @@ export async function transitionEmissionDataAction(
     return {
       status: "error",
       message: transitionMessageFor(result.reason),
+    };
+  }
+
+  revalidatePath(
+    "/emission-data",
+  );
+
+  return {
+    status: "idle",
+  };
+}
+
+const removeEvidenceFileSchema =
+  z.object({
+    evidenceFileId:
+      z.string().min(1),
+  });
+
+function removeEvidenceFileMessageFor(
+  reason: string,
+): string {
+  switch (reason) {
+    case "NOT_FOUND":
+      return "That evidence file could not be found.";
+
+    case "STORAGE_DELETE_FAILED":
+      return "Could not remove the file from storage. Try again.";
+
+    default:
+      return "Something went wrong. Please try again.";
+  }
+}
+
+/**
+ * Ordinary MEMBER action -- no role check, same posture as
+ * transitionEmissionDataAction above (removing a wrongly-uploaded
+ * evidence file is not an ADMIN+-gated action, unlike verify/reject).
+ */
+export async function removeEvidenceFileAction(
+  _previousState: EmissionDataScreenActionState,
+  formData: FormData,
+): Promise<EmissionDataScreenActionState> {
+  const parsed =
+    removeEvidenceFileSchema.safeParse(
+      {
+        evidenceFileId: formData.get("evidenceFileId"),
+      },
+    );
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Invalid request.",
+    };
+  }
+
+  const setup =
+    await requireOrgAndUser();
+
+  if (setup.status === "error") {
+    return setup;
+  }
+
+  const result =
+    await removeEvidenceFile(
+      setup.supabase,
+      setup.orgSummary.context.org_id,
+      setup.user.id as never,
+      parsed.data.evidenceFileId as never,
+    );
+
+  if (result.status === "REJECTED") {
+    return {
+      status: "error",
+      message: removeEvidenceFileMessageFor(result.reason),
     };
   }
 

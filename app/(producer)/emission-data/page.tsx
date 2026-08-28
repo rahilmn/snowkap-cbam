@@ -35,6 +35,10 @@ import {
 } from "../../../src/application/emissions/manage-emission-data";
 
 import {
+  listEvidenceFiles,
+} from "../../../src/application/evidence/upload-evidence";
+
+import {
   formatReportingPeriod,
 } from "../../../src/domain/shared/reporting-period";
 
@@ -62,7 +66,7 @@ export default async function EmissionDataPage() {
     );
   }
 
-  const [installations, records] =
+  const [installations, records, evidenceFiles] =
     await Promise.all(
       [
         listInstallations(
@@ -70,6 +74,10 @@ export default async function EmissionDataPage() {
           orgSummary.context.org_id,
         ),
         listEmissionData(
+          supabase,
+          orgSummary.context.org_id,
+        ),
+        listEvidenceFiles(
           supabase,
           orgSummary.context.org_id,
         ),
@@ -84,6 +92,26 @@ export default async function EmissionDataPage() {
         ),
       ),
     );
+
+  const evidenceFilesByEmissionDataId =
+    new Map<string, typeof evidenceFiles>();
+
+  for (
+    const file of evidenceFiles
+  ) {
+    const existing =
+      evidenceFilesByEmissionDataId.get(file.emission_data_id) ??
+      [];
+
+    existing.push(
+      file,
+    );
+
+    evidenceFilesByEmissionDataId.set(
+      file.emission_data_id,
+      existing,
+    );
+  }
 
   return (
     <AppShell
@@ -141,6 +169,17 @@ export default async function EmissionDataPage() {
                   status: record.status,
                   rejectionReason: record.rejection_reason,
                   version: record.version,
+                  evidenceFiles: (evidenceFilesByEmissionDataId.get(record.id) ?? []).map(
+                    (file) => (
+                      {
+                        id: file.id,
+                        originalFilename: file.original_filename,
+                        sizeBytes: file.size_bytes,
+                        mimeType: file.mime_type,
+                        createdAt: file.created_at,
+                      }
+                    ),
+                  ),
                 }
               ),
             )}
