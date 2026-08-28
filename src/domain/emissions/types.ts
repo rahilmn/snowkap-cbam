@@ -37,6 +37,16 @@ import type {
  * where a real, listed country simply had no country-specific record
  * (resolver reason OTHER_COUNTRIES_FALLBACK) -- see
  * src/domain/emissions/build-resolution-snapshot.ts.
+ *
+ * KNOWN OPEN GAP (docs/plans/MASTER_PLAN.md §41, "EU-origin scope
+ * gate"): UNLISTED does not distinguish "a genuine third country
+ * simply absent from the dataset" from "an EU member state, which is
+ * out of CBAM scope entirely, not merely unlisted." Both currently
+ * resolve through the same R7 fallback. This is a deliberate,
+ * documented escalation -- not an oversight -- pending an owner
+ * decision on how an in-scope/out-of-scope determination should enter
+ * the system (it would need its own versioned regulatory dataset per
+ * CLAUDE.md's facts-as-datasets rule, never a hardcoded country list).
  */
 export type CountryMappingOutcome =
   | { status: "MAPPED"; regulatory_country_name: string }

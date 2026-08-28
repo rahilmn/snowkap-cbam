@@ -368,6 +368,7 @@ Per-phase: the §38 contract's acceptance + universal gates (typecheck, tests, r
 | Sentry/error tracking · log drain · rate-limit store · AV scanning · PITR tier · support-access runbook shape | P11 |
 | Production Supabase/Railway/DNS provisioning + go/no-go | P12 |
 | History rewrite for 45 MB `.git` (recommend defer; only before adding collaborators) | any |
+| **EU-origin scope gate for default-value resolution** -- CBAM applies only to goods imported from third countries; today a shipment line declaring an EU member state as origin is UNLISTED in the regulatory `countries` table and resolves through the R7 "Other Countries and Territories" fallback exactly like a genuine unlisted third country, producing a real, persisted determination for a movement that is arguably out of CBAM scope entirely (found in the P5 mandatory review, 2026-08-28; owner decision: escalate, do not patch -- the real fix needs an authoritative, versioned in-scope/out-of-scope country dataset per the facts-as-datasets rule, not a hardcoded EU list, and its own design pass, not a review-fix patch). See `src/domain/emissions/types.ts`'s `CountryMappingOutcome` doc comment. | before default-value resolution is relied on for real declarations |
 
 ## 42. Non-Goals
 
