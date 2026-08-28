@@ -144,6 +144,34 @@ function DecimalPill(
 }
 
 /**
+ * The DEFAULT-path button was previously labeled generic "Determine"/
+ * "Re-determine" regardless of the line's CURRENT determination method
+ * -- so a line already carrying a verified ACTUAL determination showed
+ * "Re-determine" on a button that, if clicked, silently replaces it
+ * with a DEFAULT (regulatory-resolution) value, with no label
+ * disclosing that a method switch -- not a refresh of the same kind of
+ * determination -- is about to happen (found in P7's mandatory
+ * review). The audit trail already records this correctly (S4: every
+ * redetermine records what the determination changed FROM), but the
+ * button itself gave no warning before the click. This function makes
+ * the label honest about which method it resolves via and, when it
+ * would replace an ACTUAL determination specifically, says so plainly.
+ */
+function defaultResolutionButtonLabel(
+  determination: ShipmentLine["emission_determination"],
+): string {
+  if (!determination) {
+    return "Resolve default value";
+  }
+
+  if (determination.method === "ACTUAL") {
+    return "Replace with default value";
+  }
+
+  return "Re-resolve default value";
+}
+
+/**
  * Deliberately does NOT resolve/display the grantor org's name for a
  * SHARED option -- see listAvailableActualEmissionData's own doc
  * comment (list-available-actual-data.ts) for why that's out of scope
@@ -238,7 +266,9 @@ export function EmissionsCell(
               size="sm"
               loading={pending}
             >
-              {determination ? "Re-determine" : "Determine"}
+              {defaultResolutionButtonLabel(
+                determination,
+              )}
             </Button>
           </form>
         ) : null}
