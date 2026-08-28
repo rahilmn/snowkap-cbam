@@ -1,8 +1,10 @@
 import "server-only";
 
 import type {
+  CbamGoodSummary,
   CodeLevel,
   DefaultValueResolutionInput,
+  ProductionRouteSummary,
   RegulatoryRecord,
   ValueStatus,
 } from "../../domain/regulatory/types";
@@ -16,7 +18,9 @@ import type {
   RegulatoryDatasetRow,
   RegulatoryEmissionValueRow,
   RegulatoryGoodRow,
+  RegulatoryGoodSummaryRow,
   RegulatoryRouteRow,
+  RegulatoryRouteSummaryRow,
 } from "./regulatory-database-types";
 
 import {
@@ -687,4 +691,164 @@ export class SupabaseRegulatoryRepository
       },
     );
   }
+
+
+  async findCbamGoodsByCode(
+    tradeCode: string,
+  ): Promise<CbamGoodSummary[]> {
+    const supabase =
+      getSupabaseClient();
+
+    const normalizedCode =
+      normalizeCode(
+        tradeCode,
+      );
+
+    const { data, error } =
+      await supabase
+        .from(
+          "cbam_goods",
+        )
+        .select(
+          "trade_code, trade_code_type, record_level, sector, description, functional_unit",
+        )
+        .eq(
+          "trade_code",
+          normalizedCode,
+        )
+        .limit(10);
+
+    if (error) {
+      throw new Error(
+        `Failed to load CBAM goods by code: ${error.message}`,
+      );
+    }
+
+    return (
+      (data ?? []) as unknown as RegulatoryGoodSummaryRow[]
+    ).map(
+      mapGoodSummary,
+    );
+  }
+
+
+  async searchCbamGoodsByPrefix(
+    prefix: string,
+    limit = 20,
+  ): Promise<CbamGoodSummary[]> {
+    const supabase =
+      getSupabaseClient();
+
+    const normalizedPrefix =
+      normalizeCode(
+        prefix,
+      );
+
+    const { data, error } =
+      await supabase
+        .from(
+          "cbam_goods",
+        )
+        .select(
+          "trade_code, trade_code_type, record_level, sector, description, functional_unit",
+        )
+        .eq(
+          "record_level",
+          "TRADE_GOOD",
+        )
+        .like(
+          "trade_code",
+          `${normalizedPrefix}%`,
+        )
+        .order(
+          "trade_code",
+        )
+        .limit(
+          limit,
+        );
+
+    if (error) {
+      throw new Error(
+        `Failed to search CBAM goods: ${error.message}`,
+      );
+    }
+
+    return (
+      (data ?? []) as unknown as RegulatoryGoodSummaryRow[]
+    ).map(
+      mapGoodSummary,
+    );
+  }
+
+
+  async findProductionRoutes(
+    sector?: string,
+  ): Promise<ProductionRouteSummary[]> {
+    const supabase =
+      getSupabaseClient();
+
+    let query =
+      supabase
+        .from(
+          "production_routes",
+        )
+        .select(
+          "name, source_route_indicator, sector",
+        )
+        .order(
+          "name",
+        );
+
+    if (sector) {
+      query =
+        query.eq(
+          "sector",
+          sector,
+        );
+    }
+
+    const { data, error } =
+      await query;
+
+    if (error) {
+      throw new Error(
+        `Failed to load production routes: ${error.message}`,
+      );
+    }
+
+    // A route with no source_route_indicator can never be passed to
+    // the resolver later (ADR-0010's contract), so it is not a usable
+    // picker option -- filtered out here rather than surfaced as a
+    // route the UI would let someone select and then be stuck with.
+    return (
+      (data ?? []) as unknown as RegulatoryRouteSummaryRow[]
+    )
+      .filter(
+        (route): route is RegulatoryRouteSummaryRow & { source_route_indicator: string } =>
+          route.source_route_indicator !== null,
+      )
+      .map(
+        (route) => (
+          {
+            name: route.name,
+            source_route_indicator: route.source_route_indicator,
+            sector: route.sector,
+          }
+        ),
+      );
+  }
+}
+
+
+function mapGoodSummary(
+  row: RegulatoryGoodSummaryRow,
+): CbamGoodSummary {
+  return {
+    trade_code: row.trade_code,
+    trade_code_type: row.trade_code_type,
+    record_level: row.record_level,
+    sector: row.sector,
+    description: row.description,
+    functional_unit: row.functional_unit,
+  };
 }

@@ -25,6 +25,27 @@ export interface RegulatoryRouteRow {
   source_route_indicator: string | null;
 }
 
+/**
+ * Separate from RegulatoryGoodRow (used by the existing, tested
+ * findActiveDefaultEmissionCandidates path, whose own .select() does
+ * not fetch functional_unit) -- additive, for the new P4 classification
+ * queries only, rather than widening an already-relied-upon row shape.
+ */
+export interface RegulatoryGoodSummaryRow {
+  trade_code: string;
+  trade_code_type: string;
+  record_level: string;
+  sector: string;
+  description: string;
+  functional_unit: string;
+}
+
+export interface RegulatoryRouteSummaryRow {
+  name: string;
+  source_route_indicator: string | null;
+  sector: string;
+}
+
 export interface RegulatoryEmissionValueRow {
   dataset_id: string;
   good_id: string;

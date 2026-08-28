@@ -81,3 +81,136 @@ describe.skipIf(!hasSupabaseEnvironment)(
     );
   },
 );
+
+// P4 classification queries (§20) -- same credentialed-only guard as
+// above; these read the same protected, real dataset.
+describe.skipIf(!hasSupabaseEnvironment)(
+  "SupabaseRegulatoryRepository classification queries",
+  () => {
+    it(
+      "finds an exact CBAM good by its declared trade code",
+      async () => {
+        const repository =
+          new SupabaseRegulatoryRepository();
+
+        const goods =
+          await repository.findCbamGoodsByCode(
+            "25232100",
+          );
+
+        expect(goods).toHaveLength(
+          1,
+        );
+
+        expect(goods[0]).toMatchObject(
+          {
+            trade_code: "25232100",
+            trade_code_type: "CN",
+            record_level: "TRADE_GOOD",
+            sector: "CEMENT",
+            functional_unit: "TONNES",
+          },
+        );
+      },
+    );
+
+    it(
+      "returns an empty array for a well-formed but non-existent code",
+      async () => {
+        const repository =
+          new SupabaseRegulatoryRepository();
+
+        const goods =
+          await repository.findCbamGoodsByCode(
+            "99999999",
+          );
+
+        expect(goods).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "searches CBAM goods by trade-code prefix, TRADE_GOOD level only",
+      async () => {
+        const repository =
+          new SupabaseRegulatoryRepository();
+
+        const goods =
+          await repository.searchCbamGoodsByPrefix(
+            "2523",
+          );
+
+        expect(
+          goods.length,
+        ).toBeGreaterThan(
+          0,
+        );
+
+        expect(
+          goods.every(
+            (good) =>
+              good.trade_code.startsWith(
+                "2523",
+              ) &&
+              good.record_level ===
+                "TRADE_GOOD",
+          ),
+        ).toBe(
+          true,
+        );
+      },
+    );
+
+    it(
+      "finds production routes, optionally narrowed by sector",
+      async () => {
+        const repository =
+          new SupabaseRegulatoryRepository();
+
+        const cementRoutes =
+          await repository.findProductionRoutes(
+            "CEMENT",
+          );
+
+        expect(
+          cementRoutes.length,
+        ).toBeGreaterThan(
+          0,
+        );
+
+        expect(
+          cementRoutes.every(
+            (route) =>
+              route.sector ===
+              "CEMENT",
+          ),
+        ).toBe(
+          true,
+        );
+
+        expect(
+          cementRoutes.some(
+            (route) =>
+              route.name ===
+                "GREY_CLINKER_CEMENT" &&
+              route.source_route_indicator ===
+                "(A)",
+          ),
+        ).toBe(
+          true,
+        );
+
+        const allRoutes =
+          await repository.findProductionRoutes();
+
+        expect(
+          allRoutes.length,
+        ).toBeGreaterThanOrEqual(
+          cementRoutes.length,
+        );
+      },
+    );
+  },
+);
