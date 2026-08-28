@@ -88,6 +88,26 @@ export async function transitionShipmentStatus(
     };
   }
 
+  // `orgId` is the caller's *active* org (from the client-writable
+  // preferred-org cookie, validated only as "a membership the caller
+  // has"), not necessarily the org that owns `shipmentId`. RLS alone
+  // still confines the eventual write to an org the caller belongs to,
+  // but without this check a caller whose active org is A, submitting a
+  // shipmentId that actually belongs to their other org B, would apply
+  // the transition to B's shipment and record the audit event under
+  // A's org_id -- a cross-aggregate audit misattribution. Same defect
+  // shape, same fix, as fetchLineForResolution in
+  // resolve-line-emissions.ts: rejecting as NOT_FOUND (not a more
+  // specific reason) matches how an out-of-scope id is treated
+  // everywhere else in this codebase -- it doesn't reveal that the id
+  // exists under a different org.
+  if ((shipmentRow as ShipmentRow).org_id !== orgId) {
+    return {
+      status: "REJECTED",
+      reason: "NOT_FOUND",
+    };
+  }
+
   const { data: lineRows, error: linesError } =
     await supabase
       .from("shipment_lines")

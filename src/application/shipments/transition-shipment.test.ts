@@ -142,6 +142,96 @@ describe(
     );
 
     it(
+      "reports NOT_FOUND when the shipment's org_id doesn't match the caller's active org (audit-attribution guard, see resolve-line-emissions.ts's fetchLineForResolution)",
+      async () => {
+        let updateCalled =
+          false;
+
+        let auditInsertCalled =
+          false;
+
+        const supabase =
+          {
+            from: (
+              table: string,
+            ) => {
+              if (table === "audit_events") {
+                return {
+                  insert: () => {
+                    auditInsertCalled = true;
+
+                    return Promise.resolve(
+                      { error: null },
+                    );
+                  },
+                };
+              }
+
+              if (table === "shipment_lines") {
+                return {
+                  select: () => (
+                    {
+                      eq: () =>
+                        Promise.resolve(
+                          { data: [], error: null },
+                        ),
+                    }
+                  ),
+                };
+              }
+
+              return {
+                select: () => (
+                  {
+                    eq: () => (
+                      {
+                        maybeSingle: () =>
+                          Promise.resolve(
+                            { data: { ...draftShipmentRow, org_id: "org-2" }, error: null },
+                          ),
+                      }
+                    ),
+                  }
+                ),
+
+                update: () => {
+                  updateCalled = true;
+
+                  return {
+                    eq: () =>
+                      Promise.resolve(
+                        { error: null },
+                      ),
+                  };
+                },
+              };
+            },
+          } as never;
+
+        const result =
+          await transitionShipmentStatus(
+            supabase,
+            orgId,
+            actorUserId,
+            shipmentId,
+            "VOID",
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "NOT_FOUND" },
+        );
+
+        expect(updateCalled).toBe(
+          false,
+        );
+
+        expect(auditInsertCalled).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
       "voids a DRAFT shipment regardless of line completeness",
       async () => {
         const result =
