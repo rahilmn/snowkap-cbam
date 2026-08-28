@@ -5,6 +5,10 @@ import type {
   RegulatoryRecord,
 } from "../../domain/regulatory/types";
 
+import type {
+  CountryMappingOutcome,
+} from "../../domain/emissions/types";
+
 export interface RegulatoryRepository {
   findActiveDefaultEmissionCandidates(
     input: DefaultValueResolutionInput,
@@ -43,4 +47,31 @@ export interface RegulatoryRepository {
   findProductionRoutes(
     sector?: string,
   ): Promise<ProductionRouteSummary[]>;
+}
+
+/**
+ * A separate, narrower port (docs/plans/MASTER_PLAN.md §10/§15) from
+ * RegulatoryRepository above -- translating a product-side ISO
+ * 3166-1 alpha-2 origin_country into the regulatory dataset's own
+ * country name is a distinct concern from fetching resolution
+ * candidates, even though the current adapter (P5) implements both by
+ * querying the same `countries` table. Kept in this file rather than
+ * a new one so it shares the existing grandfathered
+ * application-layer import exception (see
+ * tests/architecture/layering-rules.ts,
+ * APPLICATION_GRANDFATHERED_INFRASTRUCTURE_IMPORT) without widening
+ * that allowlist.
+ */
+export interface RegulatoryCountryMapper {
+  /**
+   * `isoCode` is a product-side CountryCode (src/domain/shared/country.ts)
+   * -- always the 2-letter, uppercase, format-validated ISO code, never
+   * a display name. Returns UNLISTED (never throws, never guesses) when
+   * the code has no row in `countries` at all -- expected and common
+   * for EU member states, since CBAM's default-value dataset only
+   * publishes country-specific values for non-EU trading partners.
+   */
+  mapCountry(
+    isoCode: string,
+  ): Promise<CountryMappingOutcome>;
 }

@@ -216,3 +216,68 @@ describe.skipIf(!hasSupabaseEnvironment)(
     );
   },
 );
+
+// P5 country mapping (§15) -- same credentialed-only guard as above;
+// these read the same protected, real dataset's `countries` table.
+describe.skipIf(!hasSupabaseEnvironment)(
+  "SupabaseRegulatoryRepository.mapCountry",
+  () => {
+    it(
+      "maps a listed non-EU trading partner's ISO code to its regulatory country name",
+      async () => {
+        const repository =
+          new SupabaseRegulatoryRepository();
+
+        const mapping =
+          await repository.mapCountry(
+            "CN",
+          );
+
+        expect(mapping).toEqual(
+          {
+            status: "MAPPED",
+            regulatory_country_name: "China",
+          },
+        );
+      },
+    );
+
+    it(
+      "reports UNLISTED for an EU member state (never a CBAM origin country)",
+      async () => {
+        const repository =
+          new SupabaseRegulatoryRepository();
+
+        const mapping =
+          await repository.mapCountry(
+            "DE",
+          );
+
+        expect(mapping).toEqual(
+          {
+            status: "UNLISTED",
+          },
+        );
+      },
+    );
+
+    it(
+      "reports UNLISTED for a well-formed but unrecognized ISO code",
+      async () => {
+        const repository =
+          new SupabaseRegulatoryRepository();
+
+        const mapping =
+          await repository.mapCountry(
+            "ZZ",
+          );
+
+        expect(mapping).toEqual(
+          {
+            status: "UNLISTED",
+          },
+        );
+      },
+    );
+  },
+);

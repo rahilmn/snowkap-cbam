@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  RegulatoryCountryMapper,
   RegulatoryRepository,
 } from "./regulatory-repository";
 
@@ -24,5 +25,15 @@ import {
  * as admin-client.ts's.
  */
 export function getRegulatoryRepository(): RegulatoryRepository {
+  return new SupabaseRegulatoryRepository();
+}
+
+/**
+ * Same sanctioned-factory reasoning as getRegulatoryRepository above,
+ * for the separate RegulatoryCountryMapper port (P5) --
+ * SupabaseRegulatoryRepository implements both, but callers depend on
+ * the narrower port type they actually need.
+ */
+export function getRegulatoryCountryMapper(): RegulatoryCountryMapper {
   return new SupabaseRegulatoryRepository();
 }

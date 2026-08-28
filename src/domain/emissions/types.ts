@@ -25,6 +25,24 @@ import type {
 } from "../regulatory/types";
 
 /**
+ * The outcome of translating a shipment line's ISO 3166-1 alpha-2
+ * origin_country into the regulatory dataset's own country name (see
+ * src/domain/shared/country.ts's CountryCode doc comment). MAPPED means
+ * the ISO code has its own row in the regulatory `countries` table;
+ * UNLISTED means it does not, in which case resolution proceeds
+ * directly against the "Other Countries and Territories" fallback
+ * geography (R7) rather than pretending the ISO code has a mapped
+ * name. Recorded on the snapshot so the explanation UI can honestly
+ * say *why* the fallback territory was used, distinct from the case
+ * where a real, listed country simply had no country-specific record
+ * (resolver reason OTHER_COUNTRIES_FALLBACK) -- see
+ * src/domain/emissions/build-resolution-snapshot.ts.
+ */
+export type CountryMappingOutcome =
+  | { status: "MAPPED"; regulatory_country_name: string }
+  | { status: "UNLISTED" };
+
+/**
  * A frozen copy of a regulatory default-value resolution, taken at the
  * moment a shipment line's emissions were determined. This is not a
  * reference to a regulatory record — it is a self-sufficient snapshot,
@@ -42,6 +60,8 @@ export interface RegulatoryResolutionSnapshot {
   dataset_version: string;
   resolved_at: IsoTimestamp;
   reason: ResolutionReason;
+
+  country_mapping: CountryMappingOutcome;
 
   record_identity: {
     source_sheet: string;

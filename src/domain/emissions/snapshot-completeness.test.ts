@@ -21,6 +21,8 @@ function completeRegulatoryResolutionSnapshot(): RegulatoryResolutionSnapshot {
     resolved_at: "2026-01-01T00:00:00.000Z" as RegulatoryResolutionSnapshot["resolved_at"],
     reason: "EXACT_CN8_MATCH",
 
+    country_mapping: { status: "MAPPED", regulatory_country_name: "India" },
+
     record_identity: {
       source_sheet: "Iron and steel",
       source_row: 42,

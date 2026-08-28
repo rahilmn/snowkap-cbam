@@ -10,10 +10,16 @@ import type {
 } from "../../domain/regulatory/types";
 
 import type {
+  CountryMappingOutcome,
+} from "../../domain/emissions/types";
+
+import type {
+  RegulatoryCountryMapper,
   RegulatoryRepository,
 } from "./regulatory-repository";
 
 import type {
+  RegulatoryCountryMappingRow,
   RegulatoryCountryRow,
   RegulatoryDatasetRow,
   RegulatoryEmissionValueRow,
@@ -212,7 +218,7 @@ function mapRecord(
 
 
 export class SupabaseRegulatoryRepository
-  implements RegulatoryRepository
+  implements RegulatoryRepository, RegulatoryCountryMapper
 {
   async findActiveDefaultEmissionCandidates(
     input: DefaultValueResolutionInput,
@@ -857,6 +863,55 @@ export class SupabaseRegulatoryRepository
           }
         ),
       );
+  }
+
+  async mapCountry(
+    isoCode: string,
+  ): Promise<CountryMappingOutcome> {
+    const supabase =
+      getSupabaseClient();
+
+    const { data, error } =
+      await supabase
+        .from(
+          "countries",
+        )
+        .select(
+          "name",
+        )
+        .eq(
+          "iso2",
+          isoCode,
+        )
+        .eq(
+          "country_type",
+          "COUNTRY",
+        )
+        .eq(
+          "active",
+          true,
+        )
+        .maybeSingle();
+
+    if (error) {
+      throw new Error(
+        `Failed to look up regulatory country mapping for "${isoCode}": ${error.message}`,
+      );
+    }
+
+    const row =
+      data as RegulatoryCountryMappingRow | null;
+
+    if (!row) {
+      return {
+        status: "UNLISTED",
+      };
+    }
+
+    return {
+      status: "MAPPED",
+      regulatory_country_name: row.name,
+    };
   }
 }
 

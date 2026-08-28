@@ -10,6 +10,14 @@ export interface RegulatoryCountryRow {
   name: string;
 }
 
+/**
+ * For RegulatoryCountryMapper.mapCountry (P5) -- a lookup by iso2, not
+ * by name/id, so it carries only the one column that lookup needs.
+ */
+export interface RegulatoryCountryMappingRow {
+  name: string;
+}
+
 export interface RegulatoryGoodRow {
   id: string;
   trade_code: string;
