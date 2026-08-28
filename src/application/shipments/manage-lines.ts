@@ -395,7 +395,7 @@ export async function updateLine(
     await supabase
       .from("shipment_lines")
       .select(
-        "shipment_id, shipments(release_date)",
+        "shipment_id, emission_determination, shipments(release_date)",
       )
       .eq("id", lineId)
       .maybeSingle();
@@ -413,6 +413,9 @@ export async function updateLine(
       reason: "SHIPMENT_NOT_FOUND",
     };
   }
+
+  const existingDetermination =
+    (lineRow as { emission_determination: unknown }).emission_determination;
 
   const shipmentsRelation =
     (lineRow as { shipments: { release_date: string } | { release_date: string }[] | null }).shipments;
@@ -457,6 +460,15 @@ export async function updateLine(
           ),
           production_route_name: resolved.productionRoute?.name ?? null,
           production_route_indicator: resolved.productionRoute?.source_route_indicator ?? null,
+
+          // A determination is frozen against the declared code/origin/
+          // quantity/route it was computed for -- editing any of those
+          // makes it stale, so it is always cleared here rather than
+          // carried forward silently attached to different inputs
+          // (found in P5 review). Re-determining is then an explicit
+          // action via src/application/emissions/resolve-line-emissions.ts,
+          // same as for a brand-new line.
+          emission_determination: null,
         },
       )
       .eq("id", lineId)
@@ -498,6 +510,7 @@ export async function updateLine(
         shipment_id: line.shipment_id,
         line_number: line.line_number,
         cn_code: line.cn_code,
+        determination_cleared: existingDetermination !== null,
       },
     },
   );

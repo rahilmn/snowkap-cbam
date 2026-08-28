@@ -103,6 +103,7 @@ function mockSupabase(
     insertResult,
     updateResult,
     deleteResult,
+    updatePayloads = [] as unknown[],
   }: {
     shipmentResult?: { data: unknown; error: unknown };
     lineFetchResult?: { data: unknown; error: unknown };
@@ -110,6 +111,7 @@ function mockSupabase(
     insertResult?: { data: unknown; error: unknown };
     updateResult?: { data: unknown; error: unknown };
     deleteResult?: { data: unknown; error: unknown };
+    updatePayloads?: unknown[];
   },
 ) {
   return {
@@ -186,8 +188,14 @@ function mockSupabase(
           }
         ),
 
-        update: () => (
-          {
+        update: (
+          payload: unknown,
+        ) => {
+          updatePayloads.push(
+            payload,
+          );
+
+          return {
             eq: () => (
               {
                 select: () => (
@@ -200,8 +208,8 @@ function mockSupabase(
                 ),
               }
             ),
-          }
-        ),
+          };
+        },
 
         delete: () => (
           {
@@ -490,6 +498,44 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "SHIPMENT_NOT_FOUND" },
+        );
+      },
+    );
+
+    it(
+      "clears an existing emission_determination -- editing the declared inputs invalidates it (found in P5 review)",
+      async () => {
+        const updatePayloads: unknown[] =
+          [];
+
+        const result =
+          await updateLine(
+            mockSupabase(
+              {
+                lineFetchResult: {
+                  data: {
+                    shipment_id: "ship-1",
+                    shipments: { release_date: "2026-03-15" },
+                  },
+                  error: null,
+                },
+                updateResult: { data: lineRow, error: null },
+                updatePayloads,
+              },
+            ),
+            mockRepository(),
+            orgId,
+            actorUserId,
+            lineId,
+            validInput,
+          );
+
+        expect(result.status).toBe(
+          "OK",
+        );
+
+        expect(updatePayloads[0]).toMatchObject(
+          { emission_determination: null },
         );
       },
     );

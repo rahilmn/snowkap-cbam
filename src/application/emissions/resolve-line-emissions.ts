@@ -61,14 +61,29 @@ export type ResolveLineEmissionsResult =
   | { status: "REJECTED"; reason: ResolveLineEmissionsRejectionReason };
 
 interface LineForResolution {
+  org_id: string;
   cn_code: string;
   origin_country: string;
   production_route_indicator: string | null;
   emission_determination: EmissionDetermination | null;
 }
 
+/**
+ * `orgId` is the caller's *active* org (from the client-writable
+ * preferred-org cookie, validated only as "a membership the caller
+ * has" -- see get-current-org-context.ts), not necessarily the org
+ * that owns `lineId`. RLS alone still confines the eventual write to
+ * an org the caller belongs to, but without this check a caller whose
+ * active org is A, submitting a lineId that actually belongs to their
+ * other org B, would write B's determination and audit event under
+ * A's org_id -- a cross-aggregate audit misattribution, found in
+ * review. Rejecting as LINE_NOT_FOUND (not a more specific reason)
+ * matches how an out-of-scope id is treated everywhere else in this
+ * codebase -- it doesn't reveal that the id exists under a different org.
+ */
 async function fetchLineForResolution(
   supabase: SupabaseClient,
+  orgId: OrganizationId,
   lineId: ShipmentLineId,
 ): Promise<
   | { status: "OK"; line: LineForResolution }
@@ -78,7 +93,7 @@ async function fetchLineForResolution(
     await supabase
       .from("shipment_lines")
       .select(
-        "cn_code, origin_country, production_route_indicator, emission_determination",
+        "org_id, cn_code, origin_country, production_route_indicator, emission_determination",
       )
       .eq("id", lineId)
       .maybeSingle();
@@ -97,9 +112,19 @@ async function fetchLineForResolution(
     };
   }
 
+  const line =
+    data as LineForResolution;
+
+  if (line.org_id !== orgId) {
+    return {
+      status: "REJECTED",
+      reason: "LINE_NOT_FOUND",
+    };
+  }
+
   return {
     status: "OK",
-    line: data as LineForResolution,
+    line,
   };
 }
 
@@ -141,6 +166,7 @@ async function performResolution(
   const fetched =
     await fetchLineForResolution(
       supabase,
+      orgId,
       lineId,
     );
 
@@ -205,15 +231,36 @@ async function performResolution(
       resolution: snapshot,
     };
 
-  const { data, error } =
-    await supabase
+  // For a first-time determination, .is("emission_determination", null)
+  // makes this a compare-and-swap the database enforces: the earlier
+  // in-memory check above (line.emission_determination is still null)
+  // is only advisory against a concurrent second submit racing between
+  // that read and this write -- without this predicate, two concurrent
+  // "Determine" clicks would both pass the in-memory check and the
+  // second write would silently clobber the first while still logging
+  // an unqualified emission_determination.set (found in review).
+  // redetermineLineEmissions (allowOverwrite: true) intentionally omits
+  // it -- overwriting an existing determination is exactly its job.
+  let query =
+    supabase
       .from("shipment_lines")
       .update(
         {
           emission_determination: determination,
         },
       )
-      .eq("id", lineId)
+      .eq("id", lineId);
+
+  if (!options.allowOverwrite) {
+    query =
+      query.is(
+        "emission_determination",
+        null,
+      );
+  }
+
+  const { data, error } =
+    await query
       .select(
         SHIPMENT_LINE_COLUMNS,
       )
@@ -227,9 +274,29 @@ async function performResolution(
   }
 
   if (!data) {
-    // RLS silently excludes the row when the parent shipment is
-    // LOCKED/VOID (shipment_lines_update_parent_not_terminal), same
-    // idiom as manage-lines.ts's updateLine.
+    // Zero rows with no error has two possible causes here: the parent
+    // shipment is LOCKED/VOID (RLS silently excludes the row -- same
+    // idiom as manage-lines.ts's updateLine), or -- only possible when
+    // the CAS predicate above was applied -- another request set the
+    // determination in the race window between this call's own read
+    // and write. Re-reading distinguishes them rather than reporting a
+    // blanket SHIPMENT_NOT_EDITABLE for what is actually a lost race.
+    if (!options.allowOverwrite) {
+      const recheck =
+        await fetchLineForResolution(
+          supabase,
+          orgId,
+          lineId,
+        );
+
+      if (recheck.status === "OK" && recheck.line.emission_determination) {
+        return {
+          status: "REJECTED",
+          reason: "ALREADY_DETERMINED",
+        };
+      }
+    }
+
     return {
       status: "REJECTED",
       reason: "SHIPMENT_NOT_EDITABLE",

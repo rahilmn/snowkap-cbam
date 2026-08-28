@@ -34,6 +34,7 @@ const lineId =
 
 const lineRow =
   {
+    org_id: "org-1",
     cn_code: "25232100",
     origin_country: "CN",
     production_route_indicator: null,
@@ -114,12 +115,25 @@ function mockMapper(
 function mockSupabase(
   {
     lineFetchResult = { data: lineRow, error: null },
+    // The recheck fetch (fetchLineForResolution called a second time
+    // after a 0-row CAS update, see resolve-line-emissions.ts) reuses
+    // lineFetchResult unless a test needs the second read to see
+    // different state -- e.g. simulating a determination that another
+    // request set in the race window between the first read and the
+    // write.
+    recheckFetchResult,
     updateResult,
+    updateCalls = [] as { predicate: "none" | "is_null"; payload: unknown }[],
   }: {
     lineFetchResult?: { data: unknown; error: unknown };
+    recheckFetchResult?: { data: unknown; error: unknown };
     updateResult?: { data: unknown; error: unknown };
+    updateCalls?: { predicate: "none" | "is_null"; payload: unknown }[];
   },
 ) {
+  let selectCallCount =
+    0;
+
   return {
     from: (
       table: string,
@@ -138,25 +152,56 @@ function mockSupabase(
           {
             eq: () => (
               {
-                maybeSingle: () =>
-                  Promise.resolve(
-                    lineFetchResult,
-                  ),
+                maybeSingle: () => {
+                  selectCallCount += 1;
+
+                  const result =
+                    selectCallCount === 1
+                      ? lineFetchResult
+                      : (recheckFetchResult ?? lineFetchResult);
+
+                  return Promise.resolve(
+                    result,
+                  );
+                },
               }
             ),
           }
         ),
 
-        update: () => (
+        update: (
+          payload: unknown,
+        ) => (
           {
             eq: () => (
               {
-                select: () => (
-                  {
+                select: () => {
+                  updateCalls.push(
+                    { predicate: "none", payload },
+                  );
+
+                  return {
                     maybeSingle: () =>
                       Promise.resolve(
                         updateResult,
                       ),
+                  };
+                },
+
+                is: () => (
+                  {
+                    select: () => {
+                      updateCalls.push(
+                        { predicate: "is_null", payload },
+                      );
+
+                      return {
+                        maybeSingle: () =>
+                          Promise.resolve(
+                            updateResult,
+                          ),
+                      };
+                    },
                   }
                 ),
               }
@@ -486,6 +531,210 @@ describe(
         );
       },
     );
+
+    it(
+      "reports ALREADY_DETERMINED (not SHIPMENT_NOT_EDITABLE) when a concurrent request wins the race",
+      async () => {
+        // The CAS update (.is("emission_determination", null)) affects
+        // 0 rows because another request set the determination between
+        // this call's own read and write -- the recheck fetch must see
+        // that and report the specific, correct reason rather than the
+        // generic SHIPMENT_NOT_EDITABLE.
+        const result =
+          await determineLineEmissions(
+            mockSupabase(
+              {
+                updateResult: { data: null, error: null },
+                recheckFetchResult: {
+                  data: {
+                    ...lineRow,
+                    emission_determination: { method: "DEFAULT", resolution: {} },
+                  },
+                  error: null,
+                },
+              },
+            ),
+            mockRepository(
+              [record()],
+            ),
+            mockMapper(
+              { status: "MAPPED", regulatory_country_name: "China" },
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "ALREADY_DETERMINED" },
+        );
+      },
+    );
+
+    it(
+      "sends the CAS predicate (.is emission_determination null) only for first-time determination",
+      async () => {
+        const updateCalls: { predicate: "none" | "is_null"; payload: unknown }[] =
+          [];
+
+        await determineLineEmissions(
+          mockSupabase(
+            {
+              updateResult: { data: { ...lineRow, id: "line-1" }, error: null },
+              updateCalls,
+            },
+          ),
+          mockRepository(
+            [record()],
+          ),
+          mockMapper(
+            { status: "MAPPED", regulatory_country_name: "China" },
+          ),
+          orgId,
+          actorUserId,
+          lineId,
+        );
+
+        expect(updateCalls).toHaveLength(
+          1,
+        );
+
+        expect(updateCalls[0]?.predicate).toBe(
+          "is_null",
+        );
+      },
+    );
+
+    it(
+      "persists the frozen snapshot (not the raw resolution) as emission_determination",
+      async () => {
+        const updateCalls: { predicate: "none" | "is_null"; payload: unknown }[] =
+          [];
+
+        await determineLineEmissions(
+          mockSupabase(
+            {
+              updateResult: { data: { ...lineRow, id: "line-1" }, error: null },
+              updateCalls,
+            },
+          ),
+          mockRepository(
+            [record()],
+          ),
+          mockMapper(
+            { status: "MAPPED", regulatory_country_name: "China" },
+          ),
+          orgId,
+          actorUserId,
+          lineId,
+        );
+
+        const payload =
+          updateCalls[0]?.payload as { emission_determination: { method: string; resolution: { country_mapping: unknown } } };
+
+        expect(payload.emission_determination.method).toBe(
+          "DEFAULT",
+        );
+
+        expect(payload.emission_determination.resolution.country_mapping).toEqual(
+          { status: "MAPPED", regulatory_country_name: "China" },
+        );
+      },
+    );
+
+    it(
+      "rejects LINE_NOT_FOUND (not ALREADY_DETERMINED/etc) when the line belongs to a different org than the caller's active org",
+      async () => {
+        let repositoryQueried =
+          false;
+
+        const repository =
+          mockRepository(
+            [record()],
+          );
+
+        repository.findActiveDefaultEmissionCandidates =
+          () => {
+            repositoryQueried = true;
+
+            return Promise.resolve(
+              [record()],
+            );
+          };
+
+        const result =
+          await determineLineEmissions(
+            mockSupabase(
+              {
+                lineFetchResult: {
+                  data: { ...lineRow, org_id: "org-2" },
+                  error: null,
+                },
+              },
+            ),
+            repository,
+            mockMapper(
+              { status: "MAPPED", regulatory_country_name: "China" },
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "LINE_NOT_FOUND" },
+        );
+
+        expect(repositoryQueried).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "resolves via an exact route-specific match when the line has a production route",
+      async () => {
+        const routeRecord =
+          record(
+            { source_production_route_code: "(A)" },
+          );
+
+        const result =
+          await determineLineEmissions(
+            mockSupabase(
+              {
+                lineFetchResult: {
+                  data: { ...lineRow, production_route_indicator: "(A)" },
+                  error: null,
+                },
+                updateResult: {
+                  data: { ...lineRow, id: "line-1", production_route_indicator: "(A)" },
+                  error: null,
+                },
+              },
+            ),
+            mockRepository(
+              [routeRecord],
+            ),
+            mockMapper(
+              { status: "MAPPED", regulatory_country_name: "China" },
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+          );
+
+        expect(result.status).toBe(
+          "DETERMINED",
+        );
+
+        expect(
+          result.status === "DETERMINED" ? result.resolution.reason : null,
+        ).toBe(
+          "EXACT_CN8_MATCH",
+        );
+      },
+    );
   },
 );
 
@@ -539,6 +788,47 @@ describe(
 
         expect(result.status).toBe(
           "DETERMINED",
+        );
+      },
+    );
+
+    it(
+      "sends no CAS predicate -- an explicit override is allowed to overwrite",
+      async () => {
+        const updateCalls: { predicate: "none" | "is_null"; payload: unknown }[] =
+          [];
+
+        await redetermineLineEmissions(
+          mockSupabase(
+            {
+              lineFetchResult: {
+                data: {
+                  ...lineRow,
+                  emission_determination: { method: "DEFAULT", resolution: {} },
+                },
+                error: null,
+              },
+              updateResult: { data: { ...lineRow, id: "line-1" }, error: null },
+              updateCalls,
+            },
+          ),
+          mockRepository(
+            [record()],
+          ),
+          mockMapper(
+            { status: "MAPPED", regulatory_country_name: "China" },
+          ),
+          orgId,
+          actorUserId,
+          lineId,
+        );
+
+        expect(updateCalls).toHaveLength(
+          1,
+        );
+
+        expect(updateCalls[0]?.predicate).toBe(
+          "none",
         );
       },
     );
