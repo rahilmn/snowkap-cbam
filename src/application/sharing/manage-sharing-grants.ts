@@ -340,7 +340,16 @@ export async function acceptSharingGrant(
     return transition;
   }
 
-  const { error } =
+  // .eq("status", "INVITED") makes this a compare-and-swap the database
+  // enforces: without it, if the grant is concurrently revoked between
+  // the fetch above and this UPDATE, sharing_grants_update_grantee_accept's
+  // own USING clause (20260829260000) silently excludes the now-REVOKED
+  // row -- supabase-js returns {error: null, data: null} for a zero-row
+  // UPDATE, not an error, so this function would otherwise report OK and
+  // record a sharing_grant.accepted audit event for an accept that never
+  // actually happened (found in P7's mandatory review; same CAS shape
+  // determine-from-actual-data.ts's performDetermination already uses).
+  const { data, error } =
     await supabase
       .from("sharing_grants")
       .update(
@@ -348,12 +357,24 @@ export async function acceptSharingGrant(
           status: transition.grant.status,
         },
       )
-      .eq("id", grantId);
+      .eq("id", grantId)
+      .eq("status", "INVITED")
+      .select(
+        SHARING_GRANT_COLUMNS,
+      )
+      .maybeSingle();
 
   if (error) {
     return {
       status: "REJECTED",
       reason: "PERSIST_FAILED",
+    };
+  }
+
+  if (!data) {
+    return {
+      status: "REJECTED",
+      reason: "GRANT_NOT_INVITED",
     };
   }
 
@@ -374,7 +395,9 @@ export async function acceptSharingGrant(
 
   return {
     status: "OK",
-    grant: transition.grant,
+    grant: toSharingGrant(
+      data as SharingGrantRow,
+    ),
   };
 }
 
@@ -424,7 +447,14 @@ export async function revokeSharingGrant(
     return transition;
   }
 
-  const { error } =
+  // Same CAS reasoning as acceptSharingGrant's own comment: without
+  // .eq("status", fetched.grant.status), a concurrent transition on this
+  // grant (e.g. it expires, or -- once an EXPIRE job exists -- races
+  // against it) between the fetch above and this UPDATE would have
+  // sharing_grants_update_grantor_revoke's USING clause silently exclude
+  // an already-terminal row, and this function would otherwise report OK
+  // and audit a revoke that never happened.
+  const { data, error } =
     await supabase
       .from("sharing_grants")
       .update(
@@ -432,12 +462,24 @@ export async function revokeSharingGrant(
           status: transition.grant.status,
         },
       )
-      .eq("id", grantId);
+      .eq("id", grantId)
+      .eq("status", fetched.grant.status)
+      .select(
+        SHARING_GRANT_COLUMNS,
+      )
+      .maybeSingle();
 
   if (error) {
     return {
       status: "REJECTED",
       reason: "PERSIST_FAILED",
+    };
+  }
+
+  if (!data) {
+    return {
+      status: "REJECTED",
+      reason: "ALREADY_TERMINAL",
     };
   }
 
@@ -458,6 +500,8 @@ export async function revokeSharingGrant(
 
   return {
     status: "OK",
-    grant: transition.grant,
+    grant: toSharingGrant(
+      data as SharingGrantRow,
+    ),
   };
 }

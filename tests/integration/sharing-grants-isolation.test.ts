@@ -100,6 +100,7 @@ describe.skipIf(!localSupabaseReachable)(
     let clientImporterMember: SupabaseClient;
     let clientStrangerOwner: SupabaseClient;
 
+    let operatorId: string;
     let installationId: string;
     let activeVerifiedEmissionDataId: string;
     let grantId: string;
@@ -298,6 +299,9 @@ describe.skipIf(!localSupabaseReachable)(
         );
       }
 
+      operatorId =
+        operator.id;
+
       const { data: installation, error: installationError } =
         await clientProducerOwner
           .from("installations")
@@ -358,6 +362,8 @@ describe.skipIf(!localSupabaseReachable)(
                 methodology: "EU_METHOD",
                 status: fixture.status,
                 verification_status: fixture.verification_status,
+                verifier_user_id:
+                  fixture.verification_status === "VERIFIED" ? producerOwnerId : null,
               },
             )
             .select("id")
@@ -677,12 +683,20 @@ describe.skipIf(!localSupabaseReachable)(
           [],
         );
 
+        // Uses the GRANTOR's real operatorId (not a bogus/nonexistent
+        // one) -- an invalid FK would fail before RLS is ever consulted
+        // and would prove nothing about the write boundary this test
+        // exists to check (found and fixed during P7's mandatory
+        // cross-organization-sharing review). This must be denied by
+        // installations_insert_own_org's own EXISTS clause
+        // (20260829220000: operator_id's own org_id must match the
+        // INSERT's org_id), not by a foreign-key violation.
         const { error: insertError } =
           await clientImporterMember
             .from("installations")
             .insert(
               {
-                operator_id: installationId,
+                operator_id: operatorId,
                 org_id: importerOrgId,
                 provenance: "IMPORTER_ENTERED",
                 name: "Should never be allowed",
@@ -691,6 +705,10 @@ describe.skipIf(!localSupabaseReachable)(
             );
 
         expect(insertError).not.toBeNull();
+
+        expect(insertError?.message).not.toContain(
+          "foreign key",
+        );
       },
     );
 

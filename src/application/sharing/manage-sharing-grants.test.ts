@@ -451,7 +451,10 @@ describe(
           await acceptSharingGrant(
             makeMockSupabase(
               {
-                sharing_grants: { data: baseRow, error: null },
+                sharing_grants: [
+                  { data: baseRow, error: null },
+                  { data: { ...baseRow, status: "ACTIVE" }, error: null },
+                ],
               },
             ),
             granteeMemberContext,
@@ -463,6 +466,40 @@ describe(
             status: "OK",
             grant: expect.objectContaining({ status: "ACTIVE", grantee_org_id: "org-2" }),
           },
+        );
+      },
+    );
+
+    it(
+      "rejects GRANT_NOT_INVITED (not a silent OK) when the CAS predicate matches zero rows -- e.g. the grant was concurrently revoked between fetch and update",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await acceptSharingGrant(
+            makeMockSupabase(
+              {
+                sharing_grants: [
+                  { data: baseRow, error: null },
+                  { data: null, error: null },
+                ],
+                audit_events: { data: null, error: null },
+              },
+              recorder,
+            ),
+            granteeMemberContext,
+            "grant-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "GRANT_NOT_INVITED" },
+        );
+
+        expect(
+          recorder.ops.some((op) => op.table === "audit_events"),
+        ).toBe(
+          false,
         );
       },
     );
@@ -572,7 +609,10 @@ describe(
           await revokeSharingGrant(
             makeMockSupabase(
               {
-                sharing_grants: { data: baseRow, error: null },
+                sharing_grants: [
+                  { data: baseRow, error: null },
+                  { data: { ...baseRow, status: "REVOKED" }, error: null },
+                ],
               },
             ),
             adminContext,
@@ -581,6 +621,40 @@ describe(
 
         expect(result).toEqual(
           { status: "OK", grant: expect.objectContaining({ status: "REVOKED" }) },
+        );
+      },
+    );
+
+    it(
+      "rejects ALREADY_TERMINAL (not a silent OK) when the CAS predicate matches zero rows -- e.g. the grant reached a terminal state between fetch and update",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await revokeSharingGrant(
+            makeMockSupabase(
+              {
+                sharing_grants: [
+                  { data: baseRow, error: null },
+                  { data: null, error: null },
+                ],
+                audit_events: { data: null, error: null },
+              },
+              recorder,
+            ),
+            adminContext,
+            "grant-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "ALREADY_TERMINAL" },
+        );
+
+        expect(
+          recorder.ops.some((op) => op.table === "audit_events"),
+        ).toBe(
+          false,
         );
       },
     );
