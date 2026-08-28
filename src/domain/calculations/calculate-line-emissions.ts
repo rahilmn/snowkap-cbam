@@ -22,6 +22,28 @@ const DEFAULT_RULE_REF =
 const ACTUAL_RULE_REF =
   "RULE-EE-009";
 
+/**
+ * Owner-directed interim gate (2026-08-29,
+ * docs/regulatory/CALCULATION_RULE_REGISTER.md, RULE-EE-009's own
+ * Exceptions bullet): RULE-EE-004 requires Annex II goods (iron &
+ * steel, aluminium -- Article 7(1) sentence 2) to use direct emissions
+ * only, but RULE-EE-009 unconditionally sums direct+indirect and there
+ * is no Annex II CN-code-list dataset anywhere in this schema to gate
+ * a precise per-good exception -- only the coarser `sector` field
+ * already on every `cbam_goods` row in the regulatory dataset. Using
+ * that existing regulatory fact (not an invented list) as a
+ * conservative, sector-level proxy for "may plausibly be Annex II"
+ * until a real Annex II dataset lands, per the owner's explicit
+ * decision to gate rather than accept the interim risk.
+ */
+const ANNEX_II_SECTORS: ReadonlySet<string> =
+  new Set(
+    [
+      "IRON_STEEL",
+      "ALUMINIUM",
+    ],
+  );
+
 function noValueResult(
   status: Exclude<LineEmissionsCalculation["status"], "COMPUTED">,
 ): LineEmissionsCalculation {
@@ -163,15 +185,35 @@ function calculateFromDefaultDetermination(
  * is the engine's own defense-in-depth check, not a state P5 is
  * expected to produce") -- applied here for consistency rather than
  * relying on the type system alone.
+ *
+ * `goodSector` gates the Annex II exception RULE-EE-004 requires and
+ * this rule's own direct+indirect summation does not yet reintroduce
+ * -- see ANNEX_II_SECTORS above and RULE-EE-009's own Exceptions
+ * bullet in the register. Only gates when indirect_specific is
+ * genuinely non-zero: direct + 0 already equals the Annex II-correct,
+ * direct-only value regardless of whether the platform "knows" the
+ * good is Annex II, so a producer who has already reported indirect
+ * emissions as zero is never blocked by this gate.
  */
 function calculateFromActualDetermination(
   snapshot: ActualEmissionSnapshot,
   quantity: DecimalString,
   netMassTonnes: DecimalString | null,
+  goodSector: string | null,
 ): LineEmissionsCalculation {
   if (snapshot.verification.status !== "VERIFIED") {
     return noValueResult(
       "VALUE_UNAVAILABLE",
+    );
+  }
+
+  if (
+    goodSector !== null &&
+    ANNEX_II_SECTORS.has(goodSector) &&
+    !toDecimal(snapshot.values.indirect_specific).isZero()
+  ) {
+    return noValueResult(
+      "PARAMETER_DATASET_UNAVAILABLE",
     );
   }
 
@@ -220,12 +262,19 @@ function calculateFromActualDetermination(
  * RULE-EE-001 (DEFAULT) or RULE-EE-009 (ACTUAL) depending on the line's
  * determination method -- see docs/regulatory/CALCULATION_RULE_REGISTER.md
  * for both.
+ *
+ * `good_sector` is the line's declared good's `cbam_goods.sector`
+ * (looked up by the caller -- the engine itself does no I/O), used
+ * only by the ACTUAL path's Annex II gate (see ANNEX_II_SECTORS
+ * above); `null` when the caller has no sector to offer (e.g. a
+ * DEFAULT determination, where it is never consulted).
  */
 export function calculateLineEmissions(
   line: {
     net_mass_tonnes: DecimalString | null;
     quantity_mwh: DecimalString | null;
     emission_determination: EmissionDetermination | null;
+    good_sector?: string | null;
   },
 ): LineEmissionsCalculation {
   if (!line.emission_determination) {
@@ -253,6 +302,7 @@ export function calculateLineEmissions(
       line.emission_determination.snapshot,
       quantity,
       line.net_mass_tonnes,
+      line.good_sector ?? null,
     );
   }
 

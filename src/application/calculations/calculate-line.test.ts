@@ -12,11 +12,60 @@ import {
   ENGINE_VERSION,
 } from "../../domain/calculations/types";
 
+import type {
+  RegulatoryRepository,
+} from "../../infrastructure/regulatory/regulatory-repository";
+
 const orgId =
   "org-1" as never;
 
 const actorUserId =
   "user-1" as never;
+
+/**
+ * Only findCbamGoodsByCode is consulted by calculateLine (for the
+ * ACTUAL-path Annex II gate, calculate-line.ts's
+ * resolveGoodSectorForActualLine) -- the other three port methods are
+ * never called from this service, so they return empty/never-resolving
+ * stand-ins the same way resolve-line-emissions.test.ts's own
+ * mockRepository does for the methods it doesn't exercise either.
+ */
+function mockRepository(
+  sector: string | null = null,
+): RegulatoryRepository {
+  return {
+    findActiveDefaultEmissionCandidates: () =>
+      Promise.resolve(
+        [],
+      ),
+
+    findCbamGoodsByCode: () =>
+      Promise.resolve(
+        sector === null
+          ? []
+          : [
+              {
+                trade_code: "72061000",
+                trade_code_type: "CN8",
+                record_level: "TRADE_GOOD",
+                sector,
+                description: "test good",
+                functional_unit: "TONNES",
+              },
+            ],
+      ),
+
+    searchCbamGoodsByPrefix: () =>
+      Promise.resolve(
+        [],
+      ),
+
+    findProductionRoutes: () =>
+      Promise.resolve(
+        [],
+      ),
+  };
+}
 
 const lineId =
   "line-1" as never;
@@ -47,22 +96,48 @@ const computedDetermination =
     },
   };
 
+const actualDetermination =
+  {
+    method: "ACTUAL",
+    snapshot: {
+      emission_data_id: "ed-1",
+      emission_data_version: 1,
+      installation_id: "inst-1",
+      resolved_at: "2026-08-28T00:00:00.000Z",
+      values: {
+        direct_specific: "1.0",
+        indirect_specific: "0.2",
+      },
+      emission_unit: "TCO2E_PER_TONNE",
+      methodology: "EU_METHOD",
+      verification: { status: "VERIFIED", verifier_user_id: "user-1" },
+      evidence_file_ids: ["evidence-1"],
+      sharing_grant_id: null,
+    },
+  };
+
 function mockSupabase(
   {
     lineFetchResult = {
       data: {
         org_id: "org-1",
         shipment_id: "ship-1",
+        cn_code: "25232100",
         net_mass_tonnes: "10.5",
         quantity_mwh: null,
         emission_determination: computedDetermination,
       },
       error: null,
     },
+    shipmentFetchResult = {
+      data: { release_date: "2026-01-01" },
+      error: null,
+    },
     insertResult = { error: null },
     insertPayloads = [] as unknown[],
   }: {
     lineFetchResult?: { data: unknown; error: unknown };
+    shipmentFetchResult?: { data: unknown; error: unknown };
     insertResult?: { error: unknown };
     insertPayloads?: unknown[];
   },
@@ -93,6 +168,23 @@ function mockSupabase(
               insertResult,
             );
           },
+        };
+      }
+
+      if (table === "shipments") {
+        return {
+          select: () => (
+            {
+              eq: () => (
+                {
+                  maybeSingle: () =>
+                    Promise.resolve(
+                      shipmentFetchResult,
+                    ),
+                }
+              ),
+            }
+          ),
         };
       }
 
@@ -128,6 +220,7 @@ describe(
             mockSupabase(
               { insertPayloads },
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             lineId,
@@ -183,6 +276,7 @@ describe(
                 insertPayloads,
               },
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             lineId,
@@ -212,6 +306,7 @@ describe(
             mockSupabase(
               { lineFetchResult: { data: null, error: null } },
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             lineId,
@@ -246,6 +341,7 @@ describe(
                 insertPayloads,
               },
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             lineId,
@@ -269,6 +365,7 @@ describe(
             mockSupabase(
               { insertResult: { error: { message: "db error" } } },
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             lineId,
@@ -288,6 +385,7 @@ describe(
             mockSupabase(
               { insertResult: { error: { code: "42501", message: "denied" } } },
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             lineId,
@@ -295,6 +393,151 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "SHIPMENT_NOT_EDITABLE" },
+        );
+      },
+    );
+
+    it(
+      "returns PARAMETER_DATASET_UNAVAILABLE without persisting anything for an ACTUAL determination on an IRON_STEEL good with non-zero indirect_specific -- proves the sector lookup (shipments.release_date + repository.findCbamGoodsByCode) actually reaches the engine's Annex II gate, not just the pure domain test",
+      async () => {
+        const insertPayloads: unknown[] =
+          [];
+
+        const result =
+          await calculateLine(
+            mockSupabase(
+              {
+                lineFetchResult: {
+                  data: {
+                    org_id: "org-1",
+                    shipment_id: "ship-1",
+                    cn_code: "72061000",
+                    net_mass_tonnes: "10.5",
+                    quantity_mwh: null,
+                    emission_determination: actualDetermination,
+                  },
+                  error: null,
+                },
+                insertPayloads,
+              },
+            ),
+            mockRepository(
+              "IRON_STEEL",
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+          );
+
+        expect(result).toEqual(
+          {
+            status: "OK",
+            calculation: {
+              status: "PARAMETER_DATASET_UNAVAILABLE",
+              engine_version: ENGINE_VERSION,
+            },
+          },
+        );
+
+        expect(insertPayloads).toHaveLength(
+          0,
+        );
+      },
+    );
+
+    it(
+      "computes normally for an ACTUAL determination when the repository resolves a non-Annex-II sector",
+      async () => {
+        const insertPayloads: unknown[] =
+          [];
+
+        const result =
+          await calculateLine(
+            mockSupabase(
+              {
+                lineFetchResult: {
+                  data: {
+                    org_id: "org-1",
+                    shipment_id: "ship-1",
+                    cn_code: "25232100",
+                    net_mass_tonnes: "10.5",
+                    quantity_mwh: null,
+                    emission_determination: actualDetermination,
+                  },
+                  error: null,
+                },
+                insertPayloads,
+              },
+            ),
+            mockRepository(
+              "CEMENT",
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+          );
+
+        expect(
+          result.status === "OK" ? result.calculation.status : null,
+        ).toBe(
+          "COMPUTED",
+        );
+
+        expect(insertPayloads).toHaveLength(
+          1,
+        );
+      },
+    );
+
+    it(
+      "does not query the repository at all for a DEFAULT determination -- the Annex II gate is ACTUAL-only",
+      async () => {
+        let repositoryCalled =
+          false;
+
+        const repository: RegulatoryRepository =
+          {
+            findActiveDefaultEmissionCandidates: () =>
+              Promise.resolve(
+                [],
+              ),
+            findCbamGoodsByCode: () => {
+              repositoryCalled =
+                true;
+
+              return Promise.resolve(
+                [],
+              );
+            },
+            searchCbamGoodsByPrefix: () =>
+              Promise.resolve(
+                [],
+              ),
+            findProductionRoutes: () =>
+              Promise.resolve(
+                [],
+              ),
+          };
+
+        const result =
+          await calculateLine(
+            mockSupabase(
+              {},
+            ),
+            repository,
+            orgId,
+            actorUserId,
+            lineId,
+          );
+
+        expect(
+          result.status === "OK" ? result.calculation.status : null,
+        ).toBe(
+          "COMPUTED",
+        );
+
+        expect(repositoryCalled).toBe(
+          false,
         );
       },
     );

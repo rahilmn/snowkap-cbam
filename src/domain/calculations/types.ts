@@ -136,15 +136,25 @@ export interface CalculationResult {
  *   classification time -- a different table (cbam_goods) from the
  *   *emission record's own* emission_unit, which nothing else
  *   validates. Found in the mandatory P6 review for RULE-EE-001;
- *   applied to RULE-EE-009 (ACTUAL) from the start. **Known,
- *   escalated gap** (docs/regulatory/CALCULATION_RULE_REGISTER.md,
- *   RULE-EE-009's own Exceptions bullet): this guard alone does not
- *   detect an Annex II good using the ACTUAL method with a non-zero
- *   indirect_specific -- there is no Annex II membership data anywhere
- *   in this schema yet, so RULE-EE-009 can currently overstate embedded
- *   emissions for iron & steel / aluminium ACTUAL-method lines. Not
- *   patched here -- needs a new versioned regulatory dataset, escalated
- *   to the owner rather than hardcoded.
+ *   applied to RULE-EE-009 (ACTUAL) from the start.
+ * - PARAMETER_DATASET_UNAVAILABLE (added 2026-08-29, owner-directed
+ *   gate): an ACTUAL determination on a good in a known Annex-II
+ *   sector (iron & steel, aluminium -- Article 7(1) sentence 2,
+ *   direct-emissions-only, RULE-EE-004) whose declared
+ *   `indirect_specific` is non-zero. RULE-EE-009 sums
+ *   `direct_specific + indirect_specific` unconditionally (there is no
+ *   Annex II CN-code-list dataset in this schema yet to gate a precise
+ *   per-good exception, only the coarser `cbam_goods.sector` already
+ *   in the regulatory dataset) -- master plan §17's own named state
+ *   for exactly this situation ("a required parameter dataset is
+ *   unavailable... never invent, never substitute -- return explicit
+ *   states"). Owner-directed interim gate
+ *   (docs/regulatory/CALCULATION_RULE_REGISTER.md, RULE-EE-009's own
+ *   Exceptions bullet): rather than silently overstate the number,
+ *   the engine refuses to compute at all for this case until a proper
+ *   Annex II dataset lands. DEFAULT-method lines for the same goods
+ *   are unaffected (RULE-EE-001 already trusts the dataset's own
+ *   pre-summed, Annex-II-correct total).
  *
  * ACTUAL_METHOD_NOT_YET_SUPPORTED existed here through P6 (RULE-EE-002/
  * 003 registered but not implemented) and was removed once RULE-EE-009
@@ -156,7 +166,8 @@ export type CalculationStatus =
   | "COMPUTED"
   | "INPUT_UNRESOLVED"
   | "VALUE_UNAVAILABLE"
-  | "UNIT_UNSUPPORTED";
+  | "UNIT_UNSUPPORTED"
+  | "PARAMETER_DATASET_UNAVAILABLE";
 
 export type LineEmissionsCalculation =
   | {

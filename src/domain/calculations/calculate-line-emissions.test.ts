@@ -559,6 +559,120 @@ describe(
     );
 
     it(
+      "returns PARAMETER_DATASET_UNAVAILABLE (never a computed value) for an ACTUAL determination on an IRON_STEEL good with non-zero indirect_specific -- owner-directed gate for RULE-EE-004's not-yet-reintroduced Annex II exception",
+      () => {
+        const result =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10" as never,
+              quantity_mwh: null,
+              emission_determination: actualDetermination(
+                { direct_specific: "1.0", indirect_specific: "0.2" },
+              ),
+              good_sector: "IRON_STEEL",
+            },
+          );
+
+        expect(result).toEqual(
+          { status: "PARAMETER_DATASET_UNAVAILABLE", engine_version: ENGINE_VERSION },
+        );
+      },
+    );
+
+    it(
+      "returns PARAMETER_DATASET_UNAVAILABLE for an ALUMINIUM good with non-zero indirect_specific",
+      () => {
+        const result =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10" as never,
+              quantity_mwh: null,
+              emission_determination: actualDetermination(
+                { direct_specific: "1.0", indirect_specific: "0.2" },
+              ),
+              good_sector: "ALUMINIUM",
+            },
+          );
+
+        expect(result).toEqual(
+          { status: "PARAMETER_DATASET_UNAVAILABLE", engine_version: ENGINE_VERSION },
+        );
+      },
+    );
+
+    it(
+      "computes normally for an IRON_STEEL good whose indirect_specific is exactly zero -- direct + 0 already equals the Annex II-correct value, so the gate must not over-block it",
+      () => {
+        const result =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10" as never,
+              quantity_mwh: null,
+              emission_determination: actualDetermination(
+                { direct_specific: "1.0", indirect_specific: "0" },
+              ),
+              good_sector: "IRON_STEEL",
+            },
+          );
+
+        expect(result.status).toBe(
+          "COMPUTED",
+        );
+        if (result.status === "COMPUTED") {
+          expect(result.embedded_emissions_tco2e).toBe(
+            "10",
+          );
+        }
+      },
+    );
+
+    it(
+      "computes normally for a non-Annex-II sector (CEMENT) with non-zero indirect_specific -- the gate is sector-scoped, not universal",
+      () => {
+        const result =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10" as never,
+              quantity_mwh: null,
+              emission_determination: actualDetermination(
+                { direct_specific: "1.0", indirect_specific: "0.2" },
+              ),
+              good_sector: "CEMENT",
+            },
+          );
+
+        expect(result.status).toBe(
+          "COMPUTED",
+        );
+        if (result.status === "COMPUTED") {
+          expect(result.embedded_emissions_tco2e).toBe(
+            "12",
+          );
+        }
+      },
+    );
+
+    it(
+      "computes normally for an ACTUAL determination when good_sector is not provided (undefined) -- callers that cannot resolve a sector are not blocked by this gate",
+      () => {
+        const result =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10" as never,
+              quantity_mwh: null,
+              emission_determination: actualDetermination(
+                { direct_specific: "1.0", indirect_specific: "0.2" },
+              ),
+            },
+          );
+
+        expect(result.status).toBe(
+          "COMPUTED",
+        );
+      },
+    );
+
+    it(
       "computes identically for a cross-org (shared) ACTUAL determination as for an own-org one -- the engine does not care about sharing_grant_id",
       () => {
         const result =

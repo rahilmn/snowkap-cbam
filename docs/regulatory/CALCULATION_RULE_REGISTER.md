@@ -158,7 +158,7 @@ the paragraph above.
   rather than restored, since failing loudly on a guard violation earlier is arguably the
   better default; flagging so a future reader doesn't mistake it for an oversight.
 
-## ESCALATED, NOT PATCHED: RULE-EE-009 vs. RULE-EE-004's Annex II exception (2026-08-29)
+## ESCALATED, INTERIM GATE IMPLEMENTED: RULE-EE-009 vs. RULE-EE-004's Annex II exception (2026-08-29)
 
 RULE-EE-004 (below) documents that this rule (RULE-EE-001) trusts the regulatory
 dataset's own pre-summed `total_emissions` rather than recomputing `direct + indirect` in
@@ -173,16 +173,44 @@ accepted from the review) in the mandatory RULE-EE-009 engine review: `cbam_good
 field indicating Annex II membership at all (only `sector` — CEMENT/FERTILISERS/
 IRON_STEEL/ALUMINIUM/HYDROGEN/ELECTRICITY — and `functional_unit`, confirmed by reading
 the live schema, `20260826133116_create_regulatory_foundation.sql:218-274`), so there is
-currently no way for the engine to even detect this case, let alone gate it. This is a
-**material regulatory behavior gap requiring an owner decision, not a code patch** — per
-CLAUDE.md's facts-as-datasets rule, the Annex II code list must enter as its own versioned
-regulatory dataset (mirroring how `default_emission_values` itself entered), never a
-hardcoded list, and building that dataset is its own research-and-ingestion pass, not
-something to improvise inside this review-response. See RULE-EE-009's own entry for the
-full disclosure and the interim options recorded there. **This is why RULE-EE-009 is not
-yet considered safe to rely on for Annex II goods (iron & steel, aluminium) using the
-ACTUAL method — DEFAULT-method lines for the same goods are unaffected, since this rule's
-own trust-the-dataset-total design was never at risk.**
+currently no way for the engine to precisely detect Annex II membership at the individual
+trade-code level, let alone gate on it. This is a **material regulatory behavior gap
+requiring an owner decision, not a code patch that could invent per-code Annex II
+membership** — per CLAUDE.md's facts-as-datasets rule, a precise Annex II code list must
+still enter as its own versioned regulatory dataset (mirroring how
+`default_emission_values` itself entered), never a hardcoded list, and building that
+dataset is its own research-and-ingestion pass, not something to improvise inside this
+review-response.
+
+**Owner decision (2026-08-29)**: presented with three interim options (gate now / accept
+interim risk with disclosure / prioritize the Annex II dataset), the owner chose **gate
+now**. Implemented the same day as an engine-level safety gate, not a full Annex II
+dataset: `calculateFromActualDetermination` (`calculate-line-emissions.ts`) now returns
+`PARAMETER_DATASET_UNAVAILABLE` — never a computed value — for an ACTUAL-method line whose
+good's `cbam_goods.sector` is `IRON_STEEL` or `ALUMINIUM` (`ANNEX_II_SECTORS`, a
+conservative *sector-level* proxy using a regulatory fact already present in the dataset,
+not an invented code list) **and** whose declared `indirect_specific` is genuinely
+non-zero (`direct + 0` already equals the Annex II-correct value regardless of whether the
+platform "knows" the good is Annex II, so a producer who has already reported zero
+indirect emissions is never blocked). The sector is resolved by the application layer
+(`calculate-line.ts`'s `resolveGoodSectorForActualLine`, ACTUAL-method lines only) via the
+line's shipment `release_date` and `RegulatoryRepository.findCbamGoodsByCode` — the same
+port method classification itself uses, not a new bespoke query. See RULE-EE-009's own
+Exceptions bullet below for the rule-level detail and TDD coverage.
+
+**Known imprecision accepted by this interim gate, disclosed rather than hidden**:
+`sector` is coarser than Annex II's own CN-code-level list (RULE-EE-004's own text: the
+Annex II list "confirmed to begin with Iron and steel CN codes," full list not
+transcribed) — this gate over-blocks rather than under-blocks (conservative by design: a
+non-Annex-II good in the IRON_STEEL or ALUMINIUM sector, if one exists, is blocked
+needlessly rather than risking an under-blocked Annex II good computing a wrong number).
+It also cannot detect Annex II membership for a good whose sector cannot be resolved at
+all (network/data-drift edge case; treated as "unknown, don't gate" per
+`calculate-line-emissions.ts`'s own doc comment on `good_sector: null`) or whose CN code
+sits in a sector this constraint doesn't cover an Annex II list for. The real,
+non-interim fix remains a properly sourced, versioned Annex II CN-code-list dataset,
+still not built in this pass — DEFAULT-method lines for the same goods remain unaffected
+throughout, since RULE-EE-001's own trust-the-dataset-total design was never at risk.
 
 ## RULE-EE-002 — Actual specific embedded emissions, simple goods
 
@@ -679,32 +707,34 @@ own trust-the-dataset-total design was never at risk.**
   already does, deferring the method choice to P9 rather than guessing at it now. This
   rule does not depend on or wait for that unresolved question — it inherits RULE-EE-001's
   own already-approved answer to the identical structural question.
-- **Exceptions**: **KNOWN GAP, ESCALATED — NOT YET SAFE FOR ANNEX II GOODS.** RULE-EE-001
-  (above) trusts the regulatory dataset's own pre-summed `total` rather than recomputing
-  `direct + indirect` in application code *specifically* to avoid silently violating
-  Article 7(1) sentence 2 for Annex II goods (iron & steel, aluminium — direct emissions
-  only; see RULE-EE-004), and its own register entry states this exception "must be
-  reintroduced explicitly" if the engine is ever changed to recompute totals. RULE-EE-009
-  performs exactly that recomputation (`AttrEm_g = DirEm + IndirEm`, see Formula below)
-  and does **not** reintroduce the Annex II exception — found and independently verified
-  in the mandatory RULE-EE-009 engine review (2026-08-29). There is currently no data
-  model to detect Annex II membership at all: `cbam_goods` carries only `sector`
-  (CEMENT/FERTILISERS/IRON_STEEL/ALUMINIUM/HYDROGEN/ELECTRICITY) and `functional_unit`,
-  no Annex II flag. For an Annex II line with a producer-declared non-zero
-  `indirect_specific`, RULE-EE-009 currently overstates embedded emissions relative to
-  Article 7(1) — not yet a mis-stated financial obligation, since `certificates_due`/
-  `liability` remain null until P8/P9's parameter datasets exist, but a real
-  correctness gap in the displayed number today. **Not patched in this pass**: per
-  CLAUDE.md's facts-as-datasets rule, the fix needs an Annex II code-list dataset entering
-  through the same versioned-dataset path `default_emission_values` itself used, which is
-  its own research-and-ingestion pass, not something to improvise here — escalated to the
-  owner rather than hardcoded. Interim options recorded for that decision: (a) return an
-  explicit non-computable status for ACTUAL-method lines whose good may plausibly be
-  Annex II until the dataset lands; (b) accept the interim risk with clear internal
-  disclosure (this note) given the mitigating P8/P9-gated liability context above; (c)
-  something else the owner directs. **Until resolved: RULE-EE-009 should not be treated
-  as fully correct for iron & steel or aluminium goods using the ACTUAL method** —
-  DEFAULT-method lines for the same goods are unaffected.
+- **Exceptions**: **KNOWN GAP, ESCALATED — OWNER-DIRECTED INTERIM GATE IMPLEMENTED
+  2026-08-29.** RULE-EE-001 (above) trusts the regulatory dataset's own pre-summed `total`
+  rather than recomputing `direct + indirect` in application code *specifically* to avoid
+  silently violating Article 7(1) sentence 2 for Annex II goods (iron & steel, aluminium —
+  direct emissions only; see RULE-EE-004), and its own register entry states this
+  exception "must be reintroduced explicitly" if the engine is ever changed to recompute
+  totals. RULE-EE-009 performs exactly that recomputation (`AttrEm_g = DirEm + IndirEm`,
+  see Formula below) and, at the CN-code level, still does **not** reintroduce a precise
+  Annex II exception — found and independently verified in the mandatory RULE-EE-009
+  engine review (2026-08-29); see the "ESCALATED, INTERIM GATE IMPLEMENTED" section above
+  for the full disclosure. There is no data model for precise Annex II membership at all:
+  `cbam_goods` carries only `sector`
+  (CEMENT/FERTILISERS/IRON_STEEL/ALUMINIUM/HYDROGEN/ELECTRICITY) and `functional_unit`, no
+  Annex II flag.
+
+  **Owner decision**: presented with three interim options (gate now / accept interim risk
+  with disclosure / prioritize the Annex II dataset), the owner chose to **gate now**.
+  `calculateFromActualDetermination` returns `PARAMETER_DATASET_UNAVAILABLE` — never a
+  computed value — when `goodSector` (the application layer's
+  `resolveGoodSectorForActualLine`, via `RegulatoryRepository.findCbamGoodsByCode`) is
+  `IRON_STEEL` or `ALUMINIUM` (`ANNEX_II_SECTORS`) **and** `indirect_specific` is
+  genuinely non-zero. This is a conservative, sector-level proxy using a regulatory fact
+  already in the dataset (not an invented code list), deliberately over-blocking rather
+  than under-blocking, and is explicitly **not** the precise per-CN-code Annex II fix —
+  that still needs its own versioned regulatory dataset, per CLAUDE.md's facts-as-datasets
+  rule, and is not built in this pass. DEFAULT-method lines for the same goods remain
+  unaffected throughout (RULE-EE-001's own trust-the-dataset-total design was never at
+  risk).
 
   `snapshot.verification.status` is a branded `Extract<VerificationStatus, "VERIFIED">` in
   the `ActualEmissionSnapshot` type itself (`src/domain/emissions/types.ts`), so a
@@ -761,7 +791,20 @@ own trust-the-dataset-total design was never at risk.**
   mass line, locking in the fix for a real false-positive found live in that review; and
   (2026-08-29, same review) `VALUE_UNAVAILABLE` — never a computed value — for a snapshot
   whose `verification.status` is not `"VERIFIED"` at runtime despite the type-level
-  guarantee, confirmed red (silently computed a value) before the fix and green after.
+  guarantee, confirmed red (silently computed a value) before the fix and green after. And
+  (2026-08-29, owner-directed Annex II interim gate) `PARAMETER_DATASET_UNAVAILABLE` for an
+  IRON_STEEL good and for an ALUMINIUM good, each with non-zero `indirect_specific`;
+  `COMPUTED` (not gated) for an IRON_STEEL good whose `indirect_specific` is exactly zero;
+  `COMPUTED` for a non-Annex-II sector (CEMENT) with non-zero `indirect_specific`; and
+  `COMPUTED` when no `good_sector` is supplied at all — all in
+  `calculate-line-emissions.test.ts`. The application-layer wiring itself (the new
+  `shipments.release_date` query and `RegulatoryRepository.findCbamGoodsByCode` call in
+  `calculate-line.ts`'s `resolveGoodSectorForActualLine`) is separately covered in
+  `src/application/calculations/calculate-line.test.ts`: an end-to-end
+  `PARAMETER_DATASET_UNAVAILABLE` for an IRON_STEEL-sector repository response (proving the
+  wiring reaches the engine's gate, not just the pure domain test), a normal `COMPUTED` for
+  a non-Annex-II sector, and confirmation the repository is never even queried for a
+  DEFAULT determination.
 
 ---
 

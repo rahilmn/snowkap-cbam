@@ -151,6 +151,9 @@ function calculationStatusMessageFor(
     case "UNIT_UNSUPPORTED":
       return "The resolved emission unit doesn't match this line's quantity -- this needs review before it can be calculated.";
 
+    case "PARAMETER_DATASET_UNAVAILABLE":
+      return "This good may be subject to the EU CBAM's direct-emissions-only rule for iron & steel and aluminium (Annex II), and Snowkap does not yet have the reference data needed to apply that rule automatically. This is a known platform limitation, not an issue with your data -- calculation is unavailable until that reference data is added.";
+
     default:
       return "This line could not be calculated.";
   }
@@ -764,6 +767,7 @@ export async function calculateLineAction(
   const result =
     await calculateLine(
       supabase,
+      getRegulatoryRepository(),
       orgSummary.context.org_id,
       user.id as never,
       parsed.data.lineId as never,

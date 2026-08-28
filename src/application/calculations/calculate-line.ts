@@ -29,6 +29,10 @@ import type {
   UserId,
 } from "../../domain/shared/ids";
 
+import type {
+  RegulatoryRepository,
+} from "../../infrastructure/regulatory/regulatory-repository";
+
 import {
   recordAuditEvent,
 } from "../audit/record-audit-event";
@@ -46,6 +50,7 @@ export type CalculateLineResult =
 interface LineForCalculation {
   org_id: string;
   shipment_id: string;
+  cn_code: string;
   net_mass_tonnes: DecimalString | null;
   quantity_mwh: DecimalString | null;
   emission_determination: EmissionDetermination | null;
@@ -57,6 +62,55 @@ function quantityInput(
   return line.net_mass_tonnes !== null
     ? { quantity: line.net_mass_tonnes, quantity_unit: "TONNES" }
     : { quantity: line.quantity_mwh as DecimalString, quantity_unit: "MWH" };
+}
+
+/**
+ * The engine's Annex II gate (calculate-line-emissions.ts,
+ * ANNEX_II_SECTORS) needs the line's declared good's `cbam_goods.sector`
+ * -- data this pure engine cannot fetch itself. Only called for ACTUAL
+ * determinations (the DEFAULT path never consults good_sector, since
+ * RULE-EE-001 already trusts the dataset's own Annex-II-correct total).
+ * `findCbamGoodsByCode` needs an as-of date the same way classification
+ * does (a shipment's own release_date, never "today" -- P4's own
+ * doc comment on this port method) -- a second, separate query, matching
+ * this codebase's convention of sequential queries over embedded joins
+ * (see the regulatory adapter's own five-sequential-query design).
+ *
+ * Returns `null` -- not a rejection -- when the shipment's release_date
+ * can't be found or no matching good exists: an already-classified line
+ * reaching ACTUAL determination should always have exactly one match,
+ * so this is an unexpected-data-drift case, not a normal outcome; the
+ * engine's own `good_sector: null` handling already treats "unknown" as
+ * "don't gate" (conservative in the other direction is not this
+ * function's job -- see calculate-line-emissions.ts's own doc comment
+ * on why an indeterminate sector does not block calculation).
+ */
+async function resolveGoodSectorForActualLine(
+  supabase: SupabaseClient,
+  repository: RegulatoryRepository,
+  shipmentId: string,
+  cnCode: string,
+): Promise<string | null> {
+  const { data: shipment } =
+    await supabase
+      .from("shipments")
+      .select(
+        "release_date",
+      )
+      .eq("id", shipmentId)
+      .maybeSingle();
+
+  if (!shipment) {
+    return null;
+  }
+
+  const candidates =
+    await repository.findCbamGoodsByCode(
+      cnCode,
+      (shipment as { release_date: string }).release_date,
+    );
+
+  return candidates[0]?.sector ?? null;
 }
 
 /**
@@ -79,6 +133,7 @@ function quantityInput(
  */
 export async function calculateLine(
   supabase: SupabaseClient,
+  repository: RegulatoryRepository,
   orgId: OrganizationId,
   actorUserId: UserId,
   lineId: ShipmentLineId,
@@ -87,7 +142,7 @@ export async function calculateLine(
     await supabase
       .from("shipment_lines")
       .select(
-        "org_id, shipment_id, net_mass_tonnes, quantity_mwh, emission_determination",
+        "org_id, shipment_id, cn_code, net_mass_tonnes, quantity_mwh, emission_determination",
       )
       .eq("id", lineId)
       .maybeSingle();
@@ -116,12 +171,23 @@ export async function calculateLine(
     };
   }
 
+  const goodSector =
+    line.emission_determination?.method === "ACTUAL"
+      ? await resolveGoodSectorForActualLine(
+          supabase,
+          repository,
+          line.shipment_id,
+          line.cn_code,
+        )
+      : null;
+
   const calculation =
     calculateLineEmissions(
       {
         net_mass_tonnes: line.net_mass_tonnes,
         quantity_mwh: line.quantity_mwh,
         emission_determination: line.emission_determination,
+        good_sector: goodSector,
       },
     );
 
