@@ -882,6 +882,87 @@ describe(
     );
 
     it(
+      "records a distinct emission_data.superseded audit event on the PRIOR row's own aggregate, in addition to emission_data.activated on the new row",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        await activateEmissionData(
+          makeMockSupabase(
+            {
+              emission_data: [
+                { data: verifiedDraftRow, error: null },
+                { data: { id: "emission-data-prior" }, error: null },
+                { data: null, error: null },
+                { data: null, error: null },
+              ],
+              audit_events: { data: null, error: null },
+            },
+            recorder,
+          ),
+          orgId,
+          actorUserId,
+          "emission-data-1" as never,
+        );
+
+        const auditOps =
+          recorder.ops.filter(
+            (op) => op.table === "audit_events" && op.op === "insert",
+          );
+
+        expect(auditOps).toHaveLength(
+          2,
+        );
+
+        const supersededEvent =
+          auditOps[0]?.payload as {
+            event_type: string;
+            aggregate_id: string;
+            payload: { from_status: string; to_status: string; superseded_by_id: string };
+          };
+
+        expect(supersededEvent.event_type).toBe(
+          "emission_data.superseded",
+        );
+
+        expect(supersededEvent.aggregate_id).toBe(
+          "emission-data-prior",
+        );
+
+        expect(supersededEvent.payload).toEqual(
+          {
+            from_status: "ACTIVE",
+            to_status: "SUPERSEDED",
+            superseded_by_id: "emission-data-1",
+          },
+        );
+
+        const activatedEvent =
+          auditOps[1]?.payload as {
+            event_type: string;
+            aggregate_id: string;
+            payload: { from_status: string; to_status: string; superseded_id: string };
+          };
+
+        expect(activatedEvent.event_type).toBe(
+          "emission_data.activated",
+        );
+
+        expect(activatedEvent.aggregate_id).toBe(
+          "emission-data-1",
+        );
+
+        expect(activatedEvent.payload).toEqual(
+          {
+            from_status: "DRAFT",
+            to_status: "ACTIVE",
+            superseded_id: "emission-data-prior",
+          },
+        );
+      },
+    );
+
+    it(
       "rejects NOT_VERIFIED when the record hasn't been verified yet",
       async () => {
         const result =

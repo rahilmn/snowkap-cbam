@@ -683,6 +683,34 @@ export async function activateEmissionData(
         reason: "PERSIST_FAILED",
       };
     }
+
+    // A distinct audit event on the SUPERSEDED row's own aggregate --
+    // found missing in P7's mandatory review: without this, querying
+    // audit_events by aggregate_id = <the superseded row> (the natural
+    // query, and the one the (org_id, aggregate_type, aggregate_id,
+    // occurred_at) index in master plan §12 is built for) returns a
+    // history that ends at emission_data.activated for whatever record
+    // superseded it and never shows THIS row was retired. Recorded
+    // immediately after the supersede UPDATE succeeds, before the
+    // activate UPDATE below -- on the already-disclosed non-atomic path
+    // (this function's own doc comment), if the activate UPDATE then
+    // fails, this event still accurately reflects that the supersede
+    // half of the operation genuinely happened.
+    await recordAuditEvent(
+      supabase,
+      {
+        orgId,
+        actorUserId,
+        eventType: "emission_data.superseded",
+        aggregateType: "EMISSION_DATA",
+        aggregateId: priorActiveId,
+        payload: {
+          from_status: "ACTIVE",
+          to_status: "SUPERSEDED",
+          superseded_by_id: emissionDataId,
+        },
+      },
+    );
   }
 
   const { error: activateError } =
@@ -709,6 +737,16 @@ export async function activateEmissionData(
       aggregateType: "EMISSION_DATA",
       aggregateId: emissionDataId,
       payload: {
+        // Aligned with every other transition's own payload shape
+        // (submitForVerification/verifyEmissionData/etc. in
+        // applyTransition, above) -- found diverging in the same review.
+        // from_status is always literally "DRAFT" here: transitionEmissionData's
+        // own ACTIVATE guard (emission-data-lifecycle.ts) requires
+        // status === "DRAFT" before this point is ever reached, so
+        // transition.record.status (always "ACTIVE" on this success path)
+        // is not what "from" refers to.
+        from_status: "DRAFT",
+        to_status: transition.record.status,
         superseded_id: priorActiveId,
       },
     },
