@@ -125,12 +125,23 @@ export interface CalculationResult {
  * - ACTUAL_METHOD_NOT_YET_SUPPORTED: the determination method is
  *   ACTUAL (RULE-EE-002/003, P7 scope) -- registered but not
  *   implemented in this phase.
+ * - UNIT_UNSUPPORTED: the resolved snapshot's emission_unit (a
+ *   free-form string from the regulatory dataset, RegulatoryRecord.
+ *   emission_unit) is not consistent with the line's own quantity
+ *   basis (TONNES vs MWH). P4's QUANTITY_UNIT_MISMATCH check already
+ *   validates the *good's* functional_unit against the declared
+ *   quantity kind at classification time -- a different table
+ *   (cbam_goods) from the *emission record's own* emission_unit
+ *   (default_emission_values), which nothing else validates. Found in
+ *   the mandatory P6 review: RULE-EE-001 assumed this could never
+ *   diverge without an explicit guard.
  */
 export type CalculationStatus =
   | "COMPUTED"
   | "INPUT_UNRESOLVED"
   | "VALUE_UNAVAILABLE"
-  | "ACTUAL_METHOD_NOT_YET_SUPPORTED";
+  | "ACTUAL_METHOD_NOT_YET_SUPPORTED"
+  | "UNIT_UNSUPPORTED";
 
 export type LineEmissionsCalculation =
   | {

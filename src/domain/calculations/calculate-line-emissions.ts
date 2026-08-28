@@ -63,6 +63,27 @@ export function calculateLineEmissions(
     );
   }
 
+  // resolution.emission_unit is a free-form string sourced from the
+  // regulatory dataset (RegulatoryRecord.emission_unit), distinct from
+  // -- and unvalidated against -- the *good's* functional_unit that
+  // P4's classification already checked the line's declared quantity
+  // kind against (QUANTITY_UNIT_MISMATCH, a different table). Found in
+  // the mandatory P6 review: nothing else confirms this record's unit
+  // basis actually matches which quantity field is populated.
+  const emissionUnit =
+    resolution.emission_unit.toUpperCase();
+
+  const unitMatchesBasis =
+    line.net_mass_tonnes !== null
+      ? emissionUnit.includes("TONNE")
+      : emissionUnit.includes("MWH");
+
+  if (!unitMatchesBasis) {
+    return noValueResult(
+      "UNIT_UNSUPPORTED",
+    );
+  }
+
   const quantity =
     line.net_mass_tonnes ??
     line.quantity_mwh;

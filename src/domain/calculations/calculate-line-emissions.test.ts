@@ -31,6 +31,7 @@ function availableValue(
 
 function snapshot(
   overrides: Partial<RegulatoryResolutionSnapshot["values"]> = {},
+  emissionUnit = "TCO2E_PER_TONNE",
 ): RegulatoryResolutionSnapshot {
   return {
     dataset_id: "dataset-1",
@@ -51,17 +52,18 @@ function snapshot(
       total: availableValue("1.390"),
       ...overrides,
     },
-    emission_unit: "TCO2E_PER_TONNE",
+    emission_unit: emissionUnit,
     trace: [],
   };
 }
 
 function defaultDetermination(
   valuesOverrides: Partial<RegulatoryResolutionSnapshot["values"]> = {},
+  emissionUnit = "TCO2E_PER_TONNE",
 ): EmissionDetermination {
   return {
     method: "DEFAULT",
-    resolution: snapshot(valuesOverrides),
+    resolution: snapshot(valuesOverrides, emissionUnit),
   };
 }
 
@@ -117,6 +119,7 @@ describe(
               quantity_mwh: "200" as never,
               emission_determination: defaultDetermination(
                 { total: availableValue("0.45") },
+                "TCO2E_PER_MWH",
               ),
             },
           );
@@ -129,6 +132,43 @@ describe(
 
         expect(result.embedded_emissions_tco2e).toBe(
           "90",
+        );
+      },
+    );
+
+    it(
+      "returns UNIT_UNSUPPORTED when the resolved emission_unit doesn't match the line's quantity basis",
+      () => {
+        const massLineWithMwhUnit =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10.5" as never,
+              quantity_mwh: null,
+              emission_determination: defaultDetermination(
+                {},
+                "TCO2E_PER_MWH",
+              ),
+            },
+          );
+
+        expect(massLineWithMwhUnit).toEqual(
+          { status: "UNIT_UNSUPPORTED", engine_version: ENGINE_VERSION },
+        );
+
+        const energyLineWithTonneUnit =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: null,
+              quantity_mwh: "200" as never,
+              emission_determination: defaultDetermination(
+                {},
+                "TCO2E_PER_TONNE",
+              ),
+            },
+          );
+
+        expect(energyLineWithTonneUnit).toEqual(
+          { status: "UNIT_UNSUPPORTED", engine_version: ENGINE_VERSION },
         );
       },
     );
