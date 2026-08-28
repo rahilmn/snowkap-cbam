@@ -335,7 +335,10 @@ export async function removeInstallationAction(
   if (result.status === "REJECTED") {
     return {
       status: "error",
-      message: "Something went wrong. Please try again.",
+      message:
+        result.reason === "INSTALLATION_HAS_DEPENDENTS"
+          ? "This installation has emission records or sharing grants attached and can't be removed. Discard its emission data and revoke any sharing grants first."
+          : "Something went wrong. Please try again.",
     };
   }
 

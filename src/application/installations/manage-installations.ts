@@ -256,7 +256,10 @@ export async function createInstallation(
 
 export type RemoveInstallationResult =
   | { status: "OK" }
-  | { status: "REJECTED"; reason: "INSTALLATION_NOT_FOUND" | "PERSIST_FAILED" };
+  | {
+      status: "REJECTED";
+      reason: "INSTALLATION_NOT_FOUND" | "INSTALLATION_HAS_DEPENDENTS" | "PERSIST_FAILED";
+    };
 
 interface InstallationOwnershipRow {
   org_id: string;
@@ -268,6 +271,21 @@ interface InstallationOwnershipRow {
  * see either for the full explanation. Rejecting as
  * INSTALLATION_NOT_FOUND (not a more specific reason) matches how an
  * out-of-scope id is treated elsewhere in this codebase.
+ *
+ * The DELETE itself can fail with Postgres error 23503
+ * (foreign_key_violation) if emission_data or sharing_grants rows still
+ * reference this installation -- 20260829270000 changed both of those
+ * FKs from ON DELETE CASCADE to ON DELETE RESTRICT specifically so this
+ * function can no longer silently cascade-destroy VERIFIED emission
+ * data, its evidence, and active sharing grants (found in P7's
+ * mandatory review: the RLS "no DELETE policy" on both those tables
+ * only ever stopped a direct DELETE, never one arriving via cascade,
+ * and cascade deletes are not subject to a child table's RLS at all).
+ * INSTALLATION_HAS_DEPENDENTS surfaces that as a real, actionable
+ * rejection instead of a generic PERSIST_FAILED -- the caller must
+ * discard/retire the dependent emission_data and revoke the sharing
+ * grants first, an explicit action with its own audit trail, rather
+ * than an implicit side effect of removing their parent.
  */
 export async function removeInstallation(
   supabase: SupabaseClient,
@@ -307,7 +325,7 @@ export async function removeInstallation(
   if (error) {
     return {
       status: "REJECTED",
-      reason: "PERSIST_FAILED",
+      reason: (error as { code?: string }).code === "23503" ? "INSTALLATION_HAS_DEPENDENTS" : "PERSIST_FAILED",
     };
   }
 

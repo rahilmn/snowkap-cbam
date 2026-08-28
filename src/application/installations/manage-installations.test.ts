@@ -464,6 +464,31 @@ describe(
     );
 
     it(
+      "reports INSTALLATION_HAS_DEPENDENTS (not a generic PERSIST_FAILED) when a foreign-key violation blocks the delete",
+      async () => {
+        // 23503 = Postgres foreign_key_violation -- fired by the
+        // installations.installation_id FK's ON DELETE RESTRICT on
+        // emission_data/sharing_grants (20260829270000), which replaced
+        // ON DELETE CASCADE specifically so a MEMBER couldn't silently
+        // destroy VERIFIED emission data and sharing grants by deleting
+        // their parent installation (found in P7's mandatory review).
+        const result =
+          await removeInstallation(
+            mockSupabase(
+              { deleteError: { code: "23503", message: "violates foreign key constraint" } },
+            ),
+            orgId,
+            actorUserId,
+            "installation-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "INSTALLATION_HAS_DEPENDENTS" },
+        );
+      },
+    );
+
+    it(
       "rejects INSTALLATION_NOT_FOUND (not OK) when the installation belongs to a different org than the caller's active org",
       async () => {
         const deleteCalled =
