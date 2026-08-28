@@ -187,11 +187,22 @@ const APPLICATION_GRANDFATHERED_INFRASTRUCTURE_IMPORT =
  * inviteUserByEmail, for the Team screen's invite action), not general
  * table access -- see that file's doc comment for why this is kept
  * separate from src/infrastructure/supabase/client.ts.
+ *
+ * get-regulatory-repository is a fourth: a narrow factory (mirroring
+ * admin-client's own shape) that constructs the concrete
+ * SupabaseRegulatoryRepository for UI code -- NOT
+ * supabase-regulatory-repository.ts itself, which stays off this
+ * list. src/application may only import the RegulatoryRepository
+ * *port type* (the one pre-existing grandfathered exception below);
+ * something still has to construct the real implementation, and this
+ * factory is that one sanctioned place, used from P4's classification
+ * Server Actions onward.
  */
 const UI_ALLOWED_INFRASTRUCTURE_IMPORTS = [
   "src/infrastructure/supabase/server-client",
   "src/infrastructure/supabase/browser-client",
   "src/infrastructure/supabase/admin-client",
+  "src/infrastructure/regulatory/get-regulatory-repository",
 ];
 
 /**
