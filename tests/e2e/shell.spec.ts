@@ -403,7 +403,7 @@ test.describe(
     );
 
     test(
-      "desktop viewport shows the sidebar and org switcher",
+      "desktop viewport shows the sidebar",
       async ({ page }) => {
         await page.setViewportSize(
           {
@@ -423,12 +423,24 @@ test.describe(
           ),
         ).toBeVisible();
 
+        // The org-switcher renders only for a signed-in user with an
+        // organization (components/shell/topbar.tsx) -- this suite
+        // runs signed out, so it must be absent, not showing a stale
+        // placeholder name. The real, signed-in case is covered by
+        // tests/integration/organizations-isolation.test.ts (local
+        // Supabase) and was manually verified end-to-end (sign up ->
+        // onboard -> real org name in the topbar -> sign out -> sign
+        // back in) -- full Playwright E2E coverage of the auth flow
+        // itself, against local Supabase specifically, is tracked as
+        // follow-up work, not yet wired into this suite.
         await expect(
-          page.getByRole(
+          page.getByRole("banner").getByRole(
             "button",
-            { name: "Acme Importers Ltd" },
+            { name: /Acme|Importers/ },
           ),
-        ).toBeVisible();
+        ).toHaveCount(
+          0,
+        );
       },
     );
   },

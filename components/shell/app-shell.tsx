@@ -16,6 +16,14 @@ import {
   type Breadcrumb,
 } from "./breadcrumbs";
 
+import {
+  getServerSupabaseClient,
+} from "../../src/infrastructure/supabase/server-client";
+
+import {
+  getCurrentOrgSummary,
+} from "../../src/application/organizations/get-current-org-context";
+
 export interface AppShellProps {
   experience?: Experience;
   activeNavLabel?: string;
@@ -32,8 +40,12 @@ export interface AppShellProps {
  * from Phase 5 onward -- present as a layout slot now so its
  * introduction later doesn't reflow every screen built against this
  * shell in the meantime.
+ *
+ * Async: resolves the current org summary once per render so Topbar
+ * shows the real signed-in user's organization, not the Phase 2 static
+ * placeholder -- every existing call site keeps working unchanged.
  */
-export function AppShell(
+export async function AppShell(
   {
     experience,
     activeNavLabel,
@@ -42,9 +54,19 @@ export function AppShell(
     children,
   }: AppShellProps,
 ) {
+  const supabase =
+    await getServerSupabaseClient();
+
+  const orgSummary =
+    await getCurrentOrgSummary(
+      supabase,
+    );
+
   return (
     <div className="flex h-dvh flex-col bg-[var(--surface-page)]">
-      <Topbar />
+      <Topbar
+        organizationName={orgSummary?.organizationName ?? null}
+      />
 
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
