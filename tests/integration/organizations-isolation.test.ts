@@ -677,5 +677,301 @@ describe.skipIf(!localSupabaseReachable)(
         );
       },
     );
+
+    describe(
+      "membership management (20260828110000)",
+      () => {
+        it(
+          "OWNER can change another member's role and remove them; a plain MEMBER and a different org's OWNER cannot",
+          async () => {
+            const password =
+              `isolation-test-password-${runId}!`;
+
+            // A fresh org (own OWNER) with one additional MEMBER, so
+            // this test doesn't disturb the shared orgA/orgB fixtures
+            // other tests in this file depend on.
+            const { data: freshOrg, error: freshOrgError } =
+              await serviceClient
+                .from("organizations")
+                .insert(
+                  {
+                    name: `Membership Mgmt Org ${runId}`,
+                    slug: `membership-mgmt-org-${runId}`,
+                    capabilities: ["IMPORTER_DECLARANT"],
+                  },
+                )
+                .select("id")
+                .single();
+
+            if (freshOrgError || !freshOrg) {
+              throw new Error(
+                `Failed to create fresh org: ${freshOrgError?.message}`,
+              );
+            }
+
+            const freshOrgId =
+              freshOrg.id;
+
+            const { data: ownerUser, error: ownerUserError } =
+              await serviceClient.auth.admin.createUser(
+                {
+                  email: `mgmt-owner-${runId}@example.com`,
+                  password,
+                  email_confirm: true,
+                },
+              );
+
+            // Two separate MEMBER-level users: promotedMember gets
+            // promoted then removed (exercising the OWNER's UPDATE and
+            // DELETE authorization); plainMember stays MEMBER the
+            // entire test, specifically to prove a plain MEMBER cannot
+            // delete SOMEONE ELSE's row -- reusing promotedMember for
+            // that check would be wrong once they've actually been
+            // promoted to ADMIN (a real bug in an earlier draft of
+            // this test: it asserted "still MEMBER-level" about a user
+            // this same test had just promoted to ADMIN two steps
+            // earlier, so the "denied" expectation was never true).
+            const { data: promotedMember, error: promotedMemberError } =
+              await serviceClient.auth.admin.createUser(
+                {
+                  email: `mgmt-promoted-${runId}@example.com`,
+                  password,
+                  email_confirm: true,
+                },
+              );
+
+            const { data: plainMember, error: plainMemberError } =
+              await serviceClient.auth.admin.createUser(
+                {
+                  email: `mgmt-plain-${runId}@example.com`,
+                  password,
+                  email_confirm: true,
+                },
+              );
+
+            if (
+              ownerUserError || !ownerUser.user ||
+              promotedMemberError || !promotedMember.user ||
+              plainMemberError || !plainMember.user
+            ) {
+              throw new Error(
+                `Failed to create membership-mgmt test users: ${ownerUserError?.message ?? promotedMemberError?.message ?? plainMemberError?.message}`,
+              );
+            }
+
+            const { error: membershipInsertError } =
+              await serviceClient
+                .from("memberships")
+                .insert(
+                  [
+                    {
+                      org_id: freshOrgId,
+                      user_id: ownerUser.user.id,
+                      role: "OWNER",
+                    },
+                    {
+                      org_id: freshOrgId,
+                      user_id: promotedMember.user.id,
+                      role: "MEMBER",
+                    },
+                    {
+                      org_id: freshOrgId,
+                      user_id: plainMember.user.id,
+                      role: "MEMBER",
+                    },
+                  ],
+                )
+                .select("id, role");
+
+            if (membershipInsertError) {
+              throw new Error(
+                `Failed to create memberships: ${membershipInsertError.message}`,
+              );
+            }
+
+            const { data: membershipRows, error: membershipRowsError } =
+              await serviceClient
+                .from("memberships")
+                .select("id, user_id")
+                .eq("org_id", freshOrgId);
+
+            if (membershipRowsError || !membershipRows) {
+              throw new Error(
+                `Failed to look up membership rows: ${membershipRowsError?.message}`,
+              );
+            }
+
+            const promotedMembershipId =
+              membershipRows.find(
+                (row) => row.user_id === promotedMember.user.id,
+              )?.id;
+
+            const plainMembershipId =
+              membershipRows.find(
+                (row) => row.user_id === plainMember.user.id,
+              )?.id;
+
+            if (!promotedMembershipId || !plainMembershipId) {
+              throw new Error(
+                "Failed to resolve membership row ids for the test users.",
+              );
+            }
+
+            try {
+              const clientOwner =
+                await signInAnonClient(
+                  `mgmt-owner-${runId}@example.com`,
+                  password,
+                );
+
+              const clientPromoted =
+                await signInAnonClient(
+                  `mgmt-promoted-${runId}@example.com`,
+                  password,
+                );
+
+              const clientPlain =
+                await signInAnonClient(
+                  `mgmt-plain-${runId}@example.com`,
+                  password,
+                );
+
+              // A MEMBER cannot promote themselves -- RLS filters the
+              // row out of the UPDATE's target set (zero rows
+              // affected), not a permission error.
+              const { data: selfPromoteResult, error: selfPromoteError } =
+                await clientPromoted
+                  .from("memberships")
+                  .update(
+                    { role: "OWNER" },
+                  )
+                  .eq("id", promotedMembershipId)
+                  .select("id");
+
+              expect(selfPromoteError).toBeNull();
+              expect(selfPromoteResult).toHaveLength(0);
+
+              // A different org's OWNER (userA, from the shared
+              // fixtures) cannot touch this org's memberships either.
+              const { data: crossOrgResult, error: crossOrgError } =
+                await clientA
+                  .from("memberships")
+                  .update(
+                    { role: "ADMIN" },
+                  )
+                  .eq("id", promotedMembershipId)
+                  .select("id");
+
+              expect(crossOrgError).toBeNull();
+              expect(crossOrgResult).toHaveLength(0);
+
+              // The OWNER of THIS org can change a member's role.
+              const { data: promoted, error: promoteError } =
+                await clientOwner
+                  .from("memberships")
+                  .update(
+                    { role: "ADMIN" },
+                  )
+                  .eq("id", promotedMembershipId)
+                  .select("role")
+                  .single();
+
+              expect(promoteError).toBeNull();
+              expect(promoted?.role).toBe("ADMIN");
+
+              // A plain MEMBER (never promoted) cannot remove a
+              // DIFFERENT member's row either.
+              const { data: memberDeleteResult, error: memberDeleteError } =
+                await clientPlain
+                  .from("memberships")
+                  .delete()
+                  .eq("id", promotedMembershipId)
+                  .select("id");
+
+              expect(memberDeleteError).toBeNull();
+              expect(memberDeleteResult).toHaveLength(0);
+
+              // The OWNER can remove the (now-ADMIN) member.
+              const { data: removed, error: removeError } =
+                await clientOwner
+                  .from("memberships")
+                  .delete()
+                  .eq("id", promotedMembershipId)
+                  .select("id");
+
+              expect(removeError).toBeNull();
+              expect(removed).toHaveLength(1);
+
+              // The plain member's own row is untouched throughout.
+              const { data: plainStillMember, error: plainStillMemberError } =
+                await serviceClient
+                  .from("memberships")
+                  .select("role")
+                  .eq("id", plainMembershipId)
+                  .single();
+
+              expect(plainStillMemberError).toBeNull();
+              expect(plainStillMember?.role).toBe("MEMBER");
+
+              // list_org_members (20260828120000): a member of this
+              // org sees the remaining two members (owner + plain --
+              // promotedMember was just removed) with correct emails.
+              const { data: memberList, error: memberListError } =
+                await clientOwner.rpc(
+                  "list_org_members",
+                  { p_org_id: freshOrgId },
+                );
+
+              expect(memberListError).toBeNull();
+              expect(
+                memberList
+                  ?.map(
+                    (row: { email: string }) => row.email,
+                  )
+                  .sort(),
+              ).toEqual(
+                [
+                  `mgmt-owner-${runId}@example.com`,
+                  `mgmt-plain-${runId}@example.com`,
+                ].sort(),
+              );
+
+              // A stranger to this org (userA, from the shared
+              // fixtures) cannot call it for this org at all -- the
+              // function raises, it doesn't just return an empty list.
+              const { error: strangerListError } =
+                await clientA.rpc(
+                  "list_org_members",
+                  { p_org_id: freshOrgId },
+                );
+
+              expect(strangerListError).not.toBeNull();
+            } finally {
+              await serviceClient
+                .from("memberships")
+                .delete()
+                .eq("org_id", freshOrgId);
+
+              await serviceClient
+                .from("organizations")
+                .delete()
+                .eq("id", freshOrgId);
+
+              await serviceClient.auth.admin.deleteUser(
+                ownerUser.user.id,
+              );
+
+              await serviceClient.auth.admin.deleteUser(
+                promotedMember.user.id,
+              );
+
+              await serviceClient.auth.admin.deleteUser(
+                plainMember.user.id,
+              );
+            }
+          },
+        );
+      },
+    );
   },
 );
