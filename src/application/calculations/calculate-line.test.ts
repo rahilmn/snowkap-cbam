@@ -8,6 +8,10 @@ import {
   calculateLine,
 } from "./calculate-line";
 
+import {
+  ENGINE_VERSION,
+} from "../../domain/calculations/types";
+
 const orgId =
   "org-1" as never;
 
@@ -189,7 +193,7 @@ describe(
             status: "OK",
             calculation: {
               status: "INPUT_UNRESOLVED",
-              engine_version: "1.0.0",
+              engine_version: ENGINE_VERSION,
             },
           },
         );

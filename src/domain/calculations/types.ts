@@ -30,7 +30,7 @@ export type EngineVersion =
   string;
 
 export const ENGINE_VERSION: EngineVersion =
-  "1.0.0";
+  "1.1.0";
 
 /**
  * Identifies one ACTIVE regulatory dataset the calculation engine read
@@ -122,25 +122,29 @@ export interface CalculationResult {
  *   buildResolutionSnapshot never freezes a non-AVAILABLE total, so
  *   this should not occur in practice, but the engine checks rather
  *   than trusting that.
- * - ACTUAL_METHOD_NOT_YET_SUPPORTED: the determination method is
- *   ACTUAL (RULE-EE-002/003, P7 scope) -- registered but not
- *   implemented in this phase.
- * - UNIT_UNSUPPORTED: the resolved snapshot's emission_unit (a
- *   free-form string from the regulatory dataset, RegulatoryRecord.
- *   emission_unit) is not consistent with the line's own quantity
- *   basis (TONNES vs MWH). P4's QUANTITY_UNIT_MISMATCH check already
- *   validates the *good's* functional_unit against the declared
- *   quantity kind at classification time -- a different table
- *   (cbam_goods) from the *emission record's own* emission_unit
- *   (default_emission_values), which nothing else validates. Found in
- *   the mandatory P6 review: RULE-EE-001 assumed this could never
- *   diverge without an explicit guard.
+ * - UNIT_UNSUPPORTED: the determination's emission_unit (a free-form
+ *   string -- from the regulatory dataset for DEFAULT, RegulatoryRecord.
+ *   emission_unit; producer-entered for ACTUAL, EmissionData.emission_unit)
+ *   is not consistent with the line's own quantity basis (TONNES vs
+ *   MWH). P4's QUANTITY_UNIT_MISMATCH check already validates the
+ *   *good's* functional_unit against the declared quantity kind at
+ *   classification time -- a different table (cbam_goods) from the
+ *   *emission record's own* emission_unit, which nothing else
+ *   validates. Found in the mandatory P6 review for RULE-EE-001;
+ *   applied to RULE-EE-009 (ACTUAL) from the start.
+ *
+ * ACTUAL_METHOD_NOT_YET_SUPPORTED existed here through P6 (RULE-EE-002/
+ * 003 registered but not implemented) and was removed once RULE-EE-009
+ * implemented the ACTUAL-method branch in P7 -- an ACTUAL determination
+ * now returns COMPUTED, VALUE_UNAVAILABLE is DEFAULT-only (an
+ * ActualEmissionSnapshot's values are always populated DecimalStrings,
+ * never a RegulatoryValue status union), and UNIT_UNSUPPORTED covers
+ * both methods.
  */
 export type CalculationStatus =
   | "COMPUTED"
   | "INPUT_UNRESOLVED"
   | "VALUE_UNAVAILABLE"
-  | "ACTUAL_METHOD_NOT_YET_SUPPORTED"
   | "UNIT_UNSUPPORTED";
 
 export type LineEmissionsCalculation =

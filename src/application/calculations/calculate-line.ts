@@ -60,13 +60,13 @@ function quantityInput(
 }
 
 /**
- * Runs the pure engine (calculateLineEmissions, RULE-EE-001) against a
- * shipment line. Only a COMPUTED result is persisted to
- * calculation_results, as a new row -- "appends," not "writes,"
- * because recalculation is always a new row
- * (docs/plans/MASTER_PLAN.md §6/§12); this function never updates a
- * prior calculation_results row. A non-computable outcome
- * (INPUT_UNRESOLVED / VALUE_UNAVAILABLE / ACTUAL_METHOD_NOT_YET_SUPPORTED)
+ * Runs the pure engine (calculateLineEmissions, RULE-EE-001 for DEFAULT
+ * determinations / RULE-EE-009 for ACTUAL ones) against a shipment
+ * line. Only a COMPUTED result is persisted to calculation_results, as
+ * a new row -- "appends," not "writes," because recalculation is
+ * always a new row (docs/plans/MASTER_PLAN.md §6/§12); this function
+ * never updates a prior calculation_results row. A non-computable
+ * outcome (INPUT_UNRESOLVED / VALUE_UNAVAILABLE / UNIT_UNSUPPORTED)
  * is returned to the caller but never written -- same precedent as
  * P5's resolve-line-emissions.ts never persisting an UNRESOLVED
  * attempt.

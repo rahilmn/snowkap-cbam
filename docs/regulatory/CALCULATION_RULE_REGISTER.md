@@ -569,6 +569,83 @@ the paragraph above.
   point D.4.3).
 - **Golden regression fixture**: none — out of P7 scope; not implemented.
 
+## RULE-EE-009 — Line embedded emissions from an ACTUAL determination
+
+- **Classification**: APPLICATION DESIGN DECISION combining REGULATORY FACTs — same
+  classification shape as RULE-EE-001, its direct structural sibling for the ACTUAL
+  method.
+- **Owner decision (2026-08-29) this rule depends on**: "Pass-through — RULE-EE-002/003
+  document what producers should already compute upstream." The application does **not**
+  implement RULE-EE-002/003's own `SEE_g = AttrEm_g / AL_g` (simple goods) or
+  `SEE_g = (AttrEm_g + EE_InpMat) / AL_g` (complex goods) derivations — no activity-level
+  or precursor-attribution computation exists or is planned in-app.
+  `EmissionData.direct_specific`/`indirect_specific` (`src/domain/emissions/types.ts`,
+  freeform producer-entered `DecimalString` inputs, unchanged by this rule) are trusted as
+  the producer's own already-computed `SEE_g` components, verified through the existing
+  producer verification workflow (P7-B) rather than recomputed by this engine. RULE-EE-002
+  and RULE-EE-003 remain registered above as the regulatory basis for what those two
+  fields represent and how a producer is expected to have derived them — traceability, not
+  an in-app spec.
+- **Authoritative regulation**: Regulation (EU) 2023/956, Annex IV point 2/3's own
+  `AttrEm_g = DirEm + IndirEm` sub-formula (the one piece of RULE-EE-002/003 this rule
+  actually executes — see Formula below) — same source citations as RULE-EE-002/003's own
+  entries above, not repeated here.
+- **Applicability**: a shipment line whose `emission_determination.method === "ACTUAL"`
+  (`src/domain/emissions/types.ts`) — i.e. a P7-D `ActualEmissionSnapshot` exists, frozen
+  from a producer's own or a validly shared, ACTIVE+VERIFIED, evidence-complete
+  `EmissionData` record (owner's evidence-completeness blocking policy,
+  `checkEmissionDataEvidenceCompleteness`, already enforces the last of those upstream of
+  this rule — this rule trusts that the snapshot could only have been created for a
+  complete, verified record, per the two-wall discipline the rest of this codebase
+  already uses elsewhere: this rule is not itself a completeness/verification check).
+- **Inputs**: `quantity` (the line's `net_mass_tonnes` in tonnes, or `quantity_mwh` in MWh
+  — same as RULE-EE-001); `snapshot.values.direct_specific` and
+  `snapshot.values.indirect_specific` (`ActualEmissionSnapshot`, both `DecimalString`).
+- **Units**: tonnes × tCO2e/tonne = tCO2e for mass goods; MWh × tCO2e/MWh = tCO2e for
+  electricity — identical unit structure to RULE-EE-001. `snapshot.emission_unit` is
+  validated against the line's own quantity basis (`net_mass_tonnes` vs `quantity_mwh`)
+  before use, the same `UNIT_UNSUPPORTED` guard RULE-EE-001 already applies (found
+  necessary there in the mandatory P6 review; applied here from the start rather than
+  waiting for its own review to find the same gap).
+- **Formula**: `line_embedded_emissions = quantity × (direct_specific + indirect_specific)`.
+  Unlike RULE-EE-001 (which trusts the regulatory dataset's own pre-summed `total` field
+  rather than re-deriving `direct + indirect` in application code — see that rule's own
+  design rationale), this rule's engine code **does** perform the
+  `AttrEm_g = DirEm + IndirEm` summation itself, because `ActualEmissionSnapshot` stores
+  `direct_specific`/`indirect_specific` as two separate fields with no pre-summed total
+  (unlike `RegulatoryResolutionSnapshot.values.total`) — there is no equivalent
+  already-published total to trust instead, and Annex IV point 2/3's own
+  `AttrEm_g = DirEm + IndirEm` is exactly this summation, verbatim, so performing it here
+  is applying a cited regulatory formula, not inferring one.
+- **Rounding rule**: none — same "never rounded before P9" posture as RULE-EE-001,
+  extended here deliberately: RULE-EE-006 (Precision and rounding) found the rounding
+  *method* genuinely unresolved across all three primary sources checked (Regulation (EU)
+  2023/956, Implementing Regulation (EU) 2025/2547, and the EU ETS Monitoring and
+  Reporting Regulation (EU) 2018/2066 CBAM's own methodology derives from) — full
+  `Decimal` precision is carried through and persisted unrounded, exactly as RULE-EE-001
+  already does, deferring the method choice to P9 rather than guessing at it now. This
+  rule does not depend on or wait for that unresolved question — it inherits RULE-EE-001's
+  own already-approved answer to the identical structural question.
+- **Exceptions**: none at this rule's own level. `snapshot.verification.status` is a
+  branded `Extract<VerificationStatus, "VERIFIED">` in the `ActualEmissionSnapshot` type
+  itself (`src/domain/emissions/types.ts`) — a snapshot literally cannot exist without
+  having been VERIFIED, so this rule does not re-check verification status; it trusts the
+  snapshot's own type-level guarantee, the same way RULE-EE-001 trusts P5's
+  `buildResolutionSnapshot` never freezing a non-RESOLVED result.
+- **Data/evidence requirements**: none additional at this rule's level — see RULE-EE-002/
+  003's own Data/evidence requirements bullets for what the underlying `EmissionData`
+  record itself required to become verifiable in the first place; this rule consumes only
+  the already-frozen snapshot.
+- **Source URL**: `https://eur-lex.europa.eu/eli/reg/2023/956/oj/eng` (Annex IV point 2/3's
+  `AttrEm_g = DirEm + IndirEm` sub-formula — see RULE-EE-002/003's own Source URL bullets
+  for the full citation of each point).
+- **Golden regression fixture**: `src/domain/calculations/calculate-line-emissions.test.ts`
+  — an ACTUAL determination on a mass good, an ACTUAL determination on an electricity
+  good, exact decimal precision (direct+indirect summed then multiplied, not rounded),
+  `UNIT_UNSUPPORTED` for a mismatched basis, and a cross-org (shared) determination
+  computing identically to an own-org one (the engine does not and should not care about
+  `sharing_grant_id`).
+
 ---
 
 ## Explicitly not yet registered (FUTURE-DEFERRED, per master plan §17/§37)

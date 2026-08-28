@@ -148,9 +148,6 @@ function calculationStatusMessageFor(
     case "VALUE_UNAVAILABLE":
       return "The resolved value isn't usable for calculation.";
 
-    case "ACTUAL_METHOD_NOT_YET_SUPPORTED":
-      return "Calculation from actual emissions data isn't available yet.";
-
     case "UNIT_UNSUPPORTED":
       return "The resolved emission unit doesn't match this line's quantity -- this needs review before it can be calculated.";
 
