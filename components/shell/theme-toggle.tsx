@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useState,
 } from "react";
 
@@ -20,6 +21,23 @@ const STORAGE_KEY =
 type Theme =
   | "light"
   | "dark";
+
+/**
+ * useLayoutEffect (not useEffect) so the icon/aria-label correction
+ * below runs synchronously before the browser paints, not after --
+ * with useEffect there is a one-frame flash where this control shows
+ * the wrong icon and an aria-label contradicting the theme
+ * app/layout.tsx's inline head script already applied to <html>
+ * (see the docstring on ThemeToggle). useLayoutEffect is a no-op
+ * during SSR (this is a "use client" component that still gets
+ * server-rendered for the initial HTML), which React warns about by
+ * default; falling back to useEffect there avoids that warning
+ * without reintroducing the flash, since nothing paints during SSR.
+ */
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined"
+    ? useEffect
+    : useLayoutEffect;
 
 function applyTheme(
   theme: Theme,
@@ -58,7 +76,7 @@ export function ThemeToggle() {
       null,
     );
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const stored =
       document.documentElement.getAttribute(
         "data-theme",
