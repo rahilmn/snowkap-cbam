@@ -36,20 +36,36 @@ function noValueResult(
  * `emissionUnit` is a free-form string, but the two sources that
  * populate it use genuinely different conventions: the regulatory
  * dataset's own `emission_unit` (DEFAULT path) is always spelled out
- * ("TCO2E_PER_TONNE" -- confirmed live, RULE-EE-001's own register
- * entry), while a producer's freeform `EmissionData.emission_unit`
- * field (ACTUAL path) follows the abbreviated format the producer
- * entry form itself suggests as a placeholder
- * (app/(producer)/emission-data/emission-data-form.tsx: "e.g. tCO2e/t")
- * -- "TONNE" alone does not match "tCO2e/t" (found live while
- * verifying RULE-EE-009 in browser: a real producer-style unit string
- * was incorrectly rejected as UNIT_UNSUPPORTED). "/T" (a slash directly
- * followed by T, as in ".../t") additionally matches the abbreviated
- * mass-basis convention without false-matching "TCO2E_PER_MWH" or
- * "tCO2e/MWh" (neither contains "/T" -- the character after their own
- * slash is "M", not "T"). Purely additive relative to the original
- * "TONNE"-only check: every unit string the DEFAULT path has ever
- * actually produced still matches exactly as before.
+ * ("TCO2E_PER_TONNE" -- confirmed live, and constrained at the DB layer
+ * to exactly {'TCO2E_PER_TONNE','TCO2_PER_MWH'},
+ * 20260826133116_create_regulatory_foundation.sql:367-373 -- this
+ * function's own "TONNE"/"MWH" checks are only safe for the DEFAULT
+ * path *because* of that constraint, not because of anything this
+ * function itself verifies), while a producer's freeform
+ * `EmissionData.emission_unit` field (ACTUAL path) has NO such
+ * constraint (recordEmissionData passes it through unvalidated,
+ * src/application/emissions/manage-emission-data.ts) and follows the
+ * abbreviated format the producer entry form itself suggests as a
+ * placeholder (app/(producer)/emission-data/emission-data-form.tsx:
+ * "e.g. tCO2e/t") -- "TONNE" alone does not match "tCO2e/t" (found
+ * live while verifying RULE-EE-009 in browser: a real producer-style
+ * unit string was incorrectly rejected as UNIT_UNSUPPORTED).
+ *
+ * A first fix (bare `.includes("/T")`) was itself a bug, found in the
+ * mandatory RULE-EE-009 engine review: `tCO2/TJ` (the standard EU ETS
+ * MRR emission-factor denominator CBAM's own methodology derives
+ * from -- not a contrived string), `tCO2e/TWh`, and `tCO2e/Th` all
+ * contain "/T" as a bare substring (TJ/TWh/Th all start with T) while
+ * being genuinely energy-denominated, not tonnes-denominated -- that
+ * version silently accepted them as mass-basis and computed a
+ * fabricated number instead of UNIT_UNSUPPORTED, exactly the failure
+ * this guard exists to prevent. Fixed with an anchored pattern: "/T"
+ * only counts when NOT immediately followed by another letter/digit
+ * (so "/T" and "/t" match, but "/TJ"/"/TWh"/"/Th" do not), plus
+ * whitespace normalization so "tCO2e / t" (a space around the slash)
+ * isn't spuriously rejected either. Verified against both the original
+ * false-negative ("tCO2e/t") and this new false-positive class
+ * ("tCO2/TJ", "tCO2e/TWh", "tCO2e/Th") before trusting it.
  *
  * Distinct from -- and unvalidated against -- the *good's*
  * `functional_unit` that P4's classification already checked the
@@ -57,16 +73,22 @@ function noValueResult(
  * different table). Found in the mandatory P6 review for RULE-EE-001;
  * applied to RULE-EE-009 from the start rather than waiting for its
  * own review to find the same gap.
+ *
+ * The real fix is an allow-list on EmissionData.emission_unit at entry
+ * (a DB CHECK or a small enum, mirroring default_emission_values' own
+ * constraint) so the engine stops string-sniffing free text at all --
+ * this function remains a stop-gap until that lands, not a permanent
+ * design.
  */
 function unitMatchesQuantityBasis(
   emissionUnit: string,
   netMassTonnes: DecimalString | null,
 ): boolean {
   const normalized =
-    emissionUnit.toUpperCase();
+    emissionUnit.toUpperCase().replace(/\s+/g, "");
 
   return netMassTonnes !== null
-    ? normalized.includes("TONNE") || normalized.includes("/T")
+    ? normalized.includes("TONNE") || /\/T(?![A-Z0-9])/.test(normalized)
     : normalized.includes("MWH");
 }
 
@@ -124,18 +146,35 @@ function calculateFromDefaultDetermination(
  * pre-summed `total` rather than re-deriving it, ActualEmissionSnapshot
  * has no pre-summed total -- the direct+indirect summation
  * (Annex IV point 2/3's own `AttrEm_g = DirEm + IndirEm`) is performed
- * here directly. `snapshot.verification.status` is a branded
- * `Extract<VerificationStatus, "VERIFIED">` at the type level
- * (src/domain/emissions/types.ts) -- a snapshot cannot exist unverified,
- * so this function does not re-check it, the same way the DEFAULT path
- * trusts P5's buildResolutionSnapshot never freezing a non-RESOLVED
- * result.
+ * here directly.
+ *
+ * `snapshot.verification.status` is a branded
+ * `Extract<VerificationStatus, "VERIFIED">` at the TYPE level
+ * (src/domain/emissions/types.ts), but this function re-checks it
+ * anyway at runtime -- found in the mandatory RULE-EE-009 engine
+ * review: the guarantee is only a compile-time fiction once the
+ * snapshot round-trips through `shipment_lines.emission_determination
+ * jsonb` (no CHECK constraint on that column,
+ * 20260828150000_p4_shipment_intake_schema.sql) and is read back
+ * through an unchecked cast (shipment-mapper.ts) -- a value that is
+ * NOT "VERIFIED" at runtime would otherwise pass straight through.
+ * Same defense-in-depth reasoning RULE-EE-001 already applies to a
+ * non-AVAILABLE resolved `total` (that path's own comment: "this rule
+ * is the engine's own defense-in-depth check, not a state P5 is
+ * expected to produce") -- applied here for consistency rather than
+ * relying on the type system alone.
  */
 function calculateFromActualDetermination(
   snapshot: ActualEmissionSnapshot,
   quantity: DecimalString,
   netMassTonnes: DecimalString | null,
 ): LineEmissionsCalculation {
+  if (snapshot.verification.status !== "VERIFIED") {
+    return noValueResult(
+      "VALUE_UNAVAILABLE",
+    );
+  }
+
   if (!unitMatchesQuantityBasis(snapshot.emission_unit, netMassTonnes)) {
     return noValueResult(
       "UNIT_UNSUPPORTED",

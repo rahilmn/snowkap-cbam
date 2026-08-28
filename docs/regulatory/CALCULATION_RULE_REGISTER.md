@@ -77,7 +77,17 @@ the paragraph above.
   representing the emission intensity of electricity consumed"). Unit mismatch between a
   line's quantity kind and the good's `functional_unit` is already rejected earlier, at
   classification (`QUANTITY_UNIT_MISMATCH`, P4) — the engine never receives a mismatched
-  pair.
+  pair. The engine's own defense-in-depth unit-basis guard (`unitMatchesQuantityBasis`,
+  `calculate-line-emissions.ts`) is genuinely inert for this rule *in practice* — it stays
+  safe only because `default_emission_values.emission_unit` carries its own DB CHECK
+  (`{'TCO2E_PER_TONNE','TCO2_PER_MWH'}`,
+  `20260826133116_create_regulatory_foundation.sql:367-373`), not because of anything the
+  guard function itself verifies. **2026-08-29 (RULE-EE-009 engine review)**: that guard
+  function is now shared with RULE-EE-009 (ACTUAL) and was widened (adding an anchored
+  `/T` pattern, e.g. matching `tCO2e/t`) to accommodate the ACTUAL path's differently-
+  formatted, unconstrained `EmissionData.emission_unit` field — the widening is provably
+  inert for THIS rule only because of the DB CHECK just cited, not because the function
+  itself distinguishes the two sources' conventions.
 - **Formula**: `line_embedded_emissions = quantity × resolution.values.total.value`.
   Design rationale for using `total` rather than re-deriving `direct + indirect` in
   application code: Annex IV point 1(c) defines specific embedded emissions generically
@@ -136,6 +146,43 @@ the paragraph above.
   `tests/integration/shipments-isolation.test.ts`) — the LOCKED/VOID insert gate was
   verified live via direct role-simulated psql (both the block and the READY-still-works
   case), not via an automated test.
+- **2026-08-29 note (RULE-EE-009 engine review)**: `calculateLineEmissions`'s dispatch was
+  restructured to add the ACTUAL-method branch (RULE-EE-009). One incidental behavior
+  change on THIS rule's own path: the `quantity === null` unreachable-guard throw now
+  fires before the `VALUE_UNAVAILABLE`/`UNIT_UNSUPPORTED` checks instead of after them.
+  Both preconditions (quantity null; a non-AVAILABLE resolved total) are independently
+  unreachable given `isLineQuantityValid`'s exactly-one-quantity invariant
+  (`src/domain/shipments/invariants.ts`), so no reachable input combination is affected —
+  confirmed by the reviewer, not merely asserted here — but the ordering itself was never
+  covered by a test in either direction. Documented as a deliberate, inert reordering
+  rather than restored, since failing loudly on a guard violation earlier is arguably the
+  better default; flagging so a future reader doesn't mistake it for an oversight.
+
+## ESCALATED, NOT PATCHED: RULE-EE-009 vs. RULE-EE-004's Annex II exception (2026-08-29)
+
+RULE-EE-004 (below) documents that this rule (RULE-EE-001) trusts the regulatory
+dataset's own pre-summed `total_emissions` rather than recomputing `direct + indirect` in
+application code *specifically* because recomputing "would silently violate" Article
+7(1) sentence 2 for Annex II goods (iron & steel, aluminium — direct-only), and states:
+"if the engine is ever changed to recompute totals from direct+indirect components, this
+exception must be reintroduced explicitly."
+
+RULE-EE-009 (below) does exactly that recomputation for the ACTUAL method — and the
+Annex II exception was **not** reintroduced. Found and verified independently (not just
+accepted from the review) in the mandatory RULE-EE-009 engine review: `cbam_goods` has no
+field indicating Annex II membership at all (only `sector` — CEMENT/FERTILISERS/
+IRON_STEEL/ALUMINIUM/HYDROGEN/ELECTRICITY — and `functional_unit`, confirmed by reading
+the live schema, `20260826133116_create_regulatory_foundation.sql:218-274`), so there is
+currently no way for the engine to even detect this case, let alone gate it. This is a
+**material regulatory behavior gap requiring an owner decision, not a code patch** — per
+CLAUDE.md's facts-as-datasets rule, the Annex II code list must enter as its own versioned
+regulatory dataset (mirroring how `default_emission_values` itself entered), never a
+hardcoded list, and building that dataset is its own research-and-ingestion pass, not
+something to improvise inside this review-response. See RULE-EE-009's own entry for the
+full disclosure and the interim options recorded there. **This is why RULE-EE-009 is not
+yet considered safe to rely on for Annex II goods (iron & steel, aluminium) using the
+ACTUAL method — DEFAULT-method lines for the same goods are unaffected, since this rule's
+own trust-the-dataset-total design was never at risk.**
 
 ## RULE-EE-002 — Actual specific embedded emissions, simple goods
 
@@ -346,12 +393,18 @@ the paragraph above.
 - **Source URL**: n/a (application-layer safety rule, not a citation to the Regulation).
 - **Golden regression fixture**: `src/domain/calculations/calculate-line-emissions.test.ts`
   — a line with no `emission_determination` produces `INPUT_UNRESOLVED`; a non-AVAILABLE
-  resolved total produces `VALUE_UNAVAILABLE`; an ACTUAL-method determination produces
-  `ACTUAL_METHOD_NOT_YET_SUPPORTED`; a unit/quantity-basis mismatch produces
+  resolved total produces `VALUE_UNAVAILABLE`; a unit/quantity-basis mismatch produces
   `UNIT_UNSUPPORTED` (added post-review, see RULE-EE-001) — none of these ever return a
-  computed value. `REFERENCE_REQUIRED_UNRESOLVED`, `AMBIGUOUS_INPUT`, and
-  `PARAMETER_DATASET_UNAVAILABLE` remain unimplemented (unreachable in P6's DEFAULT-only
-  scope; relevant once P7/future-parameter-dataset work lands).
+  computed value. **2026-08-29 correction**: this bullet previously said an ACTUAL-method
+  determination produces `ACTUAL_METHOD_NOT_YET_SUPPORTED` — stale since RULE-EE-009
+  (below) implemented the ACTUAL branch in P7; that status was removed from
+  `CalculationStatus` entirely (found stale, not caught by typecheck, in the mandatory
+  RULE-EE-009 engine review — `calculationStatusMessageFor` takes a bare `status: string`
+  with a default branch, so nothing structurally would have caught a missed call site).
+  An ACTUAL determination now produces `COMPUTED` (RULE-EE-009) or `UNIT_UNSUPPORTED`,
+  never a separate not-yet-supported status. `REFERENCE_REQUIRED_UNRESOLVED`,
+  `AMBIGUOUS_INPUT`, and `PARAMETER_DATASET_UNAVAILABLE` remain unimplemented (unreachable
+  in P6/P7's current scope; relevant once future-parameter-dataset work lands).
 
 ## RULE-EE-006 — Precision and rounding
 
@@ -626,12 +679,68 @@ the paragraph above.
   already does, deferring the method choice to P9 rather than guessing at it now. This
   rule does not depend on or wait for that unresolved question — it inherits RULE-EE-001's
   own already-approved answer to the identical structural question.
-- **Exceptions**: none at this rule's own level. `snapshot.verification.status` is a
-  branded `Extract<VerificationStatus, "VERIFIED">` in the `ActualEmissionSnapshot` type
-  itself (`src/domain/emissions/types.ts`) — a snapshot literally cannot exist without
-  having been VERIFIED, so this rule does not re-check verification status; it trusts the
-  snapshot's own type-level guarantee, the same way RULE-EE-001 trusts P5's
-  `buildResolutionSnapshot` never freezing a non-RESOLVED result.
+- **Exceptions**: **KNOWN GAP, ESCALATED — NOT YET SAFE FOR ANNEX II GOODS.** RULE-EE-001
+  (above) trusts the regulatory dataset's own pre-summed `total` rather than recomputing
+  `direct + indirect` in application code *specifically* to avoid silently violating
+  Article 7(1) sentence 2 for Annex II goods (iron & steel, aluminium — direct emissions
+  only; see RULE-EE-004), and its own register entry states this exception "must be
+  reintroduced explicitly" if the engine is ever changed to recompute totals. RULE-EE-009
+  performs exactly that recomputation (`AttrEm_g = DirEm + IndirEm`, see Formula below)
+  and does **not** reintroduce the Annex II exception — found and independently verified
+  in the mandatory RULE-EE-009 engine review (2026-08-29). There is currently no data
+  model to detect Annex II membership at all: `cbam_goods` carries only `sector`
+  (CEMENT/FERTILISERS/IRON_STEEL/ALUMINIUM/HYDROGEN/ELECTRICITY) and `functional_unit`,
+  no Annex II flag. For an Annex II line with a producer-declared non-zero
+  `indirect_specific`, RULE-EE-009 currently overstates embedded emissions relative to
+  Article 7(1) — not yet a mis-stated financial obligation, since `certificates_due`/
+  `liability` remain null until P8/P9's parameter datasets exist, but a real
+  correctness gap in the displayed number today. **Not patched in this pass**: per
+  CLAUDE.md's facts-as-datasets rule, the fix needs an Annex II code-list dataset entering
+  through the same versioned-dataset path `default_emission_values` itself used, which is
+  its own research-and-ingestion pass, not something to improvise here — escalated to the
+  owner rather than hardcoded. Interim options recorded for that decision: (a) return an
+  explicit non-computable status for ACTUAL-method lines whose good may plausibly be
+  Annex II until the dataset lands; (b) accept the interim risk with clear internal
+  disclosure (this note) given the mitigating P8/P9-gated liability context above; (c)
+  something else the owner directs. **Until resolved: RULE-EE-009 should not be treated
+  as fully correct for iron & steel or aluminium goods using the ACTUAL method** —
+  DEFAULT-method lines for the same goods are unaffected.
+
+  `snapshot.verification.status` is a branded `Extract<VerificationStatus, "VERIFIED">` in
+  the `ActualEmissionSnapshot` type itself (`src/domain/emissions/types.ts`), so a
+  well-typed snapshot literally cannot carry a non-VERIFIED status. **2026-08-29 (RULE-EE-009
+  engine review, fixed)**: that guarantee is compile-time only — a snapshot round-trips
+  through `shipment_lines.emission_determination jsonb`
+  (`20260828150000_p4_shipment_intake_schema.sql`, no CHECK constraint on that column) and
+  is read back through an unchecked cast (`shipment-mapper.ts`), so a runtime value that is
+  not `"VERIFIED"` would previously have passed straight through to the formula below
+  uncaught. `calculateFromActualDetermination` (`calculate-line-emissions.ts`) now re-checks
+  `snapshot.verification.status !== "VERIFIED"` at runtime as its first guard, returning
+  `VALUE_UNAVAILABLE` rather than trusting the type — the identical defense-in-depth
+  reasoning RULE-EE-001 already applies to a non-`AVAILABLE` resolved `total` (that rule's
+  own note: "this is the engine's own defense-in-depth check, not a state P5 is expected to
+  produce"), applied here for consistency instead of trusting the type system alone.
+  TDD-verified: a test constructing a snapshot with `verification.status` overridden to
+  `"REJECTED"` confirmed the engine silently computed a value before this fix, and confirmed
+  `VALUE_UNAVAILABLE` after it (`calculate-line-emissions.test.ts`).
+
+  A second, narrower gap was considered and **deliberately left as-is** in the same review:
+  `toDecimal(snapshot.values.direct_specific)`/`.indirect_specific` throw an uncaught
+  `DecimalError` (rather than returning a discriminated non-computable status) if either
+  string is malformed. Not changed, for two reasons. First, precedent already inside this
+  same file: `calculateLineEmissions`'s own `quantity === null` guard also throws for a
+  state it document as "unreachable given `isLineQuantityValid`'s exactly-one-quantity
+  invariant" rather than returning a status — a malformed `DecimalString` on a
+  verification-gated snapshot is the same category of "should be impossible, not a normal
+  non-computable outcome" as that guard, not the same category as a genuinely expected
+  regulatory gap (`VALUE_UNAVAILABLE`, `UNIT_UNSUPPORTED`). Second, unlike
+  `snapshot.verification.status` (which loses its type guarantee crossing the JSONB
+  boundary), `direct_specific`/`indirect_specific` are protected by real DB-level CHECK
+  constraints on `emission_data` (`20260829230000_p7b_emission_data_schema.sql`: regex +
+  numeric format), so a malformed value is unreachable through the legitimate
+  snapshot-construction path even after the JSONB round-trip — there is no equivalent
+  "silently passes through" scenario to defend against. If that constraint is ever relaxed
+  or a snapshot-construction path bypasses it, this decision should be revisited.
 - **Data/evidence requirements**: none additional at this rule's level — see RULE-EE-002/
   003's own Data/evidence requirements bullets for what the underlying `EmissionData`
   record itself required to become verifiable in the first place; this rule consumes only
@@ -642,9 +751,17 @@ the paragraph above.
 - **Golden regression fixture**: `src/domain/calculations/calculate-line-emissions.test.ts`
   — an ACTUAL determination on a mass good, an ACTUAL determination on an electricity
   good, exact decimal precision (direct+indirect summed then multiplied, not rounded),
-  `UNIT_UNSUPPORTED` for a mismatched basis, and a cross-org (shared) determination
-  computing identically to an own-org one (the engine does not and should not care about
-  `sharing_grant_id`).
+  `UNIT_UNSUPPORTED` for a mismatched basis, a cross-org (shared) determination computing
+  identically to an own-org one (the engine does not and should not care about
+  `sharing_grant_id`), acceptance of the producer-facing abbreviated unit format
+  ("tCO2e/t"/"tCO2e/MWh", not just the regulatory dataset's spelled-out convention), and
+  (2026-08-29, RULE-EE-009 engine review) rejection of energy-denominated units that
+  happen to contain a bare "/T" substring ("tCO2/TJ", "tCO2e/TWh", "tCO2e/Th" — the
+  standard EU ETS MRR emission-factor denominator among them, not contrived strings) on a
+  mass line, locking in the fix for a real false-positive found live in that review; and
+  (2026-08-29, same review) `VALUE_UNAVAILABLE` — never a computed value — for a snapshot
+  whose `verification.status` is not `"VERIFIED"` at runtime despite the type-level
+  guarantee, confirmed red (silently computed a value) before the fix and green after.
 
 ---
 

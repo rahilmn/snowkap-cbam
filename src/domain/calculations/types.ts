@@ -117,11 +117,16 @@ export interface CalculationResult {
  * fabricated, and never written to calculation_results.
  *
  * - INPUT_UNRESOLVED: the line has no emission_determination at all.
- * - VALUE_UNAVAILABLE: a DEFAULT determination's resolved total value
- *   is not AVAILABLE -- defense-in-depth only; P5's
- *   buildResolutionSnapshot never freezes a non-AVAILABLE total, so
- *   this should not occur in practice, but the engine checks rather
- *   than trusting that.
+ * - VALUE_UNAVAILABLE: defense-in-depth only, in both methods --
+ *   (DEFAULT) a resolved total value is not AVAILABLE, though P5's
+ *   buildResolutionSnapshot never freezes a non-AVAILABLE total in
+ *   practice; (ACTUAL, P7/RULE-EE-009) a snapshot's verification.status
+ *   is not "VERIFIED", though that is a branded, type-level-only
+ *   guarantee (Extract<VerificationStatus, "VERIFIED">) that does not
+ *   survive the round-trip through shipment_lines.emission_determination
+ *   jsonb (no CHECK constraint on that column) and back through an
+ *   unchecked cast. Neither case should occur in practice, but the
+ *   engine checks rather than trusting that, mirroring each other.
  * - UNIT_UNSUPPORTED: the determination's emission_unit (a free-form
  *   string -- from the regulatory dataset for DEFAULT, RegulatoryRecord.
  *   emission_unit; producer-entered for ACTUAL, EmissionData.emission_unit)
@@ -131,15 +136,21 @@ export interface CalculationResult {
  *   classification time -- a different table (cbam_goods) from the
  *   *emission record's own* emission_unit, which nothing else
  *   validates. Found in the mandatory P6 review for RULE-EE-001;
- *   applied to RULE-EE-009 (ACTUAL) from the start.
+ *   applied to RULE-EE-009 (ACTUAL) from the start. **Known,
+ *   escalated gap** (docs/regulatory/CALCULATION_RULE_REGISTER.md,
+ *   RULE-EE-009's own Exceptions bullet): this guard alone does not
+ *   detect an Annex II good using the ACTUAL method with a non-zero
+ *   indirect_specific -- there is no Annex II membership data anywhere
+ *   in this schema yet, so RULE-EE-009 can currently overstate embedded
+ *   emissions for iron & steel / aluminium ACTUAL-method lines. Not
+ *   patched here -- needs a new versioned regulatory dataset, escalated
+ *   to the owner rather than hardcoded.
  *
  * ACTUAL_METHOD_NOT_YET_SUPPORTED existed here through P6 (RULE-EE-002/
  * 003 registered but not implemented) and was removed once RULE-EE-009
  * implemented the ACTUAL-method branch in P7 -- an ACTUAL determination
- * now returns COMPUTED, VALUE_UNAVAILABLE is DEFAULT-only (an
- * ActualEmissionSnapshot's values are always populated DecimalStrings,
- * never a RegulatoryValue status union), and UNIT_UNSUPPORTED covers
- * both methods.
+ * now returns COMPUTED (or one of the non-computable statuses above,
+ * same as DEFAULT), never a separate not-yet-supported status.
  */
 export type CalculationStatus =
   | "COMPUTED"

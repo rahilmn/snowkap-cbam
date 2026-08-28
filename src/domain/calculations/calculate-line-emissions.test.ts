@@ -483,6 +483,82 @@ describe(
     );
 
     it(
+      "rejects energy-denominated units on a mass line that happen to contain the letter T -- the '/T' widening must not become a bare substring trap (found in the mandatory RULE-EE-009 engine review)",
+      () => {
+        // tCO2/TJ is the standard EU ETS MRR emission-factor denominator
+        // -- not a contrived string -- and emission_unit has no CHECK
+        // constraint (recordEmissionData passes it through unvalidated),
+        // so a producer entering it is genuinely reachable. Each of
+        // these contains "/T" as a bare substring (TJ, TWh, Th all
+        // start with T) but is NOT a tonnes-denominated unit.
+        const energyDenominatedUnits =
+          [
+            "tCO2/TJ",
+            "kgCO2e/TJ",
+            "tCO2e/TWh",
+            "tCO2e/Th",
+          ];
+
+        for (const unit of energyDenominatedUnits) {
+          const result =
+            calculateLineEmissions(
+              {
+                net_mass_tonnes: "10" as never,
+                quantity_mwh: null,
+                emission_determination: actualDetermination(
+                  {},
+                  unit,
+                ),
+              },
+            );
+
+          expect(result).toEqual(
+            { status: "UNIT_UNSUPPORTED", engine_version: ENGINE_VERSION },
+          );
+        }
+      },
+    );
+
+    it(
+      "returns VALUE_UNAVAILABLE (never a computed value) for an ACTUAL snapshot whose verification.status is not VERIFIED -- defense in depth: the type-level Extract<VerificationStatus, 'VERIFIED'> guarantee does not survive a JSONB round-trip at runtime (found in the mandatory RULE-EE-009 engine review), the same reasoning RULE-EE-001 already applies to a non-AVAILABLE resolved total",
+      () => {
+        const determination =
+          actualDetermination();
+
+        if (determination.method !== "ACTUAL") {
+          throw new Error(
+            "expected ACTUAL",
+          );
+        }
+
+        const corruptedDetermination: EmissionDetermination =
+          {
+            method: "ACTUAL",
+            snapshot: {
+              ...determination.snapshot,
+              verification: {
+                status: "REJECTED" as never,
+                verifier_user_id: "user-1" as never,
+              },
+            },
+          };
+
+        const result =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10.5" as never,
+              quantity_mwh: null,
+              emission_determination: corruptedDetermination,
+            },
+          );
+
+        expect(result).toEqual(
+          { status: "VALUE_UNAVAILABLE", engine_version: ENGINE_VERSION },
+        );
+      },
+    );
+
+    it(
       "computes identically for a cross-org (shared) ACTUAL determination as for an own-org one -- the engine does not care about sharing_grant_id",
       () => {
         const result =
