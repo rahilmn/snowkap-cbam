@@ -9,10 +9,11 @@ product plan this codebase is being built toward.
 
 A CBAM compliance platform, built around a verified regulatory
 foundation. The regulatory subsystem is production-grade and protected;
-almost everything else (product domain, UI, API, auth, tenancy) is
-under active construction per the phase roadmap in the master plan. Do
-not assume features described in the master plan already exist — check
-the actual code.
+a branded Next.js application shell and design system exist (`app/`,
+`components/`); auth, tenancy, and the actual product screens
+(shipments, emissions, calculations) are under active construction per
+the phase roadmap in the master plan. Do not assume features described
+in the master plan already exist — check the actual code.
 
 ## Protected regulatory foundation
 
@@ -68,7 +69,14 @@ for the full rules — in short:
 - `src/application/**` depends on domain types and port interfaces
   only — never `@supabase/*` directly, and (with one grandfathered
   exception) never `src/infrastructure/**`.
-- `src/infrastructure/**` is unrestricted.
+- `src/infrastructure/**` is unrestricted, but every entry point that
+  touches Supabase or reads secret-bearing env vars carries
+  `import "server-only";` as its first import (defense in depth against
+  ever reaching a client bundle — see `src/infrastructure/supabase/client.ts`).
+- `app/**` (outside `app/api/**`) and `components/**` must not import
+  `src/infrastructure/**` directly — reach it through an application
+  service once one exists. `app/api/**` route handlers are the
+  sanctioned exception (health checks, uploads/downloads, webhooks).
 - Regulated numerics are always `DecimalString`
   (`src/domain/shared/decimal.ts`), never `number`.
 - Expected outcomes are discriminated `{status, reason}` unions
