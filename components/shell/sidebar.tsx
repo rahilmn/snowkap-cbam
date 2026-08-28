@@ -21,6 +21,8 @@ import type {
   ComponentType,
 } from "react";
 
+import Link from "next/link";
+
 import {
   cn,
 } from "../../lib/utils";
@@ -32,6 +34,10 @@ export type Experience =
 interface NavItem {
   label: string;
   icon: ComponentType<{ className?: string }>;
+  // Real screens are wired one at a time as they're built (§27's
+  // screen inventory) -- items without an href stay inert placeholders
+  // rather than 404ing.
+  href?: string;
 }
 
 /**
@@ -68,7 +74,7 @@ const PRODUCER_NAV: NavItem[] = [
 ];
 
 const SETTINGS_NAV: NavItem[] = [
-  { label: "Team", icon: Users },
+  { label: "Team", icon: Users, href: "/team" },
   { label: "Organization", icon: Building2 },
   { label: "Settings", icon: Settings },
 ];
@@ -139,29 +145,60 @@ function SidebarSection(
           const Icon =
             item.icon;
 
-          return (
-            <li key={item.label}>
-              <button
-                type="button"
-                disabled
-                aria-current={
-                  isActive
-                    ? "page"
-                    : undefined
-                }
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 py-1.5 text-left text-sm transition-colors duration-150 disabled:cursor-default",
-                  isActive
-                    ? "bg-[var(--surface-sunken)] font-medium text-[var(--text-primary)]"
-                    : "text-[var(--text-secondary)]",
-                )}
-              >
+          const itemClassName =
+            cn(
+              "flex w-full items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 py-1.5 text-left text-sm transition-colors duration-150",
+              isActive
+                ? "bg-[var(--surface-sunken)] font-medium text-[var(--text-primary)]"
+                : "text-[var(--text-secondary)]",
+              !item.href &&
+                "disabled:cursor-default",
+            );
+
+          const content =
+            (
+              <>
                 <Icon className="size-4 shrink-0" />
 
                 <span className="truncate">
                   {item.label}
                 </span>
-              </button>
+              </>
+            );
+
+          return (
+            <li key={item.label}>
+              {item.href ? (
+                <Link
+                  href={item.href}
+                  aria-current={
+                    isActive
+                      ? "page"
+                      : undefined
+                  }
+                  className={
+                    cn(
+                      itemClassName,
+                      "hover:bg-[var(--surface-sunken)]",
+                    )
+                  }
+                >
+                  {content}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  aria-current={
+                    isActive
+                      ? "page"
+                      : undefined
+                  }
+                  className={itemClassName}
+                >
+                  {content}
+                </button>
+              )}
             </li>
           );
         },
