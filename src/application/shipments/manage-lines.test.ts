@@ -96,22 +96,30 @@ function mockSupabase(
   {
     shipmentResult = { data: { release_date: "2026-03-15" }, error: null },
     lineFetchResult = {
-      data: { shipment_id: "ship-1", shipments: { release_date: "2026-03-15" } },
+      data: { org_id: "org-1", shipment_id: "ship-1", shipments: { release_date: "2026-03-15" } },
       error: null,
     },
+    // Separate from lineFetchResult -- removeLine's ownership pre-check
+    // selects only "org_id" (see the comment on removeLine itself), so
+    // the mock's select() below branches on the requested columns rather
+    // than reusing whichever result updateLine's broader fetch expects.
+    ownerFetchResult = { data: { org_id: "org-1" }, error: null },
     maxLineNumberResult = { data: [], error: null },
     insertResult,
     updateResult,
     deleteResult,
     updatePayloads = [] as unknown[],
+    deleteCalls = [] as unknown[],
   }: {
     shipmentResult?: { data: unknown; error: unknown };
     lineFetchResult?: { data: unknown; error: unknown };
+    ownerFetchResult?: { data: unknown; error: unknown };
     maxLineNumberResult?: { data: unknown; error: unknown };
     insertResult?: { data: unknown; error: unknown };
     updateResult?: { data: unknown; error: unknown };
     deleteResult?: { data: unknown; error: unknown };
     updatePayloads?: unknown[];
+    deleteCalls?: unknown[];
   },
 ) {
   return {
@@ -144,16 +152,20 @@ function mockSupabase(
         };
       }
 
-      // shipment_lines: .select() is called twice by addLine (the
-      // parent-shipment lookup happens against "shipments" above, but
-      // updateLine's .select() with an embedded shipments(...) relation
-      // and addLine's max-line-number .select() both target this
-      // table) -- distinguish by call order isn't reliable across the
-      // two functions under test, so updateLine's test cases supply
-      // lineFetchResult and addLine's supply maxLineNumberResult; the
-      // mock just returns whichever chain shape matches what's called.
+      // shipment_lines: .select() is called by addLine (max-line-number),
+      // updateLine (its own row, with an embedded shipments(...)
+      // relation) and removeLine (its org_id-only ownership pre-check),
+      // all against this same table -- distinguish by call order isn't
+      // reliable across the functions under test, so the mock switches
+      // on the requested columns instead: an exact "org_id" select is
+      // removeLine's ownership check (ownerFetchResult), anything else
+      // reaching .maybeSingle() is updateLine's row fetch
+      // (lineFetchResult), and the .order().limit() shape is addLine's
+      // max-line-number lookup (maxLineNumberResult).
       return {
-        select: () => (
+        select: (
+          columns?: string,
+        ) => (
           {
             eq: () => (
               {
@@ -168,7 +180,7 @@ function mockSupabase(
 
                 maybeSingle: () =>
                   Promise.resolve(
-                    lineFetchResult,
+                    columns === "org_id" ? ownerFetchResult : lineFetchResult,
                   ),
               }
             ),
@@ -211,8 +223,12 @@ function mockSupabase(
           };
         },
 
-        delete: () => (
-          {
+        delete: () => {
+          deleteCalls.push(
+            true,
+          );
+
+          return {
             eq: () => (
               {
                 select: () => (
@@ -225,8 +241,8 @@ function mockSupabase(
                 ),
               }
             ),
-          }
-        ),
+          };
+        },
       };
     },
   } as never;
@@ -514,6 +530,7 @@ describe(
               {
                 lineFetchResult: {
                   data: {
+                    org_id: "org-1",
                     shipment_id: "ship-1",
                     shipments: { release_date: "2026-03-15" },
                   },
@@ -536,6 +553,46 @@ describe(
 
         expect(updatePayloads[0]).toMatchObject(
           { emission_determination: null },
+        );
+      },
+    );
+
+    it(
+      "reports SHIPMENT_NOT_FOUND (not a more specific reason) when the line belongs to a different org than the caller's active org",
+      async () => {
+        const updatePayloads: unknown[] =
+          [];
+
+        const result =
+          await updateLine(
+            mockSupabase(
+              {
+                lineFetchResult: {
+                  data: {
+                    org_id: "org-2",
+                    shipment_id: "ship-1",
+                    emission_determination: null,
+                    shipments: { release_date: "2026-03-15" },
+                  },
+                  error: null,
+                },
+                updateResult: { data: { ...lineRow, org_id: "org-2" }, error: null },
+                updatePayloads,
+              },
+            ),
+            mockRepository(),
+            orgId,
+            actorUserId,
+            lineId,
+            validInput,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "SHIPMENT_NOT_FOUND" },
+        );
+
+        expect(updatePayloads).toHaveLength(
+          0,
         );
       },
     );
@@ -584,6 +641,39 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "SHIPMENT_NOT_EDITABLE" },
+        );
+      },
+    );
+
+    it(
+      "reports SHIPMENT_NOT_EDITABLE (not a more specific reason) when the line belongs to a different org than the caller's active org",
+      async () => {
+        const deleteCalls: unknown[] =
+          [];
+
+        const result =
+          await removeLine(
+            mockSupabase(
+              {
+                ownerFetchResult: { data: { org_id: "org-2" }, error: null },
+                deleteResult: {
+                  data: { shipment_id: "ship-1", line_number: 1 },
+                  error: null,
+                },
+                deleteCalls,
+              },
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "SHIPMENT_NOT_EDITABLE" },
+        );
+
+        expect(deleteCalls).toHaveLength(
+          0,
         );
       },
     );

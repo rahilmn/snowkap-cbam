@@ -395,7 +395,7 @@ export async function updateLine(
     await supabase
       .from("shipment_lines")
       .select(
-        "shipment_id, emission_determination, shipments(release_date)",
+        "org_id, shipment_id, emission_determination, shipments(release_date)",
       )
       .eq("id", lineId)
       .maybeSingle();
@@ -408,6 +408,29 @@ export async function updateLine(
   }
 
   if (!lineRow) {
+    return {
+      status: "REJECTED",
+      reason: "SHIPMENT_NOT_FOUND",
+    };
+  }
+
+  const lineOrgId =
+    (lineRow as { org_id: string }).org_id;
+
+  // `orgId` is the caller's *active* org (from the client-writable
+  // preferred-org cookie, validated only as "a membership the caller
+  // has"), not necessarily the org that owns `lineId` -- same precedent
+  // as fetchLineForResolution's doc comment in
+  // ../emissions/resolve-line-emissions.ts. RLS alone still confines the
+  // eventual UPDATE to an org the caller belongs to, but without this
+  // check a caller whose active org is A, submitting a lineId that
+  // actually belongs to their other org B, would update B's line and
+  // record the resulting audit event under A's org_id -- a cross-
+  // aggregate audit misattribution, found in review. Rejecting as
+  // SHIPMENT_NOT_FOUND (not a more specific reason) matches how an
+  // out-of-scope id is treated everywhere else in this codebase -- it
+  // doesn't reveal that the id exists under a different org.
+  if (lineOrgId !== orgId) {
     return {
       status: "REJECTED",
       reason: "SHIPMENT_NOT_FOUND",
@@ -527,6 +550,41 @@ export async function removeLine(
   actorUserId: UserId,
   lineId: ShipmentLineId,
 ): Promise<RemoveLineResult> {
+  // `orgId` is the caller's *active* org (from the client-writable
+  // preferred-org cookie, validated only as "a membership the caller
+  // has"), not necessarily the org that owns `lineId` -- same precedent
+  // as fetchLineForResolution's doc comment in
+  // ../emissions/resolve-line-emissions.ts. RLS alone still confines the
+  // eventual DELETE to an org the caller belongs to, but without this
+  // pre-check a caller whose active org is A, submitting a lineId that
+  // actually belongs to their other org B, would delete B's line and
+  // record the resulting audit event under A's org_id -- a cross-
+  // aggregate audit misattribution, found in review. Rejecting as
+  // SHIPMENT_NOT_EDITABLE (not a more specific reason) reuses the same
+  // reason this function already gives for "not found/not editable" (see
+  // the comment below) -- it doesn't reveal that the id exists under a
+  // different org.
+  const { data: ownerRow, error: ownerFetchError } =
+    await supabase
+      .from("shipment_lines")
+      .select("org_id")
+      .eq("id", lineId)
+      .maybeSingle();
+
+  if (ownerFetchError) {
+    return {
+      status: "REJECTED",
+      reason: "FETCH_FAILED",
+    };
+  }
+
+  if (!ownerRow || (ownerRow as { org_id: string }).org_id !== orgId) {
+    return {
+      status: "REJECTED",
+      reason: "SHIPMENT_NOT_EDITABLE",
+    };
+  }
+
   const { data, error } =
     await supabase
       .from("shipment_lines")
