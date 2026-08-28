@@ -19,6 +19,20 @@ import type {
 } from "../emissions/types";
 
 /**
+ * Bumped on any behavioral change to the engine (a new/changed rule, a
+ * different rounding policy, a different trace shape) -- see
+ * docs/plans/MASTER_PLAN.md §17: "same inputs + version => byte-identical
+ * output, re-provable on demand." Every CalculationResult carries the
+ * engine_version that produced it, never recomputed silently against a
+ * newer version.
+ */
+export type EngineVersion =
+  string;
+
+export const ENGINE_VERSION: EngineVersion =
+  "1.0.0";
+
+/**
  * Identifies one ACTIVE regulatory dataset the calculation engine read
  * (beyond the DEFAULT_EMISSION_VALUES dataset already captured inside
  * the line's own EmissionDetermination snapshot) — e.g. a MARKUPS,
@@ -88,3 +102,44 @@ export interface CalculationResult {
   calculated_at: IsoTimestamp;
   correlation_id: string | null;
 }
+
+/**
+ * The pure engine's own return shape (calculate-line-emissions.ts) --
+ * distinct from CalculationResult above, which is the *persisted*
+ * record and therefore assumes a successful computation (outputs.
+ * embedded_emissions_tco2e is non-nullable). Only a COMPUTED result is
+ * ever turned into a CalculationResult row -- mirroring how P5's
+ * resolveLineEmissions never persists an UNRESOLVED attempt either
+ * (src/application/emissions/resolve-line-emissions.ts): every other
+ * status here is an explicit non-computable outcome
+ * (docs/regulatory/CALCULATION_RULE_REGISTER.md RULE-EE-005) that the
+ * caller surfaces for that render/response only, never zero, never
+ * fabricated, and never written to calculation_results.
+ *
+ * - INPUT_UNRESOLVED: the line has no emission_determination at all.
+ * - VALUE_UNAVAILABLE: a DEFAULT determination's resolved total value
+ *   is not AVAILABLE -- defense-in-depth only; P5's
+ *   buildResolutionSnapshot never freezes a non-AVAILABLE total, so
+ *   this should not occur in practice, but the engine checks rather
+ *   than trusting that.
+ * - ACTUAL_METHOD_NOT_YET_SUPPORTED: the determination method is
+ *   ACTUAL (RULE-EE-002/003, P7 scope) -- registered but not
+ *   implemented in this phase.
+ */
+export type CalculationStatus =
+  | "COMPUTED"
+  | "INPUT_UNRESOLVED"
+  | "VALUE_UNAVAILABLE"
+  | "ACTUAL_METHOD_NOT_YET_SUPPORTED";
+
+export type LineEmissionsCalculation =
+  | {
+      status: "COMPUTED";
+      engine_version: EngineVersion;
+      embedded_emissions_tco2e: DecimalString;
+      steps: CalculationStep[];
+    }
+  | {
+      status: Exclude<CalculationStatus, "COMPUTED">;
+      engine_version: EngineVersion;
+    };
