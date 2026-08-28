@@ -33,6 +33,10 @@ import {
 } from "../../../../src/application/calculations/get-latest-calculations";
 
 import {
+  listAvailableActualEmissionData,
+} from "../../../../src/application/emissions/list-available-actual-data";
+
+import {
   formatReportingPeriod,
 } from "../../../../src/domain/shared/reporting-period";
 
@@ -96,6 +100,16 @@ export default async function ShipmentDetailPage(
     await getLatestCalculationsByShipment(
       supabase,
       shipment.id,
+    );
+
+  // Org-wide, not per-line -- deliberately not filtered against any one
+  // line's CN code (see listAvailableActualEmissionData's own doc
+  // comment for why); the same list is threaded down to every line's
+  // EmissionsCell.
+  const availableActualData =
+    await listAvailableActualEmissionData(
+      supabase,
+      orgSummary.context.org_id,
     );
 
   const editable =
@@ -187,6 +201,7 @@ export default async function ShipmentDetailPage(
           lines={shipment.lines}
           editable={editable}
           latestCalculations={latestCalculations}
+          availableActualData={availableActualData}
         />
       </Card>
 

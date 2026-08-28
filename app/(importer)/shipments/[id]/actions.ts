@@ -38,6 +38,11 @@ import {
 } from "../../../../src/application/emissions/resolve-line-emissions";
 
 import {
+  determineLineFromActualData,
+  redetermineLineFromActualData,
+} from "../../../../src/application/emissions/determine-from-actual-data";
+
+import {
   calculateLine,
 } from "../../../../src/application/calculations/calculate-line";
 
@@ -560,6 +565,139 @@ export async function resolveEmissionsAction(
       reason: result.resolution.reason,
       trace: result.resolution.trace,
       message: unresolvedMessageFor(result.resolution.reason),
+    };
+  }
+
+  revalidatePath(
+    `/shipments/${parsed.data.shipmentId}`,
+  );
+
+  return {
+    status: "idle",
+  };
+}
+
+function determineFromActualDataRejectionMessageFor(
+  reason: string,
+): string {
+  switch (reason) {
+    case "LINE_NOT_FOUND":
+      return "That line could not be found.";
+
+    case "EMISSION_DATA_NOT_FOUND":
+      return "That actual-emissions dataset could not be found, or is no longer visible to your organization.";
+
+    case "DATA_INTEGRITY_ERROR":
+      return "This dataset could not be used due to a data integrity problem. Please contact support.";
+
+    case "SHIPMENT_NOT_EDITABLE":
+      return "This shipment is locked or void and can no longer be edited.";
+
+    default:
+      return "Something went wrong. Please try again.";
+  }
+}
+
+const determineFromActualDataSchema =
+  z.object({
+    lineId:
+      z.string().min(1),
+
+    shipmentId:
+      z.string().min(1),
+
+    emissionDataId:
+      z.string().min(1),
+  });
+
+/**
+ * Mirrors resolveEmissionsAction's exact "try determine first, retry as
+ * redetermine on ALREADY_DETERMINED" shape (see that action's own doc
+ * comment for the full reasoning -- identical here, just against the
+ * ACTUAL-data determination pair in determine-from-actual-data.ts
+ * instead of the DEFAULT-resolution pair in resolve-line-emissions.ts).
+ * Unlike resolveEmissionsAction there is no UNRESOLVED outcome on this
+ * path -- determineLineFromActualData/redetermineLineFromActualData only
+ * ever return DETERMINED or REJECTED (a fetched, ACTIVE+VERIFIED
+ * emission_data row is always usable on its own -- nothing here calls
+ * out to the regulatory resolver, which is the only thing that can
+ * produce an UNRESOLVED outcome on the DEFAULT path) -- so this reuses
+ * the plain LineActionState ({status:"idle"|"error"}) rather than the
+ * richer ResolveEmissionsActionState.
+ */
+export async function determineFromActualDataAction(
+  _previousState: LineActionState,
+  formData: FormData,
+): Promise<LineActionState> {
+  const parsed =
+    determineFromActualDataSchema.safeParse(
+      {
+        lineId: formData.get("lineId"),
+        shipmentId: formData.get("shipmentId"),
+        emissionDataId: formData.get("emissionDataId"),
+      },
+    );
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Invalid request.",
+    };
+  }
+
+  const supabase =
+    await getServerSupabaseClient();
+
+  const orgSummary =
+    await getCurrentOrgSummary(
+      supabase,
+      await getPreferredOrgId(),
+    );
+
+  if (!orgSummary) {
+    return {
+      status: "error",
+      message: "You are not a member of an organization.",
+    };
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(
+      "/sign-in",
+    );
+  }
+
+  let result =
+    await determineLineFromActualData(
+      supabase,
+      orgSummary.context.org_id,
+      user.id as never,
+      parsed.data.lineId as never,
+      parsed.data.emissionDataId as never,
+    );
+
+  if (
+    result.status === "REJECTED" &&
+    result.reason === "ALREADY_DETERMINED"
+  ) {
+    result =
+      await redetermineLineFromActualData(
+        supabase,
+        orgSummary.context.org_id,
+        user.id as never,
+        parsed.data.lineId as never,
+        parsed.data.emissionDataId as never,
+      );
+  }
+
+  if (result.status === "REJECTED") {
+    return {
+      status: "error",
+      message: determineFromActualDataRejectionMessageFor(result.reason),
     };
   }
 

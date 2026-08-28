@@ -36,17 +36,23 @@ import type {
   LatestLineCalculation,
 } from "../../../../src/application/calculations/get-latest-calculations";
 
+import type {
+  AvailableActualEmissionDataOption,
+} from "../../../../src/application/emissions/list-available-actual-data";
+
 export function LinesTable(
   {
     shipmentId,
     lines,
     editable,
     latestCalculations,
+    availableActualData,
   }: {
     shipmentId: string;
     lines: ShipmentLine[];
     editable: boolean;
     latestCalculations: Record<string, LatestLineCalculation>;
+    availableActualData: AvailableActualEmissionDataOption[];
   },
 ) {
   if (lines.length === 0) {
@@ -106,6 +112,7 @@ export function LinesTable(
                 line={line}
                 editable={editable}
                 latestCalculation={latestCalculations[line.id]}
+                availableActualData={availableActualData}
               />
             ),
           )}
@@ -121,11 +128,13 @@ function LineRow(
     line,
     editable,
     latestCalculation,
+    availableActualData,
   }: {
     shipmentId: string;
     line: ShipmentLine;
     editable: boolean;
     latestCalculation: LatestLineCalculation | undefined;
+    availableActualData: AvailableActualEmissionDataOption[];
   },
 ) {
   const [
@@ -178,6 +187,7 @@ function LineRow(
           shipmentId={shipmentId}
           line={line}
           editable={editable}
+          availableActualData={availableActualData}
         />
       </td>
 
