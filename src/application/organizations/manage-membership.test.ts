@@ -23,38 +23,63 @@ function mockSupabase(
     selectResult,
     updateError = null,
     deleteError = null,
+    onAuditInsert,
   }: {
     selectResult: { data: unknown; error: unknown };
     updateError?: unknown;
     deleteError?: unknown;
+    onAuditInsert?: (payload: unknown) => void;
   },
 ) {
   return {
-    from: () => (
-      {
-        select: () =>
-          chainableSelect(
-            selectResult,
-          ),
-
-        update: () => (
-          {
-            eq: () =>
-              Promise.resolve(
-                { error: updateError },
-              ),
-          }
+    auth: {
+      getUser: () =>
+        Promise.resolve(
+          { data: { user: { id: "actor-1" } } },
         ),
+    },
 
-        delete: () => (
-          {
-            eq: () =>
-              Promise.resolve(
-                { error: deleteError },
-              ),
+    from: (
+      table: string,
+    ) => (
+      table === "audit_events"
+        ? {
+            insert: (
+              payload: unknown,
+            ) => {
+              onAuditInsert?.(
+                payload,
+              );
+
+              return Promise.resolve(
+                { error: null },
+              );
+            },
           }
-        ),
-      }
+        : {
+            select: () =>
+              chainableSelect(
+                selectResult,
+              ),
+
+            update: () => (
+              {
+                eq: () =>
+                  Promise.resolve(
+                    { error: updateError },
+                  ),
+              }
+            ),
+
+            delete: () => (
+              {
+                eq: () =>
+                  Promise.resolve(
+                    { error: deleteError },
+                  ),
+              }
+            ),
+          }
     ),
   } as never;
 }
@@ -122,6 +147,42 @@ describe(
 
         expect(result).toEqual(
           { status: "OK" },
+        );
+      },
+    );
+
+    it(
+      "records a membership.role_changed audit event on success",
+      async () => {
+        let auditPayload: unknown;
+
+        await changeMemberRole(
+          mockSupabase(
+            {
+              selectResult: twoOwners,
+              onAuditInsert: (payload) => {
+                auditPayload = payload;
+              },
+            },
+          ),
+          orgId,
+          "m-2" as never,
+          "ADMIN",
+        );
+
+        expect(auditPayload).toMatchObject(
+          {
+            org_id: orgId,
+            actor_user_id: "actor-1",
+            event_type: "membership.role_changed",
+            aggregate_type: "MEMBERSHIP",
+            aggregate_id: "m-2",
+            payload: {
+              target_user_id: "u-2",
+              old_role: "OWNER",
+              new_role: "ADMIN",
+            },
+          },
         );
       },
     );
@@ -213,6 +274,38 @@ describe(
 
         expect(result).toEqual(
           { status: "OK" },
+        );
+      },
+    );
+
+    it(
+      "records a membership.removed audit event on success",
+      async () => {
+        let auditPayload: unknown;
+
+        await removeMember(
+          mockSupabase(
+            {
+              selectResult: twoOwners,
+              onAuditInsert: (payload) => {
+                auditPayload = payload;
+              },
+            },
+          ),
+          orgId,
+          "m-2" as never,
+        );
+
+        expect(auditPayload).toMatchObject(
+          {
+            event_type: "membership.removed",
+            aggregate_type: "MEMBERSHIP",
+            aggregate_id: "m-2",
+            payload: {
+              target_user_id: "u-2",
+              removed_role: "OWNER",
+            },
+          },
         );
       },
     );

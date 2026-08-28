@@ -18,6 +18,10 @@ import type {
   OrganizationId,
 } from "../../domain/shared/ids";
 
+import {
+  recordAuditEvent,
+} from "../audit/record-audit-event";
+
 export type ManageMembershipResult =
   | { status: "OK" }
   | {
@@ -91,6 +95,11 @@ export async function changeMemberRole(
     return invariantResult;
   }
 
+  const target =
+    memberships.find(
+      (membership) => membership.id === membershipId,
+    );
+
   const { error: updateError } =
     await supabase
       .from("memberships")
@@ -104,6 +113,28 @@ export async function changeMemberRole(
       status: "REJECTED",
       reason: "PERSIST_FAILED",
     };
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (user) {
+    await recordAuditEvent(
+      supabase,
+      {
+        orgId,
+        actorUserId: user.id as never,
+        eventType: "membership.role_changed",
+        aggregateType: "MEMBERSHIP",
+        aggregateId: membershipId,
+        payload: {
+          target_user_id: target?.user_id,
+          old_role: target?.role,
+          new_role: newRole,
+        },
+      },
+    );
   }
 
   return {
@@ -147,6 +178,11 @@ export async function removeMember(
     return invariantResult;
   }
 
+  const target =
+    memberships.find(
+      (membership) => membership.id === membershipId,
+    );
+
   const { error: deleteError } =
     await supabase
       .from("memberships")
@@ -158,6 +194,27 @@ export async function removeMember(
       status: "REJECTED",
       reason: "PERSIST_FAILED",
     };
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (user) {
+    await recordAuditEvent(
+      supabase,
+      {
+        orgId,
+        actorUserId: user.id as never,
+        eventType: "membership.removed",
+        aggregateType: "MEMBERSHIP",
+        aggregateId: membershipId,
+        payload: {
+          target_user_id: target?.user_id,
+          removed_role: target?.role,
+        },
+      },
+    );
   }
 
   return {
