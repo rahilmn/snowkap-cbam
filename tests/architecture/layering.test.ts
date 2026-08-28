@@ -67,7 +67,7 @@ function listTypeScriptFiles(
       continue;
     }
 
-    if (!entry.endsWith(".ts")) {
+    if (!entry.endsWith(".ts") && !entry.endsWith(".tsx")) {
       continue;
     }
 
@@ -360,6 +360,94 @@ describe(
         );
       },
     );
+
+    it(
+      "catches a page component importing infrastructure directly",
+      () => {
+        const files: SourceFile[] =
+          [
+            {
+              path: "app/widgets/page.tsx",
+              content:
+                `import { getSupabaseClient } from "../../src/infrastructure/supabase/client";`,
+            },
+          ];
+
+        expect(
+          checkLayering(
+            files,
+          ),
+        ).toHaveLength(
+          1,
+        );
+      },
+    );
+
+    it(
+      "catches a UI component importing infrastructure directly",
+      () => {
+        const files: SourceFile[] =
+          [
+            {
+              path: "components/widgets/widget-list.tsx",
+              content:
+                `import { getSupabaseClient } from "../../src/infrastructure/supabase/client";`,
+            },
+          ];
+
+        expect(
+          checkLayering(
+            files,
+          ),
+        ).toHaveLength(
+          1,
+        );
+      },
+    );
+
+    it(
+      "allows a route handler (app/api/**) to import infrastructure directly",
+      () => {
+        const files: SourceFile[] =
+          [
+            {
+              path: "app/api/widgets/route.ts",
+              content:
+                `import { getSupabaseClient } from "../../../src/infrastructure/supabase/client";`,
+            },
+          ];
+
+        expect(
+          checkLayering(
+            files,
+          ),
+        ).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "allows UI to import plain domain types",
+      () => {
+        const files: SourceFile[] =
+          [
+            {
+              path: "app/widgets/page.tsx",
+              content:
+                `import type { Widget } from "../../src/domain/widgets/types";`,
+            },
+          ];
+
+        expect(
+          checkLayering(
+            files,
+          ),
+        ).toEqual(
+          [],
+        );
+      },
+    );
   },
 );
 
@@ -386,6 +474,37 @@ describe(
             [
               ...domainFiles,
               ...applicationFiles,
+            ],
+          );
+
+        expect(
+          violations,
+        ).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "finds zero layering violations in app/ and components/",
+      () => {
+        const appFiles =
+          listTypeScriptFiles(
+            `${REPO_ROOT}app`,
+            "app",
+          );
+
+        const componentFiles =
+          listTypeScriptFiles(
+            `${REPO_ROOT}components`,
+            "components",
+          );
+
+        const violations =
+          checkLayering(
+            [
+              ...appFiles,
+              ...componentFiles,
             ],
           );
 

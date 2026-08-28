@@ -159,6 +159,23 @@ const APPLICATION_GRANDFATHERED_INFRASTRUCTURE_IMPORT =
   "src/infrastructure/regulatory/regulatory-repository";
 
 /**
+ * Route handlers are the sanctioned exception for direct infrastructure
+ * access (docs/plans/MASTER_PLAN.md §28: "route handlers only for
+ * streams (upload/download), health, and future webhooks") -- every
+ * other UI file should reach infrastructure through an application
+ * service once one exists, never around it.
+ */
+function isUiFile(
+  filePath: string,
+): boolean {
+  return (
+    (isUnderDirectory(filePath, "app") &&
+      !isUnderDirectory(filePath, "app/api")) ||
+    isUnderDirectory(filePath, "components")
+  );
+}
+
+/**
  * Checks one file against the layering rules and returns any
  * violations. `files` is only used to know which import targets exist
  * in the domain/application/infrastructure tree at all — this function
@@ -185,7 +202,12 @@ export function checkLayering(
         "src/application",
       );
 
-    if (!isDomain && !isApplication) {
+    const isUi =
+      isUiFile(
+        file.path,
+      );
+
+    if (!isDomain && !isApplication && !isUi) {
       continue;
     }
 
@@ -316,6 +338,26 @@ export function checkLayering(
                 `src/application must not import from "${relativeTarget}" — ` +
                 `the only grandfathered exception is the RegulatoryRepository ` +
                 `port at ${APPLICATION_GRANDFATHERED_INFRASTRUCTURE_IMPORT}.`,
+            },
+          );
+        }
+      }
+
+      if (isUi) {
+        if (
+          isUnderDirectory(
+            relativeTarget,
+            "src/infrastructure",
+          )
+        ) {
+          violations.push(
+            {
+              file: file.path,
+              message:
+                `"${file.path}" must not import from "${relativeTarget}" — ` +
+                `UI (app/** outside app/api/**, and components/**) must reach ` +
+                `infrastructure through an application service, not directly. ` +
+                `Route handlers (app/api/**) are the sanctioned exception.`,
             },
           );
         }
