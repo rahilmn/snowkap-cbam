@@ -64,7 +64,7 @@ const IMPORTER_NAV: NavItem[] = [
 
 const PRODUCER_NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard },
-  { label: "Installations", icon: Factory },
+  { label: "Installations", icon: Factory, href: "/installations" },
   { label: "Production data", icon: Package },
   { label: "Emissions", icon: BarChart3 },
   { label: "Evidence", icon: ClipboardCheck },
