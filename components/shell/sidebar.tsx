@@ -52,10 +52,10 @@ interface NavItem {
  */
 const IMPORTER_NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard },
-  { label: "Shipments", icon: Ship },
+  { label: "Shipments", icon: Ship, href: "/shipments" },
   { label: "Emissions", icon: BarChart3 },
   { label: "Calculations", icon: Calculator },
-  { label: "Suppliers", icon: Truck },
+  { label: "Suppliers", icon: Truck, href: "/suppliers" },
   { label: "Installations", icon: Factory },
   { label: "Audit", icon: ScrollText },
   { label: "Reports", icon: FileStack },
