@@ -156,14 +156,55 @@ export async function createSupplier(
 
 export type RemoveSupplierResult =
   | { status: "OK" }
-  | { status: "REJECTED"; reason: "PERSIST_FAILED" };
+  | { status: "REJECTED"; reason: "SUPPLIER_NOT_FOUND" | "PERSIST_FAILED" };
 
+interface SupplierOwnershipRow {
+  org_id: string;
+}
+
+/**
+ * `orgId` is the caller's *active* org (see fetchLineForResolution in
+ * resolve-line-emissions.ts for the full reasoning), not necessarily
+ * the org that owns `supplierId`. The suppliers_delete_own_org RLS
+ * policy alone confines the delete to *an* org the caller belongs to,
+ * not specifically this active orgId, so without this check a caller
+ * whose active org is A, submitting a supplierId that actually belongs
+ * to their other org B, would delete B's supplier while the audit
+ * event is recorded under A's org_id -- a cross-aggregate audit
+ * misattribution, the same defect found in fetchLineForResolution.
+ * Rejecting as SUPPLIER_NOT_FOUND (not a more specific reason) matches
+ * how an out-of-scope id is treated there -- it doesn't reveal that the
+ * id exists under a different org.
+ */
 export async function removeSupplier(
   supabase: SupabaseClient,
   orgId: OrganizationId,
   actorUserId: UserId,
   supplierId: SupplierId,
 ): Promise<RemoveSupplierResult> {
+  const { data: existing, error: fetchError } =
+    await supabase
+      .from("suppliers")
+      .select(
+        "org_id",
+      )
+      .eq("id", supplierId)
+      .maybeSingle();
+
+  if (fetchError) {
+    return {
+      status: "REJECTED",
+      reason: "PERSIST_FAILED",
+    };
+  }
+
+  if (!existing || (existing as SupplierOwnershipRow).org_id !== orgId) {
+    return {
+      status: "REJECTED",
+      reason: "SUPPLIER_NOT_FOUND",
+    };
+  }
+
   const { error } =
     await supabase
       .from("suppliers")

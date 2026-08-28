@@ -33,11 +33,17 @@ function mockSupabase(
   {
     listResult,
     insertResult,
+    ownershipFetchResult = { data: { org_id: "org-1" }, error: null },
     deleteError = null,
+    deleteCalled,
+    auditInsertCalled,
   }: {
     listResult?: { data: unknown; error: unknown };
     insertResult?: { data: unknown; error: unknown };
+    ownershipFetchResult?: { data: unknown; error: unknown };
     deleteError?: unknown;
+    deleteCalled?: { value: boolean };
+    auditInsertCalled?: { value: boolean };
   },
 ) {
   return {
@@ -46,10 +52,15 @@ function mockSupabase(
     ) => (
       table === "audit_events"
         ? {
-            insert: () =>
-              Promise.resolve(
+            insert: () => {
+              if (auditInsertCalled) {
+                auditInsertCalled.value = true;
+              }
+
+              return Promise.resolve(
                 { error: null },
-              ),
+              );
+            },
           }
         : {
             select: () => (
@@ -59,6 +70,11 @@ function mockSupabase(
                     order: () =>
                       Promise.resolve(
                         listResult,
+                      ),
+
+                    maybeSingle: () =>
+                      Promise.resolve(
+                        ownershipFetchResult,
                       ),
                   }
                 ),
@@ -80,10 +96,15 @@ function mockSupabase(
 
             delete: () => (
               {
-                eq: () =>
-                  Promise.resolve(
+                eq: () => {
+                  if (deleteCalled) {
+                    deleteCalled.value = true;
+                  }
+
+                  return Promise.resolve(
                     { error: deleteError },
-                  ),
+                  );
+                },
               }
             ),
           }
@@ -244,6 +265,64 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "PERSIST_FAILED" },
+        );
+      },
+    );
+
+    it(
+      "rejects SUPPLIER_NOT_FOUND (not OK) when the supplier belongs to a different org than the caller's active org",
+      async () => {
+        const deleteCalled =
+          { value: false };
+
+        const auditInsertCalled =
+          { value: false };
+
+        const result =
+          await removeSupplier(
+            mockSupabase(
+              {
+                ownershipFetchResult: { data: { org_id: "org-2" }, error: null },
+                deleteCalled,
+                auditInsertCalled,
+              },
+            ),
+            orgId,
+            actorUserId,
+            "supplier-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "SUPPLIER_NOT_FOUND" },
+        );
+
+        expect(deleteCalled.value).toBe(
+          false,
+        );
+
+        expect(auditInsertCalled.value).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "reports SUPPLIER_NOT_FOUND when the supplier doesn't exist",
+      async () => {
+        const result =
+          await removeSupplier(
+            mockSupabase(
+              {
+                ownershipFetchResult: { data: null, error: null },
+              },
+            ),
+            orgId,
+            actorUserId,
+            "supplier-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "SUPPLIER_NOT_FOUND" },
         );
       },
     );
