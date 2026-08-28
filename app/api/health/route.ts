@@ -95,6 +95,13 @@ export async function GET(): Promise<NextResponse<HealthCheckResult>> {
       result.checks.database =
         "error";
 
+      // The dataset invariant was never actually checked -- it must not
+      // default to "ok", or a broken deploy reads as fully healthy on
+      // this specific field even though this is exactly the outage the
+      // check exists to surface.
+      result.checks.active_regulatory_dataset =
+        "error";
+
       result.status =
         "degraded";
     } else if ((data ?? []).length === 0) {
@@ -112,6 +119,12 @@ export async function GET(): Promise<NextResponse<HealthCheckResult>> {
     }
   } catch (caught) {
     result.checks.database =
+      "error";
+
+    // Same reasoning as the `error` branch above: getSupabaseClient()
+    // itself can throw (e.g. missing env vars), or the query can reject
+    // outright -- either way the dataset invariant was never checked.
+    result.checks.active_regulatory_dataset =
       "error";
 
     result.status =
