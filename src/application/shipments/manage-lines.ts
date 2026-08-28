@@ -11,7 +11,6 @@ import {
 } from "../../domain/shared/country";
 
 import type {
-  CnCodeLevel,
   ShipmentLine,
   ShipmentLineProductionRoute,
 } from "../../domain/shipments/types";
@@ -22,6 +21,14 @@ import type {
   ShipmentLineId,
   UserId,
 } from "../../domain/shared/ids";
+
+import type {
+  RegulatoryRepository,
+} from "../../infrastructure/regulatory/regulatory-repository";
+
+import {
+  classifyLine,
+} from "./classify-line";
 
 import {
   recordAuditEvent,
@@ -40,16 +47,26 @@ export interface LineQuantityInput {
 
 export interface AddLineInput {
   cnCode: string;
-  cnCodeLevel: CnCodeLevel;
   goodsDescription: string | null;
   originCountry: string;
   quantity: LineQuantityInput;
-  productionRoute: ShipmentLineProductionRoute | null;
+  // Just the route's display name -- the indicator that actually gets
+  // stored is always server-resolved against findProductionRoutes(),
+  // never taken from the caller (ADR-0010 discipline: never trust a
+  // client-claimed indicator).
+  productionRouteName: string | null;
 }
 
 export type ManageLineRejectionReason =
+  | "INVALID_CN_CODE_FORMAT"
+  | "UNSUPPORTED_CODE"
+  | "AMBIGUOUS_CODE"
+  | "QUANTITY_UNIT_MISMATCH"
+  | "ROUTE_NOT_FOUND"
+  | "ROUTE_AMBIGUOUS"
   | "INVALID_QUANTITY"
   | "INVALID_ORIGIN_COUNTRY"
+  | "SHIPMENT_NOT_FOUND"
   | "FETCH_FAILED"
   | "PERSIST_FAILED"
   | "SHIPMENT_NOT_EDITABLE";
@@ -87,8 +104,119 @@ function classifyLineWriteError(
     : "PERSIST_FAILED";
 }
 
+interface ResolvedClassification {
+  cnCodeLevel: "CN8" | "TARIC10";
+  goodsDescription: string | null;
+  productionRoute: ShipmentLineProductionRoute | null;
+}
+
+/**
+ * The shared validate-and-classify pipeline for addLine/updateLine:
+ * format check -> classifyLine (regulatory existence + level,
+ * §20) -> quantity-kind match -> route resolution (server-verified
+ * indicator, never client-supplied). Returns either the fields that
+ * only the regulatory subsystem can determine, or the specific
+ * rejection reason -- callers just persist on success.
+ */
+async function resolveLineClassification(
+  repository: RegulatoryRepository,
+  releaseDate: string,
+  input: Pick<AddLineInput, "cnCode" | "goodsDescription" | "quantity" | "productionRouteName">,
+): Promise<
+  | { status: "OK"; resolved: ResolvedClassification }
+  | { status: "REJECTED"; reason: ManageLineRejectionReason }
+> {
+  const classification =
+    await classifyLine(
+      repository,
+      input.cnCode,
+      releaseDate,
+    );
+
+  if (classification.status === "INVALID_FORMAT") {
+    return {
+      status: "REJECTED",
+      reason: "INVALID_CN_CODE_FORMAT",
+    };
+  }
+
+  if (classification.status === "UNSUPPORTED_CODE") {
+    return {
+      status: "REJECTED",
+      reason: "UNSUPPORTED_CODE",
+    };
+  }
+
+  if (classification.status === "AMBIGUOUS") {
+    return {
+      status: "REJECTED",
+      reason: "AMBIGUOUS_CODE",
+    };
+  }
+
+  const requiredKind =
+    classification.requiredQuantityKind === "ENERGY"
+      ? "ENERGY"
+      : "MASS";
+
+  if (input.quantity.kind !== requiredKind) {
+    return {
+      status: "REJECTED",
+      reason: "QUANTITY_UNIT_MISMATCH",
+    };
+  }
+
+  let productionRoute: ShipmentLineProductionRoute | null =
+    null;
+
+  if (input.productionRouteName) {
+    const routes =
+      await repository.findProductionRoutes(
+        classification.good.sector,
+      );
+
+    const matches =
+      routes.filter(
+        (route) => route.name === input.productionRouteName,
+      );
+
+    if (matches.length === 0) {
+      return {
+        status: "REJECTED",
+        reason: "ROUTE_NOT_FOUND",
+      };
+    }
+
+    if (matches.length > 1) {
+      return {
+        status: "REJECTED",
+        reason: "ROUTE_AMBIGUOUS",
+      };
+    }
+
+    const [route] =
+      matches;
+
+    productionRoute =
+      {
+        name: (route as NonNullable<typeof route>).name,
+        source_route_indicator: (route as NonNullable<typeof route>).source_route_indicator,
+      };
+  }
+
+  return {
+    status: "OK",
+    resolved: {
+      cnCodeLevel: classification.level,
+      goodsDescription: input.goodsDescription ?? classification.good.description,
+      productionRoute,
+    },
+  };
+}
+
 export async function addLine(
   supabase: SupabaseClient,
+  repository: RegulatoryRepository,
   orgId: OrganizationId,
   actorUserId: UserId,
   shipmentId: ShipmentId,
@@ -118,6 +246,38 @@ export async function addLine(
     };
   }
 
+  const { data: shipmentRow, error: shipmentError } =
+    await supabase
+      .from("shipments")
+      .select("release_date")
+      .eq("id", shipmentId)
+      .maybeSingle();
+
+  if (shipmentError) {
+    return {
+      status: "REJECTED",
+      reason: "FETCH_FAILED",
+    };
+  }
+
+  if (!shipmentRow) {
+    return {
+      status: "REJECTED",
+      reason: "SHIPMENT_NOT_FOUND",
+    };
+  }
+
+  const classificationResult =
+    await resolveLineClassification(
+      repository,
+      (shipmentRow as { release_date: string }).release_date,
+      input,
+    );
+
+  if (classificationResult.status === "REJECTED") {
+    return classificationResult;
+  }
+
   const { data: existingLines, error: fetchError } =
     await supabase
       .from("shipment_lines")
@@ -136,6 +296,9 @@ export async function addLine(
   const nextLineNumber =
     ((existingLines?.[0] as { line_number: number } | undefined)?.line_number ?? 0) + 1;
 
+  const { resolved } =
+    classificationResult;
+
   const { data, error } =
     await supabase
       .from("shipment_lines")
@@ -145,14 +308,14 @@ export async function addLine(
           org_id: orgId,
           line_number: nextLineNumber,
           cn_code: input.cnCode,
-          cn_code_level: input.cnCodeLevel,
-          goods_description: input.goodsDescription,
+          cn_code_level: resolved.cnCodeLevel,
+          goods_description: resolved.goodsDescription,
           origin_country: originResult.value,
           ...quantityColumns(
             input.quantity,
           ),
-          production_route_name: input.productionRoute?.name ?? null,
-          production_route_indicator: input.productionRoute?.source_route_indicator ?? null,
+          production_route_name: resolved.productionRoute?.name ?? null,
+          production_route_indicator: resolved.productionRoute?.source_route_indicator ?? null,
         },
       )
       .select(
@@ -198,6 +361,7 @@ export async function addLine(
 
 export async function updateLine(
   supabase: SupabaseClient,
+  repository: RegulatoryRepository,
   orgId: OrganizationId,
   actorUserId: UserId,
   lineId: ShipmentLineId,
@@ -227,20 +391,72 @@ export async function updateLine(
     };
   }
 
+  const { data: lineRow, error: lineFetchError } =
+    await supabase
+      .from("shipment_lines")
+      .select(
+        "shipment_id, shipments(release_date)",
+      )
+      .eq("id", lineId)
+      .maybeSingle();
+
+  if (lineFetchError) {
+    return {
+      status: "REJECTED",
+      reason: "FETCH_FAILED",
+    };
+  }
+
+  if (!lineRow) {
+    return {
+      status: "REJECTED",
+      reason: "SHIPMENT_NOT_FOUND",
+    };
+  }
+
+  const shipmentsRelation =
+    (lineRow as { shipments: { release_date: string } | { release_date: string }[] | null }).shipments;
+
+  const parentShipment =
+    Array.isArray(shipmentsRelation)
+      ? shipmentsRelation[0]
+      : shipmentsRelation;
+
+  if (!parentShipment) {
+    return {
+      status: "REJECTED",
+      reason: "SHIPMENT_NOT_FOUND",
+    };
+  }
+
+  const classificationResult =
+    await resolveLineClassification(
+      repository,
+      parentShipment.release_date,
+      input,
+    );
+
+  if (classificationResult.status === "REJECTED") {
+    return classificationResult;
+  }
+
+  const { resolved } =
+    classificationResult;
+
   const { data, error } =
     await supabase
       .from("shipment_lines")
       .update(
         {
           cn_code: input.cnCode,
-          cn_code_level: input.cnCodeLevel,
-          goods_description: input.goodsDescription,
+          cn_code_level: resolved.cnCodeLevel,
+          goods_description: resolved.goodsDescription,
           origin_country: originResult.value,
           ...quantityColumns(
             input.quantity,
           ),
-          production_route_name: input.productionRoute?.name ?? null,
-          production_route_indicator: input.productionRoute?.source_route_indicator ?? null,
+          production_route_name: resolved.productionRoute?.name ?? null,
+          production_route_indicator: resolved.productionRoute?.source_route_indicator ?? null,
         },
       )
       .eq("id", lineId)

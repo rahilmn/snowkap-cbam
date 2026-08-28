@@ -10,6 +10,14 @@ import {
   updateLine,
 } from "./manage-lines";
 
+import type {
+  RegulatoryRepository,
+} from "../../infrastructure/regulatory/regulatory-repository";
+
+import type {
+  CbamGoodSummary,
+} from "../../domain/regulatory/types";
+
 const orgId =
   "org-1" as never;
 
@@ -22,14 +30,23 @@ const shipmentId =
 const lineId =
   "line-1" as never;
 
+const cementGood: CbamGoodSummary =
+  {
+    trade_code: "25232100",
+    trade_code_type: "CN",
+    record_level: "TRADE_GOOD",
+    sector: "CEMENT",
+    description: "Portland cement",
+    functional_unit: "TONNES",
+  };
+
 const validInput =
   {
     cnCode: "25232100",
-    cnCodeLevel: "CN8" as const,
     goodsDescription: "Portland cement",
     originCountry: "DE",
     quantity: { kind: "MASS" as const, value: "10.5" },
-    productionRoute: null,
+    productionRouteName: null,
   };
 
 const lineRow =
@@ -49,13 +66,46 @@ const lineRow =
     emission_determination: null,
   };
 
+function mockRepository(
+  goods: CbamGoodSummary[] = [cementGood],
+): RegulatoryRepository {
+  return {
+    findActiveDefaultEmissionCandidates: () =>
+      Promise.resolve(
+        [],
+      ),
+
+    findCbamGoodsByCode: () =>
+      Promise.resolve(
+        goods,
+      ),
+
+    searchCbamGoodsByPrefix: () =>
+      Promise.resolve(
+        [],
+      ),
+
+    findProductionRoutes: () =>
+      Promise.resolve(
+        [],
+      ),
+  };
+}
+
 function mockSupabase(
   {
+    shipmentResult = { data: { release_date: "2026-03-15" }, error: null },
+    lineFetchResult = {
+      data: { shipment_id: "ship-1", shipments: { release_date: "2026-03-15" } },
+      error: null,
+    },
     maxLineNumberResult = { data: [], error: null },
     insertResult,
     updateResult,
     deleteResult,
   }: {
+    shipmentResult?: { data: unknown; error: unknown };
+    lineFetchResult?: { data: unknown; error: unknown };
     maxLineNumberResult?: { data: unknown; error: unknown };
     insertResult?: { data: unknown; error: unknown };
     updateResult?: { data: unknown; error: unknown };
@@ -65,80 +115,112 @@ function mockSupabase(
   return {
     from: (
       table: string,
-    ) => (
-      table === "audit_events"
-        ? {
-            insert: () =>
-              Promise.resolve(
-                { error: null },
-              ),
-          }
-        : {
-            select: () => (
-              {
-                eq: () => (
-                  {
-                    order: () => (
-                      {
-                        limit: () =>
-                          Promise.resolve(
-                            maxLineNumberResult,
-                          ),
-                      }
+    ) => {
+      if (table === "audit_events") {
+        return {
+          insert: () =>
+            Promise.resolve(
+              { error: null },
+            ),
+        };
+      }
+
+      if (table === "shipments") {
+        return {
+          select: () => (
+            {
+              eq: () => (
+                {
+                  maybeSingle: () =>
+                    Promise.resolve(
+                      shipmentResult,
                     ),
+                }
+              ),
+            }
+          ),
+        };
+      }
+
+      // shipment_lines: .select() is called twice by addLine (the
+      // parent-shipment lookup happens against "shipments" above, but
+      // updateLine's .select() with an embedded shipments(...) relation
+      // and addLine's max-line-number .select() both target this
+      // table) -- distinguish by call order isn't reliable across the
+      // two functions under test, so updateLine's test cases supply
+      // lineFetchResult and addLine's supply maxLineNumberResult; the
+      // mock just returns whichever chain shape matches what's called.
+      return {
+        select: () => (
+          {
+            eq: () => (
+              {
+                order: () => (
+                  {
+                    limit: () =>
+                      Promise.resolve(
+                        maxLineNumberResult,
+                      ),
                   }
                 ),
+
+                maybeSingle: () =>
+                  Promise.resolve(
+                    lineFetchResult,
+                  ),
               }
             ),
+          }
+        ),
 
-            insert: () => (
+        insert: () => (
+          {
+            select: () => (
+              {
+                single: () =>
+                  Promise.resolve(
+                    insertResult,
+                  ),
+              }
+            ),
+          }
+        ),
+
+        update: () => (
+          {
+            eq: () => (
               {
                 select: () => (
                   {
-                    single: () =>
+                    maybeSingle: () =>
                       Promise.resolve(
-                        insertResult,
+                        updateResult,
                       ),
                   }
                 ),
               }
             ),
+          }
+        ),
 
-            update: () => (
+        delete: () => (
+          {
+            eq: () => (
               {
-                eq: () => (
+                select: () => (
                   {
-                    select: () => (
-                      {
-                        maybeSingle: () =>
-                          Promise.resolve(
-                            updateResult,
-                          ),
-                      }
-                    ),
-                  }
-                ),
-              }
-            ),
-
-            delete: () => (
-              {
-                eq: () => (
-                  {
-                    select: () => (
-                      {
-                        maybeSingle: () =>
-                          Promise.resolve(
-                            deleteResult,
-                          ),
-                      }
-                    ),
+                    maybeSingle: () =>
+                      Promise.resolve(
+                        deleteResult,
+                      ),
                   }
                 ),
               }
             ),
           }
-    ),
+        ),
+      };
+    },
   } as never;
 }
 
@@ -156,6 +238,7 @@ describe(
                 insertResult: { data: lineRow, error: null },
               },
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             shipmentId,
@@ -195,6 +278,7 @@ describe(
                 insertResult: { data: { ...lineRow, line_number: 4 }, error: null },
               },
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             shipmentId,
@@ -217,6 +301,7 @@ describe(
             mockSupabase(
               {},
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             shipmentId,
@@ -237,6 +322,7 @@ describe(
             mockSupabase(
               {},
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             shipmentId,
@@ -245,6 +331,71 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "INVALID_ORIGIN_COUNTRY" },
+        );
+      },
+    );
+
+    it(
+      "rejects an unsupported CN code before touching shipment_lines",
+      async () => {
+        const result =
+          await addLine(
+            mockSupabase(
+              {},
+            ),
+            mockRepository(
+              [],
+            ),
+            orgId,
+            actorUserId,
+            shipmentId,
+            validInput,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "UNSUPPORTED_CODE" },
+        );
+      },
+    );
+
+    it(
+      "rejects a quantity kind that doesn't match the good's functional unit",
+      async () => {
+        const result =
+          await addLine(
+            mockSupabase(
+              {},
+            ),
+            mockRepository(),
+            orgId,
+            actorUserId,
+            shipmentId,
+            { ...validInput, quantity: { kind: "ENERGY", value: "10" } },
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "QUANTITY_UNIT_MISMATCH" },
+        );
+      },
+    );
+
+    it(
+      "reports SHIPMENT_NOT_FOUND when the parent shipment doesn't exist",
+      async () => {
+        const result =
+          await addLine(
+            mockSupabase(
+              { shipmentResult: { data: null, error: null } },
+            ),
+            mockRepository(),
+            orgId,
+            actorUserId,
+            shipmentId,
+            validInput,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "SHIPMENT_NOT_FOUND" },
         );
       },
     );
@@ -262,6 +413,7 @@ describe(
                 },
               },
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             shipmentId,
@@ -287,6 +439,7 @@ describe(
             mockSupabase(
               { updateResult: { data: lineRow, error: null } },
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             lineId,
@@ -307,6 +460,7 @@ describe(
             mockSupabase(
               { updateResult: { data: null, error: null } },
             ),
+            mockRepository(),
             orgId,
             actorUserId,
             lineId,
@@ -315,6 +469,27 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "SHIPMENT_NOT_EDITABLE" },
+        );
+      },
+    );
+
+    it(
+      "reports SHIPMENT_NOT_FOUND when the line's parent can't be resolved",
+      async () => {
+        const result =
+          await updateLine(
+            mockSupabase(
+              { lineFetchResult: { data: null, error: null } },
+            ),
+            mockRepository(),
+            orgId,
+            actorUserId,
+            lineId,
+            validInput,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "SHIPMENT_NOT_FOUND" },
         );
       },
     );
