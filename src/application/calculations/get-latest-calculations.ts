@@ -44,12 +44,16 @@ interface CalculationResultRow {
  * COMPUTED results -- see calculate-line.ts) -- the UI renders that as
  * "Not calculated," not as an error.
  *
- * Reduced in application code (rather than a DISTINCT ON query) to
- * keep the query itself simple and let the existing
- * (org_id, line_id, calculated_at desc) index serve it well even as
- * history accumulates -- the row count per shipment stays small
- * (calculations per line, not per shipment), so this is not a scale
- * concern.
+ * Reads the latest_calculation_results view (DISTINCT ON line_id,
+ * ordered calculated_at desc / id desc for a deterministic tiebreak --
+ * see 20260829200000_p6_calculation_results_hardening.sql) rather than
+ * fetching every row for the shipment and reducing in application
+ * code: an earlier version did exactly that and, found in the
+ * mandatory P6 review, silently truncated past PostgREST's row cap
+ * once a shipment's calculation history (across all its lines and
+ * every recalculation) exceeded it -- lines whose only calculation
+ * fell outside the newest rows would render as "Not calculated" even
+ * though they had been.
  */
 export async function getLatestCalculationsByShipment(
   supabase: SupabaseClient,
@@ -57,12 +61,11 @@ export async function getLatestCalculationsByShipment(
 ): Promise<Record<string, LatestLineCalculation>> {
   const { data, error } =
     await supabase
-      .from("calculation_results")
+      .from("latest_calculation_results")
       .select(
         "line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at",
       )
-      .eq("shipment_id", shipmentId)
-      .order("calculated_at", { ascending: false });
+      .eq("shipment_id", shipmentId);
 
   if (error || !data) {
     return {};
@@ -72,10 +75,6 @@ export async function getLatestCalculationsByShipment(
     {};
 
   for (const row of data as CalculationResultRow[]) {
-    if (latestByLine[row.line_id]) {
-      continue;
-    }
-
     latestByLine[row.line_id] =
       {
         engine_version: row.engine_version,

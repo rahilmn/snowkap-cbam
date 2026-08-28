@@ -258,7 +258,7 @@ describe(
     );
 
     it(
-      "reports PERSIST_FAILED when the insert fails",
+      "reports PERSIST_FAILED when the insert fails for an ordinary reason",
       async () => {
         const result =
           await calculateLine(
@@ -272,6 +272,25 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "PERSIST_FAILED" },
+        );
+      },
+    );
+
+    it(
+      "reports SHIPMENT_NOT_EDITABLE when RLS rejects a LOCKED/VOID shipment's calculation (42501)",
+      async () => {
+        const result =
+          await calculateLine(
+            mockSupabase(
+              { insertResult: { error: { code: "42501", message: "denied" } } },
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "SHIPMENT_NOT_EDITABLE" },
         );
       },
     );

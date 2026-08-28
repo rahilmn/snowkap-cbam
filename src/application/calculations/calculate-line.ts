@@ -3,6 +3,10 @@ import type {
 } from "@supabase/supabase-js";
 
 import {
+  randomUUID,
+} from "node:crypto";
+
+import {
   calculateLineEmissions,
 } from "../../domain/calculations/calculate-line-emissions";
 
@@ -32,7 +36,8 @@ import {
 export type CalculateLineRejectionReason =
   | "LINE_NOT_FOUND"
   | "FETCH_FAILED"
-  | "PERSIST_FAILED";
+  | "PERSIST_FAILED"
+  | "SHIPMENT_NOT_EDITABLE";
 
 export type CalculateLineResult =
   | { status: "OK"; calculation: LineEmissionsCalculation }
@@ -127,6 +132,20 @@ export async function calculateLine(
     };
   }
 
+  // Shared between this row and its audit event so the two can be
+  // cross-checked later (e.g. a future reproduction check flagging any
+  // calculation_results row with no matching audit event as
+  // suspect -- calculation_results is writable by any authenticated
+  // member of the line's own org per its RLS policy, which constrains
+  // scope/ownership but not the correctness of the numbers themselves;
+  // found in the mandatory P6 review and tracked as a P11 hardening
+  // item rather than redesigned here, since the real fix -- routing
+  // writes through a SECURITY DEFINER RPC that recomputes and
+  // compares, or removing direct INSERT entirely -- is a materially
+  // larger change than this review-fix pass).
+  const correlationId =
+    randomUUID();
+
   const { error: insertError } =
     await supabase
       .from("calculation_results")
@@ -144,13 +163,21 @@ export async function calculateLine(
           steps: calculation.steps,
           embedded_emissions_tco2e: calculation.embedded_emissions_tco2e,
           calculated_by_user_id: actorUserId,
+          correlation_id: correlationId,
         },
       );
 
   if (insertError) {
+    // Unlike an UPDATE/DELETE excluded by RLS (which silently affects
+    // 0 rows), an INSERT whose WITH CHECK fails raises 42501 --
+    // calculation_results_insert_own_org_as_self rejects a LOCKED/VOID
+    // shipment's line the same way shipment_lines' own policies do
+    // (20260829200000_p6_calculation_results_hardening.sql, found in
+    // the mandatory P6 review: master plan §22 says recalculation is
+    // "allowed until LOCKED," which nothing enforced before this).
     return {
       status: "REJECTED",
-      reason: "PERSIST_FAILED",
+      reason: insertError.code === "42501" ? "SHIPMENT_NOT_EDITABLE" : "PERSIST_FAILED",
     };
   }
 
@@ -162,6 +189,7 @@ export async function calculateLine(
       eventType: "calculation.computed",
       aggregateType: "SHIPMENT_LINE",
       aggregateId: lineId,
+      correlationId,
       payload: {
         shipment_id: line.shipment_id,
         engine_version: calculation.engine_version,
