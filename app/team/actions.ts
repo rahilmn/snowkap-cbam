@@ -28,6 +28,10 @@ import {
   revokeInvitation,
 } from "../../src/application/organizations/invitations";
 
+import {
+  getPreferredOrgId,
+} from "../../components/shell/get-preferred-org-id";
+
 import type {
   TeamActionState,
 } from "./action-state";
@@ -111,6 +115,7 @@ export async function changeRoleAction(
   const orgSummary =
     await getCurrentOrgSummary(
       supabase,
+      await getPreferredOrgId(),
     );
 
   if (!orgSummary) {
@@ -174,6 +179,7 @@ export async function removeMemberAction(
   const orgSummary =
     await getCurrentOrgSummary(
       supabase,
+      await getPreferredOrgId(),
     );
 
   if (!orgSummary) {
@@ -240,6 +246,7 @@ export async function inviteMemberAction(
   const orgSummary =
     await getCurrentOrgSummary(
       supabase,
+      await getPreferredOrgId(),
     );
 
   if (!orgSummary) {

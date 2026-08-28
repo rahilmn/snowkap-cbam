@@ -37,6 +37,10 @@ import {
   PendingInvitationsList,
 } from "./pending-invitations-list";
 
+import {
+  getPreferredOrgId,
+} from "../../components/shell/get-preferred-org-id";
+
 export default async function TeamPage() {
   const supabase =
     await getServerSupabaseClient();
@@ -44,6 +48,7 @@ export default async function TeamPage() {
   const orgSummary =
     await getCurrentOrgSummary(
       supabase,
+      await getPreferredOrgId(),
     );
 
   if (!orgSummary) {

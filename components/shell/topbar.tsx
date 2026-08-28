@@ -1,5 +1,4 @@
 import {
-  ChevronsUpDown,
   LogOut,
 } from "lucide-react";
 
@@ -16,21 +15,31 @@ import {
 } from "./theme-toggle";
 
 import {
+  OrgSwitcher,
+  type OrgSwitcherOption,
+} from "./org-switcher";
+
+import {
   signOutAction,
 } from "../../app/(auth)/actions";
 
 export interface TopbarProps {
   /**
    * null when signed out, or signed in without an org yet (onboarding
-   * in progress) -- the org-switcher button hides itself rather than
-   * showing a misleading placeholder in either case.
+   * in progress) -- the org-switcher hides itself rather than showing
+   * a misleading placeholder in either case.
    */
   organizationName: string | null;
+
+  currentOrgId?: string;
+  organizations?: OrgSwitcherOption[];
 }
 
 export function Topbar(
   {
     organizationName,
+    currentOrgId,
+    organizations,
   }: TopbarProps,
 ) {
   return (
@@ -38,22 +47,14 @@ export function Topbar(
       <div className="flex items-center gap-3">
         <Wordmark />
 
-        {organizationName ? (
+        {organizationName && currentOrgId && organizations ? (
           <>
             <div className="hidden h-5 w-px bg-[var(--border-default)] sm:block" />
 
-            <button
-              type="button"
-              disabled
-              className="hidden items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-sm text-[var(--text-secondary)] disabled:cursor-not-allowed sm:flex"
-            >
-              {organizationName}
-
-              <ChevronsUpDown
-                className="size-3.5 text-[var(--text-tertiary)]"
-                aria-hidden="true"
-              />
-            </button>
+            <OrgSwitcher
+              currentOrgId={currentOrgId}
+              organizations={organizations}
+            />
           </>
         ) : null}
       </div>

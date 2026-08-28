@@ -7,6 +7,10 @@ import {
 } from "./topbar";
 
 import {
+  getPreferredOrgId,
+} from "./get-preferred-org-id";
+
+import {
   Sidebar,
   type Experience,
 } from "./sidebar";
@@ -93,12 +97,22 @@ export async function AppShell(
   const orgSummary =
     await getCurrentOrgSummary(
       supabase,
+      await getPreferredOrgId(),
     );
 
   return (
     <div className="flex h-dvh flex-col bg-[var(--surface-page)]">
       <Topbar
         organizationName={orgSummary?.organizationName ?? null}
+        currentOrgId={orgSummary?.context.org_id}
+        organizations={orgSummary?.availableOrganizations.map(
+          (org) => (
+            {
+              orgId: org.orgId,
+              organizationName: org.organizationName,
+            }
+          ),
+        )}
       />
 
       <div className="flex flex-1 overflow-hidden">
