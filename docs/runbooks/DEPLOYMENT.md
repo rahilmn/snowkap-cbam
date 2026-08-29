@@ -128,15 +128,30 @@ variables into the client JavaScript bundle **at `next build` time**,
 not at container start. Setting them only as Railway *runtime*
 variables (visible to `node server.js` via `process.env`) has no effect
 on the already-built client bundle — they must be present in the
-build environment Railway's Dockerfile build runs in. Confirm Railway
-actually passes its configured environment variables through to the
-Docker build step for this service (Railway's own per-service settings
-control this) before relying on it; if it does not, these two need to
-be passed as explicit `--build-arg`s the same way `GIT_SHA` is, which
-would mean adding two more `ARG`/`ENV` pairs to the Dockerfile's
-`build` stage — a real Dockerfile change, out of this document's
-docs-only scope, and something to confirm and fix at first real setup
-time, not something already done.
+build environment Railway's Dockerfile build runs in.
+
+**Update, 2026-08-29 — confirmed live, no longer just a caveat.** A
+real `docker build` of this Dockerfile failed with exactly the
+predicted symptom: `next build`'s static-generation phase prerenders
+every `app/**/page.tsx`, and every authenticated page's
+`getServerSupabaseClient()` call throws
+`"NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY must be
+configured"` before Next's automatic dynamic-rendering bailout ever
+gets a chance to kick in — so the whole build failed, not just one
+page. The Dockerfile now declares `ARG`/`ENV NEXT_PUBLIC_SUPABASE_URL`
+and `ARG`/`ENV NEXT_PUBLIC_SUPABASE_ANON_KEY` in the `build` stage,
+mirroring `GIT_SHA`'s existing pattern — confirmed fixed by a
+successful local build afterward. **What still needs confirming at
+first real Railway setup**: whether Railway actually forwards its
+configured project variables through to this service's Docker build
+step as matching-named build args (Railway's documented behavior is
+that it does, for `ARG`s whose names match a configured variable — the
+same mechanism `GIT_SHA` already relies on — but this repo has not yet
+had a real Railway project to confirm it against). If it turns out
+Railway does *not* auto-forward them for some reason, the fallback is
+passing them as explicit `--build-arg`s in whatever triggers the
+build, the same way `GIT_SHA` is documented above (§2) — the Dockerfile
+side of that fallback is already done either way.
 
 **`SUPABASE_DB_PASSWORD` is never a Railway runtime variable.** Master
 plan §29 states this explicitly ("pipeline/CI-only, never runtime"),
