@@ -24,6 +24,15 @@ import {
 } from "../../../../src/infrastructure/regulatory/get-regulatory-repository";
 
 import {
+  createInMemoryRateLimiter,
+  type RateLimitConfig,
+} from "../../../../src/infrastructure/rate-limit/rate-limiter";
+
+import {
+  getClientIp,
+} from "../../../../components/shell/get-client-ip";
+
+import {
   addLine,
   removeLine,
 } from "../../../../src/application/shipments/manage-lines";
@@ -230,17 +239,44 @@ const addLineSchema =
       z.string().optional(),
   });
 
+// 2026-08-29 (P13 audit finding, live-reproduced): searchCbamGoodsAction
+// is a real Server Action -- a directly-invokable POST endpoint
+// (framework Next-Action header) independent of whether the React page
+// around it ever renders, exactly the pitfall Next's own docs name
+// ("render-time gating ... is not a security boundary, because
+// requests can be sent without going through the UI"). This file's own
+// prior comment claimed "the app's own auth-gated routing already
+// keeps a signed-out visitor from reaching the page" -- false:
+// proxy.ts (this app's only middleware) never checks auth or redirects
+// unauthenticated requests, it only refreshes the session cookie and
+// always calls NextResponse.next(). searchCbamGoodsByText also runs
+// through the service-role client (bypasses RLS entirely, the same
+// protected-zone client ADR-0005 restricts to system jobs), so the
+// intended authenticated-only access policy for cbam_goods was
+// bypassed by construction, not merely unenforced. 20 req/10s/IP is
+// deliberately generous (this backs live-as-you-type search) while
+// still bounding an unauthenticated replay loop.
+const SEARCH_CBAM_GOODS_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 20,
+    windowMs: 10 * 1000,
+  };
+
+const searchCbamGoodsLimiter =
+  createInMemoryRateLimiter(
+    SEARCH_CBAM_GOODS_RATE_LIMIT,
+  );
+
 /**
  * Live-search backing for the CN/TARIC classification combobox
  * (cn-code-picker.tsx) -- read-only against the public regulatory
  * cbam_goods reference data (already readable by any authenticated
  * user via authenticated_read_regulatory_data's own SELECT policies,
- * 20260828100000), so this deliberately does not gate on org context
- * the way every mutation action in this file does: there is no
- * org-scoped data here to leak, and the app's own auth-gated routing
- * already keeps a signed-out visitor from reaching the page this is
- * called from. Returns the canonical cbam_goods rows verbatim
- * (searchCbamGoodsByText, src/infrastructure/regulatory/
+ * 20260828100000). Gated on genuine authentication (not org
+ * membership specifically -- there is no org-scoped data here to
+ * leak, only a real signed-in session) plus a rate limit, per the
+ * 2026-08-29 finding above. Returns the canonical cbam_goods rows
+ * verbatim (searchCbamGoodsByText, src/infrastructure/regulatory/
  * supabase-regulatory-repository.ts) -- never a synthesized or
  * invented candidate. A short/blank query returns [] without a DB
  * round trip, matching that method's own guard.
@@ -248,6 +284,27 @@ const addLineSchema =
 export async function searchCbamGoodsAction(
   query: string,
 ): Promise<{ trade_code: string; trade_code_type: string; description: string }[]> {
+  const rateLimitResult =
+    searchCbamGoodsLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return [];
+  }
+
+  const supabase =
+    await getServerSupabaseClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return [];
+  }
+
   if (query.trim().length < 2) {
     return [];
   }
