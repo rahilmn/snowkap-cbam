@@ -228,6 +228,80 @@ describe(
     );
 
     it(
+      // 2026-08-29 (P11 mandatory security review, finding #14):
+      // this file's createServerClient call previously omitted
+      // cookieOptions entirely, so @supabase/ssr's own default
+      // (no `secure`) applied -- the session cookie was eligible to
+      // be sent on a plaintext http:// request.
+      "passes cookieOptions.secure = true to createServerClient in production",
+      async () => {
+        const previousNodeEnv =
+          process.env.NODE_ENV;
+
+        // @ts-expect-error -- NODE_ENV is readonly in the ambient
+        // ProcessEnv type but genuinely writable at runtime; this is
+        // the standard pattern this file's own afterEach restore
+        // (process.env = {...ORIGINAL_ENV}) already relies on.
+        process.env.NODE_ENV =
+          "production";
+
+        getUserMock.mockResolvedValueOnce(
+          { data: { user: null }, error: null },
+        );
+
+        await proxy(
+          requestWithCookie(),
+        );
+
+        const [, , options] =
+          createServerClientMock.mock.calls[0] as [
+            string,
+            string,
+            { cookieOptions?: { secure?: boolean } },
+          ];
+
+        expect(options.cookieOptions?.secure).toBe(true);
+
+        // @ts-expect-error -- see the write above.
+        process.env.NODE_ENV =
+          previousNodeEnv;
+      },
+    );
+
+    it(
+      "passes cookieOptions.secure = false outside production, so local http:// dev keeps working",
+      async () => {
+        const previousNodeEnv =
+          process.env.NODE_ENV;
+
+        // @ts-expect-error -- see the matching production test above.
+        process.env.NODE_ENV =
+          "development";
+
+        getUserMock.mockResolvedValueOnce(
+          { data: { user: null }, error: null },
+        );
+
+        await proxy(
+          requestWithCookie(),
+        );
+
+        const [, , options] =
+          createServerClientMock.mock.calls[0] as [
+            string,
+            string,
+            { cookieOptions?: { secure?: boolean } },
+          ];
+
+        expect(options.cookieOptions?.secure).toBe(false);
+
+        // @ts-expect-error -- see the write above.
+        process.env.NODE_ENV =
+          previousNodeEnv;
+      },
+    );
+
+    it(
       "fails open to a plain pass-through response, without ever constructing a Supabase client, when env vars are unset",
       async () => {
         delete process.env.NEXT_PUBLIC_SUPABASE_URL;

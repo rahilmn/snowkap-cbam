@@ -56,6 +56,14 @@ export async function proxy(
       url,
       anonKey,
       {
+        // 2026-08-29 (P11 finding #14) -- see server-client.ts's
+        // matching comment for the full reasoning; same fix, applied
+        // here too since this is the third of the three create*Client
+        // call sites the review named.
+        cookieOptions: {
+          secure: process.env.NODE_ENV === "production",
+        },
+
         cookies: {
           getAll() {
             return request.cookies.getAll();

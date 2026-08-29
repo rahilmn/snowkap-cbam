@@ -44,6 +44,13 @@ export async function switchOrganizationAction(
       sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 24 * 365,
+      // 2026-08-29 (P11 finding #14): matches the same fix applied to
+      // the three Supabase create*Client call sites -- this cookie
+      // only carries an org preference (see this file's own header
+      // comment on why no authorization check is needed here), but
+      // there's no reason for it to be sent over plaintext http:// in
+      // production either.
+      secure: process.env.NODE_ENV === "production",
     },
   );
 

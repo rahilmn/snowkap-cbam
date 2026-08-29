@@ -51,6 +51,22 @@ export async function getServerSupabaseClient() {
     url,
     anonKey,
     {
+      // 2026-08-29 (P11 mandatory security review, finding #14,
+      // SHOULD-FIX, confirmed live): all three create*Client call
+      // sites (this one, browser-client.ts, proxy.ts) previously
+      // omitted cookieOptions entirely, so @supabase/ssr's own
+      // defaults applied -- {path:"/", sameSite:"lax", httpOnly:false},
+      // NO `secure`. That leaves the access + refresh tokens eligible
+      // to be sent on a plaintext http:// request (e.g. a user typing
+      // the bare host before any edge redirect to https runs).
+      // `secure: true` in production closes that; conditioned on
+      // NODE_ENV so local dev (plain http://localhost, no TLS) keeps
+      // working exactly as before -- an unconditional `secure: true`
+      // would silently break every cookie-dependent flow in `pnpm dev`.
+      cookieOptions: {
+        secure: process.env.NODE_ENV === "production",
+      },
+
       cookies: {
         getAll() {
           return cookieStore.getAll();

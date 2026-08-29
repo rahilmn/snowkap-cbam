@@ -40,6 +40,14 @@ export function getBrowserSupabaseClient(): SupabaseClient {
       createBrowserClient(
         url,
         anonKey,
+        {
+          // 2026-08-29 (P11 finding #14) -- see server-client.ts's
+          // matching comment for the full reasoning; same fix, same
+          // NODE_ENV condition, mirrored here for the browser client.
+          cookieOptions: {
+            secure: process.env.NODE_ENV === "production",
+          },
+        },
       );
   }
 
