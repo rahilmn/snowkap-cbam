@@ -17,6 +17,9 @@ const signInWithPasswordMock =
 const signUpMock =
   vi.fn();
 
+const signOutMock =
+  vi.fn();
+
 const getServerSupabaseClientMock =
   vi.fn(
     () => (
@@ -24,10 +27,37 @@ const getServerSupabaseClientMock =
         auth: {
           signInWithPassword: signInWithPasswordMock,
           signUp: signUpMock,
+          signOut: signOutMock,
         },
       }
     ),
   );
+
+// signOutAction's own real work is entirely "sign out, then redirect" --
+// redirect() throws a Next-internal signal outside a real request
+// context (see this file's header comment), so this sentinel lets the
+// test assert signOut() was actually called BEFORE that throw, without
+// needing a real Next request/response cycle.
+const REDIRECT_SENTINEL =
+  Symbol(
+    "next/navigation redirect() called",
+  );
+
+const redirectMock =
+  vi.fn(
+    (..._args: unknown[]) => {
+      throw REDIRECT_SENTINEL;
+    },
+  );
+
+vi.mock(
+  "next/navigation",
+  () => (
+    {
+      redirect: (...args: unknown[]) => redirectMock(...args),
+    }
+  ),
+);
 
 vi.mock(
   "../../src/infrastructure/supabase/server-client",
@@ -62,7 +92,7 @@ vi.mock(
   ),
 );
 
-const { signInAction, signUpAction } =
+const { signInAction, signUpAction, signOutAction } =
   await import(
     "./actions"
   );
@@ -175,6 +205,44 @@ describe(
 
         expect(getServerSupabaseClientMock).not.toHaveBeenCalled();
         expect(signUpMock).not.toHaveBeenCalled();
+      },
+    );
+  },
+);
+
+// 2026-08-30 (P13 final non-blocked-work audit): this action previously
+// had zero test coverage at all -- signOut() could stop being called
+// before the redirect and no test would fail.
+describe(
+  "signOutAction",
+  () => {
+    it(
+      "calls supabase.auth.signOut() before redirecting to /sign-in",
+      async () => {
+        signOutMock.mockResolvedValueOnce(
+          { error: null },
+        );
+
+        await expect(
+          signOutAction(),
+        ).rejects.toBe(
+          REDIRECT_SENTINEL,
+        );
+
+        expect(signOutMock).toHaveBeenCalledTimes(1);
+        expect(redirectMock).toHaveBeenCalledWith(
+          "/sign-in",
+        );
+
+        const signOutOrder =
+          signOutMock.mock.invocationCallOrder[0];
+
+        const redirectOrder =
+          redirectMock.mock.invocationCallOrder[0];
+
+        expect(signOutOrder).toBeLessThan(
+          redirectOrder,
+        );
       },
     );
   },
