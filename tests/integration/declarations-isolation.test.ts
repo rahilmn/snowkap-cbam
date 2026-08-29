@@ -134,6 +134,12 @@ interface RealRegulatoryRecord {
   source_row: number;
   source_trade_code: string;
   origin_country_name: string;
+  // P13 review iteration 5, finding F1: the DB check now also verifies
+  // a DEFAULT determination's line.origin_country (ISO2) maps to the
+  // same country the narrative claims -- every shipment_line seeded
+  // from a RealRegulatoryRecord must declare THIS record's own real
+  // ISO2, not a hardcoded one.
+  origin_country_iso2: string;
   total_value: string;
   total_status: string;
   direct_value: string;
@@ -306,9 +312,18 @@ describe.skipIf(!localSupabaseReachable)(
                 shipment_id: shipment.id,
                 org_id: orgAId,
                 line_number: index + 1,
-                cn_code: "72081000",
-                cn_code_level: "CN8",
-                origin_country: "IN",
+                // P13 review iteration 5, finding F1: the DB check now
+                // ties a DEFAULT determination to the LINE's own
+                // cn_code/origin_country, so this must be recordA's own
+                // real trade code/country, not an unrelated hardcoded
+                // pair -- a mismatch here is exactly the forgery shape
+                // that finding closed.
+                cn_code: recordA.source_trade_code.replace(/\s+/g, ""),
+                cn_code_level:
+                  recordA.source_trade_code.replace(/\s+/g, "").length > 8
+                    ? "TARIC10"
+                    : "CN8",
+                origin_country: recordA.origin_country_iso2,
                 net_mass_tonnes: "10",
                 emission_determination: determinationFrom(
                   recordA,
@@ -443,7 +458,7 @@ describe.skipIf(!localSupabaseReachable)(
         await serviceClient
           .from("default_emission_values")
           .select(
-            "dataset_id, source_sheet, source_row, source_trade_code, total_value, total_status, direct_value, direct_status, indirect_value, indirect_status, emission_unit, production_route_id, countries!inner(name), regulatory_datasets!inner(version)",
+            "dataset_id, source_sheet, source_row, source_trade_code, total_value, total_status, direct_value, direct_status, indirect_value, indirect_status, emission_unit, production_route_id, countries!inner(name, iso2), regulatory_datasets!inner(version)",
           )
           .eq(
             "total_status",
@@ -465,7 +480,7 @@ describe.skipIf(!localSupabaseReachable)(
         row: NonNullable<typeof candidates>[number],
       ): RealRegulatoryRecord {
         const countryRow =
-          row.countries as unknown as { name: string };
+          row.countries as unknown as { name: string; iso2: string };
 
         const datasetRow =
           row.regulatory_datasets as unknown as { version: string };
@@ -477,6 +492,7 @@ describe.skipIf(!localSupabaseReachable)(
           source_row: row.source_row,
           source_trade_code: row.source_trade_code,
           origin_country_name: countryRow.name,
+          origin_country_iso2: countryRow.iso2,
           total_value: row.total_value,
           total_status: row.total_status,
           direct_value: row.direct_value,
@@ -1745,11 +1761,29 @@ describe.skipIf(!localSupabaseReachable)(
         // with (resolve-line-emissions.ts's redetermineLineEmissions
         // updates shipment_lines.emission_determination alone -- zero
         // references to calculation_results in that file).
+        //
+        // recordB genuinely differs from recordA (different total_value,
+        // by this suite's own candidate-selection rule), so it is very
+        // likely a different country and/or good too -- P13 review
+        // iteration 5, finding F1 ties a DEFAULT determination to the
+        // LINE's own declared cn_code/origin_country, so this
+        // redetermination also reclassifies the line to recordB's own
+        // real trade code/country in the SAME statement (a realistic
+        // combined "corrected the declared classification, then
+        // re-determined" scenario) rather than attaching recordB's
+        // record to a line still declaring recordA's classification,
+        // which the new check correctly refuses as a mismatch.
         const { error: redetermineError } =
           await clientOwnerA
             .from("shipment_lines")
             .update(
               {
+                cn_code: recordB.source_trade_code.replace(/\s+/g, ""),
+                cn_code_level:
+                  recordB.source_trade_code.replace(/\s+/g, "").length > 8
+                    ? "TARIC10"
+                    : "CN8",
+                origin_country: recordB.origin_country_iso2,
                 emission_determination: determinationFrom(
                   recordB,
                 ),

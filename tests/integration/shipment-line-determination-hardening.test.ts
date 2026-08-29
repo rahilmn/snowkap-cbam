@@ -88,6 +88,12 @@ interface RealRecord {
   source_row: number;
   source_trade_code: string;
   origin_country_name: string;
+  // P13 review iteration 5, finding F1: the DB check now also verifies
+  // a DEFAULT determination's line.origin_country (an ISO2 code) maps
+  // to the same country the record_identity/country_mapping narrative
+  // claims -- every shipment_line seeded from a RealRecord must
+  // declare THIS record's own real ISO2, not a hardcoded one.
+  origin_country_iso2: string;
   source_production_route_code: string | null;
   emission_unit: string;
   direct_value: string;
@@ -249,7 +255,7 @@ describe.skipIf(!localSupabaseReachable)(
               ),
               cn_code: recordA.source_trade_code.replace(/\s+/g, ""),
               cn_code_level: "CN8",
-              origin_country: "IN",
+              origin_country: recordA.origin_country_iso2,
               net_mass_tonnes: "10",
               emission_determination: null,
               ...overrides,
@@ -275,7 +281,7 @@ describe.skipIf(!localSupabaseReachable)(
         await serviceClient
           .from("default_emission_values")
           .select(
-            "dataset_id, source_sheet, source_row, source_trade_code, total_value, total_status, direct_value, direct_status, indirect_value, indirect_status, emission_unit, production_route_id, countries!inner(name), regulatory_datasets!inner(version)",
+            "dataset_id, source_sheet, source_row, source_trade_code, total_value, total_status, direct_value, direct_status, indirect_value, indirect_status, emission_unit, production_route_id, countries!inner(name, iso2), regulatory_datasets!inner(version)",
           )
           .eq(
             "total_status",
@@ -297,7 +303,7 @@ describe.skipIf(!localSupabaseReachable)(
         row: NonNullable<typeof candidates>[number],
       ): RealRecord {
         const countries =
-          row.countries as unknown as { name: string };
+          row.countries as unknown as { name: string; iso2: string };
 
         const datasets =
           row.regulatory_datasets as unknown as { version: string };
@@ -309,6 +315,7 @@ describe.skipIf(!localSupabaseReachable)(
           source_row: row.source_row,
           source_trade_code: row.source_trade_code,
           origin_country_name: countries.name,
+          origin_country_iso2: countries.iso2,
           source_production_route_code: null,
           emission_unit: row.emission_unit,
           direct_value: row.direct_value,
@@ -569,14 +576,17 @@ describe.skipIf(!localSupabaseReachable)(
     });
 
     afterAll(async () => {
-      await serviceClient
-        .from("audit_events")
-        .delete()
-        .eq(
-          "org_id",
-          importerOrgId,
-        );
-
+      // P13 review iteration 5, finding F4: shipment_lines must be
+      // deleted BEFORE audit_events, not after -- 20260829580000's own
+      // AFTER DELETE audit trigger writes a fresh audit_events row for
+      // every determination-carrying line this suite's own tests
+      // delete, so purging audit_events first (the order this suite
+      // used before this fix) leaves those fresh rows behind, which
+      // then blocks the organizations delete below under
+      // audit_events_org_id_fkey's ON DELETE RESTRICT. audit_events is
+      // now purged LAST (for both orgs), after everything that could
+      // possibly still be generating rows via a trigger has already
+      // been removed.
       await serviceClient
         .from("shipment_lines")
         .delete()
@@ -626,19 +636,35 @@ describe.skipIf(!localSupabaseReachable)(
         );
 
       await serviceClient
-        .from("organizations")
-        .delete()
-        .eq(
-          "id",
-          producerOrgId,
-        );
-
-      await serviceClient
         .from("memberships")
         .delete()
         .eq(
           "org_id",
           importerOrgId,
+        );
+
+      await serviceClient
+        .from("audit_events")
+        .delete()
+        .eq(
+          "org_id",
+          importerOrgId,
+        );
+
+      await serviceClient
+        .from("audit_events")
+        .delete()
+        .eq(
+          "org_id",
+          producerOrgId,
+        );
+
+      await serviceClient
+        .from("organizations")
+        .delete()
+        .eq(
+          "id",
+          producerOrgId,
         );
 
       await serviceClient
@@ -817,6 +843,135 @@ describe.skipIf(!localSupabaseReachable)(
         expect(error?.code).toBe(
           "42501",
         );
+      },
+    );
+
+    it(
+      "rejects recordB's real identity/values attached to a line still declaring recordA's cn_code and origin_country (P13 review iteration 5, finding F1) -- a real, genuinely-matching record from a different good/country must never back a line it has nothing to do with; a prior version of this fix accepted exactly this shape, live-reproduced as a real, 100% understatement",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              // Deliberately NOT also updating cn_code/origin_country --
+              // insertLine's own defaults are recordA's, so attaching
+              // recordB's determination here is exactly the mismatch
+              // finding F1 closes.
+              { emission_determination: determinationFrom(recordB) },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "rejects a DEFAULT determination with the emission_unit key missing entirely (P13 review iteration 5, finding F3) -- a bare `=` comparison previously let a missing key's SQL NULL silently pass validation, live-reproduced to crash the real calculation engine downstream",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const forged =
+          determinationFrom(
+            recordA,
+          ) as { resolution: Record<string, unknown> };
+
+        delete forged.resolution.emission_unit;
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "rejects a DEFAULT determination with resolved_at missing entirely (P13 review iteration 5, finding F6) -- the ACTUAL branch already required a parseable resolved_at; the DEFAULT branch previously did not",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const forged =
+          determinationFrom(
+            recordA,
+          ) as { resolution: Record<string, unknown> };
+
+        delete forged.resolution.resolved_at;
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "force-clears an existing valid determination when cn_code changes in a separate statement, rather than silently leaving it attached to the now-different line (P13 review iteration 5, finding F2)",
+      async () => {
+        const lineId =
+          await insertLine(
+            { emission_determination: determinationFrom(recordA) },
+          );
+
+        const { error: mutateError } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              // A different real trade code recordB's own identity uses
+              // -- any value genuinely different from recordA's own
+              // cn_code demonstrates the force-clear; it does not need
+              // to correspond to a real determination of its own here.
+              { cn_code: recordB.source_trade_code.replace(/\s+/g, "") },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(mutateError).toBeNull();
+
+        const { data: after } =
+          await serviceClient
+            .from("shipment_lines")
+            .select("emission_determination")
+            .eq(
+              "id",
+              lineId,
+            )
+            .single();
+
+        expect(after?.emission_determination).toBeNull();
       },
     );
 
@@ -1545,11 +1700,30 @@ describe.skipIf(!localSupabaseReachable)(
             { emission_determination: determinationFrom(recordA) },
           );
 
+        // recordB genuinely differs from recordA (different total_value,
+        // by this suite's own candidate-selection rule), so it is very
+        // likely a different country and/or good too -- P13 review
+        // iteration 5, finding F1 ties a DEFAULT determination to the
+        // LINE's own declared cn_code/origin_country, so this
+        // redetermination also reclassifies the line to recordB's own
+        // real trade code/country in the SAME statement (a realistic
+        // combined "corrected the declared classification, then
+        // re-determined" scenario), matching
+        // tests/integration/declarations-isolation.test.ts's own
+        // identical fix.
         const { error } =
           await clientMember
             .from("shipment_lines")
             .update(
-              { emission_determination: determinationFrom(recordB) },
+              {
+                cn_code: recordB.source_trade_code.replace(/\s+/g, ""),
+                cn_code_level:
+                  recordB.source_trade_code.replace(/\s+/g, "").length > 8
+                    ? "TARIC10"
+                    : "CN8",
+                origin_country: recordB.origin_country_iso2,
+                emission_determination: determinationFrom(recordB),
+              },
             )
             .eq(
               "id",
@@ -1708,7 +1882,7 @@ describe.skipIf(!localSupabaseReachable)(
                 ),
                 cn_code: recordA.source_trade_code.replace(/\s+/g, ""),
                 cn_code_level: "CN8",
-                origin_country: "IN",
+                origin_country: recordA.origin_country_iso2,
                 net_mass_tonnes: "10",
                 emission_determination: forged,
               },
@@ -1736,7 +1910,7 @@ describe.skipIf(!localSupabaseReachable)(
                 ),
                 cn_code: recordA.source_trade_code.replace(/\s+/g, ""),
                 cn_code_level: "CN8",
-                origin_country: "IN",
+                origin_country: recordA.origin_country_iso2,
                 net_mass_tonnes: "10",
                 emission_determination: determinationFrom(recordA),
               },
@@ -1828,7 +2002,7 @@ describe.skipIf(!localSupabaseReachable)(
                 ),
                 cn_code: recordA.source_trade_code.replace(/\s+/g, ""),
                 cn_code_level: "CN8",
-                origin_country: "IN",
+                origin_country: recordA.origin_country_iso2,
                 net_mass_tonnes: "10",
                 emission_determination: determinationFrom(recordA),
               },
