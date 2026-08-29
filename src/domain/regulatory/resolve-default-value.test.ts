@@ -1164,6 +1164,85 @@ describe(
 
 
     it(
+      "does not substitute a different route's usable value when the requested route's own exact record exists but is unusable (P13 adversarial audit)",
+      () => {
+        const requestedRouteUnavailable =
+          record({
+            source_production_route_code:
+              "(C)",
+
+            production_route:
+              "CARBON_STEEL_BF_BOF",
+
+            total_emissions: {
+              value: null,
+
+              status:
+                "UNAVAILABLE",
+
+              raw_source_value:
+                "-",
+            },
+          });
+
+        const otherRouteUsable =
+          record({
+            source_production_route_code:
+              "(F)",
+
+            production_route:
+              "LOW_ALLOY_STEEL_BF_BOF",
+
+            total_emissions: {
+              value:
+                "3.000",
+
+              status:
+                "AVAILABLE",
+
+              raw_source_value:
+                "3.000",
+            },
+          });
+
+        const result =
+          resolveDefaultValue(
+            [
+              requestedRouteUnavailable,
+              otherRouteUsable,
+            ],
+            {
+              origin_country_name:
+                "India",
+
+              trade_code:
+                "72061000",
+
+              production_route:
+                "(C)",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "UNAVAILABLE",
+        );
+
+        expect(
+          result.record,
+        ).toBeNull();
+      },
+    );
+
+
+    it(
       "does not treat a fallback NOT_APPLICABLE value as zero",
       () => {
         const fallback = record({

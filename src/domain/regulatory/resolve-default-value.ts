@@ -474,10 +474,33 @@ function resolveForCountry(
 
   /*
    * Unique usable exact match.
+   *
+   * When an explicit production route was requested, this must
+   * never select a usable record belonging to a DIFFERENT,
+   * non-null route -- that would silently substitute a route the
+   * caller did not ask for. The requested route's own exact
+   * record (if any) and route-independent records were already
+   * considered above; if neither yielded a usable match, this
+   * fallback must stay restricted to the same set, not widen to
+   * every route.
    */
   const usableExact =
     sorted.filter(
-      isUsableTotalValue,
+      (candidate) =>
+        isUsableTotalValue(
+          candidate,
+        ) &&
+        (
+          !input.production_route
+          ||
+          candidate
+            .source_production_route_code ===
+            null
+          ||
+          candidate
+            .source_production_route_code ===
+          input.production_route
+        ),
     );
 
   if (
