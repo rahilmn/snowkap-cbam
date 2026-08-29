@@ -15,6 +15,10 @@ import {
   getBrowserSupabaseClient,
 } from "../../../src/infrastructure/supabase/browser-client";
 
+import {
+  isSafeRedirectPath,
+} from "./is-safe-redirect-path";
+
 /**
  * Landing target for Supabase Auth email links (invite, magic link,
  * password reset) that deliver a session via an implicit-flow hash
@@ -79,10 +83,22 @@ function AuthCallback() {
           "refresh_token",
         );
 
-      const next =
+      const requestedNext =
         searchParams.get(
           "next",
-        ) ?? "/accept-invitation";
+        );
+
+      // 2026-08-29 (P13 audit finding): never trust `next` past a
+      // same-origin-path check -- see is-safe-redirect-path.ts's own
+      // doc comment for the open-redirect + session-fixation chain
+      // this closes. An unsafe value falls back to the same default an
+      // absent one already did, rather than being rejected as an error
+      // -- the caller gets signed in either way, just not sent
+      // somewhere attacker-controlled.
+      const next =
+        requestedNext && isSafeRedirectPath(requestedNext)
+          ? requestedNext
+          : "/accept-invitation";
 
       if (!accessToken || !refreshToken) {
         setError(
