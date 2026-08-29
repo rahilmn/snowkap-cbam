@@ -553,6 +553,28 @@ describe(
     );
 
     it(
+      "allows UI to import the rate limiter directly (no adapter/port to hide behind a factory)",
+      () => {
+        const files: SourceFile[] =
+          [
+            {
+              path: "app/(auth)/actions.ts",
+              content:
+                `import { createInMemoryRateLimiter } from "../../src/infrastructure/rate-limit/rate-limiter";`,
+            },
+          ];
+
+        expect(
+          checkLayering(
+            files,
+          ),
+        ).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
       "allows UI to import plain domain types",
       () => {
         const files: SourceFile[] =

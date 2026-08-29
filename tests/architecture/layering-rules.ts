@@ -197,12 +197,28 @@ const APPLICATION_GRANDFATHERED_INFRASTRUCTURE_IMPORT =
  * something still has to construct the real implementation, and this
  * factory is that one sanctioned place, used from P4's classification
  * Server Actions onward.
+ *
+ * rate-limiter is a fifth, and a different shape from the four above:
+ * it isn't a Supabase integration at all, and has no adapter/port
+ * split to hide behind a factory -- it's a self-contained, no-I/O,
+ * pure module (see its own header comment) with nothing "real" to
+ * swap in later that would need hiding from UI callers the way
+ * SupabaseRegulatoryRepository does. docs/plans/MASTER_PLAN.md §28's
+ * "Rate limiting (P11) on auth, mutation, import, and sharing
+ * endpoints" needs this called directly from Server Actions
+ * (app/(auth)/actions.ts, app/accept-invitation/actions.ts) as early
+ * as possible in each action -- before any Supabase call -- so a
+ * rejected request never reaches the database; routing that through
+ * an application-layer indirection would add a layer with no adapter
+ * to hide and no reuse benefit, for the same reason the session-scoped
+ * Supabase clients above are allowed directly rather than wrapped.
  */
 const UI_ALLOWED_INFRASTRUCTURE_IMPORTS = [
   "src/infrastructure/supabase/server-client",
   "src/infrastructure/supabase/browser-client",
   "src/infrastructure/supabase/admin-client",
   "src/infrastructure/regulatory/get-regulatory-repository",
+  "src/infrastructure/rate-limit/rate-limiter",
 ];
 
 /**
