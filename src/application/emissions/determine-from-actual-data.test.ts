@@ -39,6 +39,9 @@ const emissionDataId =
 const lineRow =
   {
     org_id: "org-1",
+    // Matches verifiedActiveRow's cn_scope below (finding S16:
+    // performDetermination now cross-checks the two).
+    cn_code: "72081000",
     emission_determination: null,
   };
 
@@ -261,6 +264,61 @@ describe(
             evidence_file_ids: ["evidence-1"],
             sharing_grant_id: null,
           },
+        );
+      },
+    );
+
+    it(
+      "rejects EMISSION_DATA_NOT_FOUND when the chosen emission_data row's cn_scope does not cover the line's own declared cn_code (P13 review, finding S16) -- e.g. a steel installation's actuals must never silently back a cement line's determination",
+      async () => {
+        const result =
+          await determineLineFromActualData(
+            makeMockSupabase(
+              {
+                shipment_lines: [
+                  { data: { ...lineRow, cn_code: "25232100" }, error: null },
+                ],
+                // verifiedActiveRow.cn_scope is ["72081000"], which
+                // neither equals nor is a digit-prefix of "25232100".
+                emission_data: { data: verifiedActiveRow, error: null },
+              },
+            ),
+            memberContext(),
+            lineId,
+            emissionDataId,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "EMISSION_DATA_NOT_FOUND" },
+        );
+      },
+    );
+
+    it(
+      "accepts an emission_data row whose cn_scope is a genuine digit-prefix of the line's more specific TARIC10 code",
+      async () => {
+        const result =
+          await determineLineFromActualData(
+            makeMockSupabase(
+              {
+                shipment_lines: [
+                  { data: { ...lineRow, cn_code: "7208100010" }, error: null },
+                  { data: updatedLineRow, error: null },
+                ],
+                // verifiedActiveRow.cn_scope is ["72081000"] -- a genuine
+                // shorter prefix of "7208100010", per
+                // cnScopeCoversCnCode's own documented CN8-covers-TARIC10
+                // relationship.
+                emission_data: { data: verifiedActiveRow, error: null },
+              },
+            ),
+            memberContext(),
+            lineId,
+            emissionDataId,
+          );
+
+        expect(result.status).toBe(
+          "DETERMINED",
         );
       },
     );

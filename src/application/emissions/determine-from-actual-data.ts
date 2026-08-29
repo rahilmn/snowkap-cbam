@@ -16,6 +16,10 @@ import {
   checkEmissionDataEvidenceCompleteness,
 } from "../../domain/emissions/snapshot-completeness";
 
+import {
+  cnScopeCoversCnCode,
+} from "../../domain/emissions/cn-scope-covers-code";
+
 import type {
   IsoTimestamp,
 } from "../../domain/shared/reporting-period";
@@ -103,6 +107,7 @@ export type DetermineFromActualDataResult =
 
 interface LineForDetermination {
   org_id: string;
+  cn_code: string;
   emission_determination: EmissionDetermination | null;
 }
 
@@ -117,12 +122,18 @@ interface LineForDetermination {
  * A, submitting a lineId that actually belongs to their other org B,
  * would write B's determination and audit event under A's org_id.
  * Rejecting as LINE_NOT_FOUND (not a more specific reason) matches how
- * an out-of-scope id is treated everywhere else in this codebase. Only
- * org_id/emission_determination are selected -- unlike
+ * an out-of-scope id is treated everywhere else in this codebase.
+ * org_id/cn_code/emission_determination are selected -- unlike
  * fetchLineForResolution, this determination path never touches
- * cn_code/origin_country/production_route_indicator (those feed the
- * regulatory resolver only; an ACTUAL determination is built entirely
- * from the emission_data row).
+ * origin_country/production_route_indicator (those feed the regulatory
+ * resolver only), but cn_code IS needed here (P13 review, finding S16):
+ * performDetermination cross-checks it against the chosen emission_data
+ * row's own cn_scope via cnScopeCoversCnCode, since nothing before that
+ * fix stopped an importer from "determining" a line's emissions from an
+ * ACTUAL dataset scoped to a completely different good -- the picker
+ * (listAvailableActualEmissionData) only ever used cnScopeCoversCnCode
+ * to narrow what it OFFERS, not to gate what a direct call actually
+ * commits.
  */
 async function fetchLineForDetermination(
   supabase: SupabaseClient,
@@ -136,7 +147,7 @@ async function fetchLineForDetermination(
     await supabase
       .from("shipment_lines")
       .select(
-        "org_id, emission_determination",
+        "org_id, cn_code, emission_determination",
       )
       .eq("id", lineId)
       .maybeSingle();
@@ -396,6 +407,26 @@ async function performDetermination(
 
   const { record, sharingGrantId } =
     fetchedEmissionData.data;
+
+  // P13 review, finding S16, live-reproduced: nothing previously
+  // stopped an importer from determining a line's emissions from an
+  // ACTUAL dataset scoped to an entirely different good -- e.g. a
+  // steel installation's cn_scope ["72081000"] silently accepted as
+  // the actual emissions for a line declared under CN code "25232100"
+  // (cement). listAvailableActualEmissionData already uses
+  // cnScopeCoversCnCode to keep the picker from OFFERING a
+  // non-covering record, but nothing enforced it at commit time -- a
+  // caller could still name any accessible emissionDataId directly.
+  // Collapsed into the SAME non-leaky EMISSION_DATA_NOT_FOUND reason
+  // every other ineligibility above uses, consistent with this
+  // function's own established posture that no failure mode short of a
+  // genuine FETCH_FAILED may be distinguishable from any other.
+  if (!cnScopeCoversCnCode(record.cn_scope, line.cn_code)) {
+    return {
+      status: "REJECTED",
+      reason: "EMISSION_DATA_NOT_FOUND",
+    };
+  }
 
   // EmissionData.verifier_user_id is typed UserId | null (a record can
   // rest in any verification_status), but
