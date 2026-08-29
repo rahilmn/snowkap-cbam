@@ -3,17 +3,21 @@
 **Date**: 2026-08-29 (updated 2026-08-30 with the blocker-remediation
 round's results — see §15 items 9–15 and §16.6; updated again 2026-08-30
 after the verified 24-commit checkpoint push to
-`origin/feature/full-product-build` and a fresh Railway re-check — see §29)
+`origin/feature/full-product-build` and a fresh Railway re-check — see §29;
+updated again 2026-08-30 with a CI reliability fix, a documentation
+correction, and a final coverage-backfill round closing every remaining
+zero-coverage file — see §16.10)
 **Repository**: https://github.com/rahilmn/snowkap-cbam
 **Branch**: `feature/full-product-build`
-**HEAD**: `11d882b` (pushed to and confirmed synchronized with
+**HEAD**: `0d0456a` (pushed to and confirmed synchronized with
 `origin/feature/full-product-build`; the 12-dimension adversarial audit
 referenced throughout this report was launched while HEAD was `28bc578`,
 completed and its results are fully incorporated in §16; commits between
 this report's original `4eb4ff5` HEAD and current HEAD are the audit's own
-§16.6 triage table, the blocker-remediation round that acted on it, and
-this round's re-verification work on the R7/R9 memo — all incorporated in
-§15/§16.6/§11's updates)
+§16.6 triage table, the blocker-remediation round that acted on it, this
+round's re-verification work on the R7/R9 memo (all incorporated in
+§15/§16.6/§11's updates), and this final round's CI fix, documentation
+correction, and coverage backfill (§16.10))
 
 This report supersedes any prior status summary given mid-session in this
 conversation. Where this document and an earlier message in this session
@@ -86,23 +90,30 @@ with authority over the primary source.
 ## 2. Exact Git HEAD
 
 ```
-28bc578 docs(deployment): record today's fresh, independent Docker build re-verification
+0d0456a test: backfill coverage for last 9 zero-coverage files (mappers, calculation reader, regulatory glue, shell cookie helpers)
 ```
 
-Full HEAD SHA: `28bc578...` (short form as shown; see `git rev-parse HEAD`
-in the repository for the full 40-character hash at any time).
+Full HEAD SHA: `0d0456adf69788223b29c2e2b64678d5403b7122` (see `git rev-parse
+HEAD` in the repository to reconfirm at any time). **Superseded note**: this
+section previously cited `28bc578` — that was the HEAD when this report's
+adversarial-audit-derived sections (§15/§16) were last substantively
+updated, not a claim that nothing landed afterward. §16.10 documents
+everything committed between `28bc578` and this current HEAD.
 
 ## 3. Branch / remote state
 
 - Active branch: `feature/full-product-build`
 - Working tree: **clean** (`git status` — nothing to commit)
-- Remote sync: **45 commits ahead of `origin/feature/full-product-build`**,
-  not yet pushed (no push was requested or authorized this session)
+- Remote sync: **pushed and confirmed synchronized** with
+  `origin/feature/full-product-build` (0 ahead, 0 behind, verified via
+  `git fetch` + `git rev-list --left-right --count` immediately before this
+  update) — per standing instruction, still **never merged to `main`**
 - `git diff --check`: clean (no whitespace errors)
 - No secrets, generated artifacts, or debug files found in tracked output
-  (re-ran the same secret-scan pattern `.github/workflows/ci.yml` uses,
-  independently, against the full working tree: zero matches beyond the two
-  already-allow-listed, genuinely non-secret local-dev markers)
+  (re-ran the CI secret-scan pattern independently against the full
+  working tree, using the same hardened check §16.10 describes: zero
+  matches beyond the two already-allow-listed, genuinely non-secret
+  local-dev markers)
 - **Not merged to `main`** — per explicit instruction, this session never
   touched `main`
 
@@ -1274,6 +1285,113 @@ confirmed fully reverted; the remote-project cross-check query), is
 preserved in this session's own transcript for anyone who needs to
 re-verify or extend this investigation.
 
+### 16.10 Fifth round: CI reliability fix, a documentation correction, and closing every remaining zero-coverage file (2026-08-30)
+
+With §16.9's E2E fix verified and both remaining blockers (§29's Railway
+outage, §11's R7/R9 memo) still exactly as open as before — neither touched
+this round, per standing instruction — this round continued the explicit
+"remaining non-blocked work" list: security hardening, coverage gaps,
+documentation, and production-config review.
+
+**Fixed**:
+
+- **CI secret-scan could silently no-op instead of failing** — a retried
+  production-config-review agent found and locally reproduced that the
+  scan's trailing `|| true` (`.github/workflows/ci.yml`, needed so "no
+  matches" exits 0 under `set -euo pipefail`) also absorbed `git grep`
+  itself exiting non-zero for a malformed `PATTERN`: the fatal error
+  prints to stderr, but the captured `$MATCHES` variable stays empty and
+  the step reports "no secrets found" and exits 0 — this security gate
+  quietly becoming a no-op on some future edit to the pattern, with
+  nothing in the workflow's own green checkmark to reveal it. Fixed by
+  splitting `git grep` out and checking its exit code explicitly (0 or 1
+  = ran fine, anything else = the scan itself is broken and must fail
+  loudly) — verified locally against both the exit-1 (no matches) and
+  exit-128 (malformed pattern) cases, and re-confirmed zero real matches
+  against the current repo afterward. Commit `795c5e2`.
+- **A false positive the fix above would have caught** — this report's
+  own §29 quoted a build command with two empty, unquoted env-var
+  assignments (`NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_ANON_KEY=
+  ...`), which the scan's own `SUPABASE_(...)?\s*[:=]\s*['"]?[^$\s"']`
+  branch matched — its `\s*` after `=` let the following word's first
+  letter satisfy the "at least one non-space value character" check,
+  even though both assignments were empty. Reworded to explicit `=""`
+  quoting, which reproducibly no longer matches (verified both ways).
+  Same commit as the doc correction below, `18880e0`, since both are
+  documentation-only changes to the same file discovered together.
+- **§7's inaccurate verification claim** — this report previously said
+  producer-side navigation was confirmed present on "the same
+  dual-capability test organization." Live-verified this round that this
+  was wrong: `deriveExperience()` (`components/shell/app-shell.tsx`,
+  unchanged since introduction) shows the producer sidebar only when an
+  org holds `PRODUCER_OPERATOR` and not `IMPORTER_DECLARANT`, by explicit
+  documented design — a dual-capability org gets the importer sidebar
+  only (producer screens remain fully functional and correctly
+  authorized via direct URL, just not linked from the sidebar). Not a
+  regression; confirmed via `git log -p --follow` that this logic has
+  never been different since its introduction, and that the introducing
+  commit's own verification was against a producer-only org, never a
+  dual-capability one — §7's claim was simply wrong from the start, not
+  a later drift. §7 corrected with the actual verification scenario and
+  a labeled correction paragraph; added as its own disclosed limitation
+  to §35, since it had never been listed there. Commit `18880e0`.
+- **Every remaining zero-coverage file with real behavior, closed** —
+  two backfill rounds (seven parallel agents, then five), every agent
+  independently confirming `pnpm typecheck` and its own `vitest run`
+  clean before returning, then a full-suite re-run after each round to
+  confirm no interaction effects:
+  - Round one (155 new tests) targeted `app/`'s `actions.ts`/`route.ts` files a
+    prior audit flagged as zero- or partial-coverage: `shipments/[id]`
+    (7→44 tests), `evidence/[id]/download` (0→7), `declarations` (0→23),
+    `emission-data` (0→33, including the ADMIN+-only verify/reject
+    compliance gate), `organization` (0→13), `installations` (0→27,
+    including `INSTALLATION_HAS_DEPENDENTS`), and `shipments`+`suppliers`
+    (0→15). A systematic sweep afterward (every `actions.ts`/`route.ts`
+    under `app/` checked for a sibling `.test.ts`) confirmed zero remain
+    uncovered by this pattern. Commit `2f551e4`.
+  - Round two (43 new tests) closed the last non-trivial files elsewhere
+    in the tree with zero coverage, found via the same sibling-test-file
+    sweep extended to `src/application/`, `src/infrastructure/`,
+    `src/domain/`, and `components/`: the `declaration`/`shipment`/
+    `emission-data`/`evidence`/`sharing-grant` row-mapper functions (real
+    branching on ANNUAL/QUARTERLY period kinds and null-to-default
+    coercions, previously untested because no prior round had reason to
+    touch them), `get-latest-calculations` (including a multi-row test
+    guarding the exact truncation/dedup bug class a prior P6 review
+    found and fixed in this same function), `resolve-active-default-value`
+    (the application-layer orchestration wrapper around the protected
+    regulatory resolver — tested narrowly on its own wiring, with the
+    real resolver mocked at the module boundary; **no file under
+    `src/domain/regulatory/` or `src/infrastructure/regulatory/` was
+    touched, read for modification, or exercised beyond its own existing
+    test suite** — this stays fully outside the protected zone's
+    TDD-defect protocol because nothing protected was changed), and two
+    `components/shell/` cookie helpers (`get-preferred-org-id`,
+    `switch-org-action` — the latter's `secure` cookie flag, gated on
+    `NODE_ENV === "production"`, is asserted directly rather than left
+    implicit). Files correctly excluded from this sweep: pure port
+    interfaces (`organization-repository.ts`) and branded-type-only
+    files (`src/domain/shared/ids.ts`) — neither has runtime behavior to
+    test. Commit `0d0456a`.
+  - Both rounds' generated diffs were spot-checked directly against
+    their source files (not just trusted from the agents' own reports)
+    — exact string/value assertions confirmed to match the real
+    implementation, e.g. `organization/actions.test.ts`'s OWNER-only
+    message and `emission-data/actions.test.ts`'s
+    `PERMISSION_DENIED` message both checked byte-for-byte against
+    `app/organization/actions.ts` and `app/(producer)/emission-data/actions.ts`.
+  - Net effect: `pnpm test` moved 1121 → 1276 → **1319** passed / 14
+    skipped / 0 failed across this round (§24); `pnpm typecheck` stayed
+    clean throughout.
+
+**Not fixed, deliberately out of scope this round**: the pre-existing
+documentation staleness already disclosed in §35 (three architecture docs,
+~20 stale `AUTHORIZATION_MATRIX.md` citations, one bad
+`CALCULATION_RULE_REGISTER.md` fixture reference) — untouched, still
+exactly as disclosed. §29's Railway outage and §11's R7/R9 memo remain the
+only two items changing the RELEASE BLOCKED classification (§37), and
+neither was touched this round, per standing instruction.
+
 ## 19. Explainability
 
 Live-verified this session (§6): input → classification (CN8 match) →
@@ -1360,22 +1478,37 @@ data — every result traces to the real `cbam_goods`/regulatory dataset.
 
 ## 24. Test counts
 
-`pnpm typecheck`: **clean**, zero errors, at HEAD `4eb4ff5`.
+`pnpm typecheck`: **clean**, zero errors, at HEAD `0d0456a` (current, see §2).
 
-`pnpm test`: **974 passed / 14 skipped / 988 total**, a fully clean run (zero
-failures) at HEAD `4eb4ff5`, after the final adversarial audit workflow
-(§16) had finished and stopped contending for the local Postgres instance.
-Note: while that workflow was active, it ran heavy, deliberately concurrent
-live `psql` probes against the same local Postgres instance to reproduce RLS
-findings directly — full-suite runs made *during* that window occasionally
-showed one or another specific integration test
+`pnpm test`: **1319 passed / 14 skipped / 1333 total**, a fully clean run
+(zero failures) at current HEAD. This figure has moved twice since this
+section was first written at 974/14/0 (HEAD `4eb4ff5`, right after the
+initial adversarial audit workflow stopped contending for local Postgres —
+see the historical note below): to **1121/14/0** after the blocker-
+remediation round's own fixes and their tests (§15/§16.6), then to
+**1276/14/0** after this final round's first coverage-backfill pass (§16.10,
+155 new tests across 8 previously-zero-coverage `actions.ts`/`route.ts`
+files under `app/`), and finally to the current **1319/14/0** after a
+second, smaller pass (§16.10, 43 new tests) closed every remaining
+non-trivial zero-coverage file elsewhere in the tree (pure mappers, one
+calculation-view reader, one regulatory orchestration wrapper, two shell
+cookie helpers — pure-interface and branded-type-only files were correctly
+excluded, since there is no runtime behavior in them to test). No test was
+ever deleted or weakened to reach any of these numbers.
+
+**Historical note (2026-08-29, HEAD `4eb4ff5`)**: while the original
+adversarial audit workflow (§16) was still active, it ran heavy,
+deliberately concurrent live `psql` probes against the same local Postgres
+instance to reproduce RLS findings directly — full-suite runs made *during*
+that window occasionally showed one or another specific integration test
 (`organizations-isolation.test.ts`, different individual tests each time)
 timing out at its default 5-second limit under that contention. Every such
 failure was re-run in isolation and passed cleanly every time. This is a
 real, reproducible, understood environmental characteristic of concurrent
 heavy local-Postgres load, not a product defect — recorded honestly here
-rather than silently retried until it happened to pass, and now moot: the
-974/14/0 figure above is a genuinely clean, uncontended run.
+rather than silently retried until it happened to pass, and long since moot:
+every full-suite run cited in this section since, including the current
+1319/14/0 figure, was a genuinely clean, uncontended run.
 
 ## 25. Integration tests
 
