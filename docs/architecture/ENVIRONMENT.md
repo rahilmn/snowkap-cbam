@@ -367,6 +367,65 @@ intentionally excluded from the "16 variables" count above and from
 client component needs the version string, it already has this value
 available with no further plumbing.
 
+## 6. `.env` vs `.env.local` — a real, live-reproduced local-dev risk
+
+**This section documents an actual defect found and fixed this
+session, not a hypothetical.** On this project's own dev machine(s),
+`.env` documents the **hosted regulatory Supabase project**
+(`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`/`NEXT_PUBLIC_SUPABASE_URL`/
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` all point at it) — needed for
+`scripts/regulatory/*.py` and `pnpm regulatory:verify`, which
+deliberately run against the hosted project, never local. `.env.local`
+correctly overrides all four of those same variables to the **local**
+Supabase instance, for `pnpm dev`/`pnpm build`+`pnpm start`/
+`pnpm test:e2e` — Next.js's own documented precedence
+(`.env.local` > `.env`) is exactly what makes this override work for
+normal `next dev` and a normal `next build`.
+
+**It did not work for Next.js 16's standalone production server**
+(`node .next/standalone/server.js`, exactly what
+`playwright.config.ts`'s `webServer` runs) — live-reproduced,
+byte-for-byte confirmed, not inferred: `NEXT_PUBLIC_SUPABASE_URL`
+(inlined at build time, which `next build` loads correctly) resolved
+to local as expected, but plain `SUPABASE_URL`/
+`SUPABASE_SERVICE_ROLE_KEY` (read live at runtime via `process.env`,
+never inlined) resolved to `.env`'s **remote** value instead, for
+every single call in that server process's lifetime, not merely a
+first-call race later self-corrected. `src/infrastructure/supabase/
+client.ts`'s regulatory adapter — the one thing in this codebase that
+uses those two specific variables at runtime — was therefore silently
+reading real, valid-looking data from the **wrong Supabase project
+entirely**. This surfaced as a genuinely confusing, 100%-reproducible
+E2E failure (a legitimate shipment-line determination rejected by the
+local anti-forgery validation trigger, because the regulatory
+candidates behind it came from the remote project's dataset, not
+local's) — see `docs/plans/P13_RELEASE_READINESS_REPORT.md` §16.8 for
+the full diagnostic account, including exactly how it was confirmed
+(a live query against the remote project's own `regulatory_datasets`
+table, matching the rejected write's claimed `dataset_id` exactly).
+
+**Fixed two ways, together** (neither alone was sufficient — see the
+commit message on `632f543` for why): `client.ts`/`admin-client.ts`
+now re-derive env on every call and rebuild their cached client if it
+differs from what was cached (general hardening — did not fix this
+specific case alone, since the wrong value resolved consistently, not
+just on a first call); `playwright.config.ts` now explicitly parses
+`.env.local` then `.env` itself (matching Next's own documented
+precedence) and passes the result directly into `webServer.env`,
+which Node guarantees reaches the spawned standalone server's real
+`process.env` regardless of whatever that server's own env-file
+loading does or doesn't do correctly.
+
+**Practical implication for anyone touching this area**: if you ever
+see local product code (not `scripts/regulatory/*`) behaving as though
+it's talking to a different Supabase project than the one `supabase
+status` reports — especially anything regulatory-adapter-related, and
+especially under a production build (`pnpm build && pnpm start`) rather
+than `pnpm dev` — suspect this exact class of issue first. Confirm by
+comparing a suspect `dataset_id`/row id directly against both
+projects, the same way this session did, before assuming a code-logic
+bug in the regulatory resolver itself.
+
 ## Cross-check against `.env.example`
 
 [`.env.example`](../../.env.example) documents 9 of the 16 variables

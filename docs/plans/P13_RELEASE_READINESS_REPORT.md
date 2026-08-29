@@ -1095,24 +1095,22 @@ manual browser sign-ups and multiple back-to-back Playwright runs)
 sharing one rate-limit window, which is the security control working
 exactly as designed, not a defect.
 
-**Left as a disclosed, unresolved operational finding, not fixed this
-round**: this means `pnpm exec playwright test` (the bare command
-documented in `README.md`/CI as "the" way to run this suite) **cannot
-reliably complete as a single batch locally** without risking exactly
-this collision, since the suite's own total sign-up volume can exceed
-`SIGN_UP_RATE_LIMIT`'s budget within one run. This is a real gap this
-report had not previously surfaced (the existing "CI stops local
-Supabase before running the Playwright E2E suite" limitation, §26/§35,
-is a *different* reason the suite has never gone green as one batch in
-CI — this rate-limit collision is an *additional*, independent reason
-it might not go green as one batch even if that CI gap were closed
-today, until one of: the rate limiter is bypassed/relaxed under a
-recognized test/CI signal — this codebase has no such mechanism today,
-and inventing one was out of scope for this pass and would itself need
-its own security review — or the suite's specs are run individually /
-with deliberate spacing / against a dev server restarted between
-batches, as this verification pass did to get a clean signal. Recorded
-here rather than worked around silently.
+**Update (§16.9 below, same day): this was fixed, and the rate-limit
+attribution above was only ever a partial explanation.** At the time
+this subsection was written, `pnpm exec playwright test` genuinely
+could not reliably complete as a single local batch, and the sign-up
+rate-limit collision described above is real and was a genuine
+contributing factor (confirmed independently via the dev-server timing
+signature) — but a *second*, unrelated, and more consequential defect
+(a wrong-Supabase-project data leak under Next's standalone server) was
+also present and was the actual cause of the specific residual failure
+this subsection went on to describe as "left... not fixed this round."
+Both are now fixed; see §16.9 for the full account of the second one,
+including why the concurrency/load theory floated below turned out to
+be wrong. Left as originally written, immediately below, for the
+historical record of how this investigation actually proceeded rather
+than silently rewritten to look like the right answer was found first
+try.
 
 Evidence upload (`app/api/evidence/upload/route.ts`) enforces MIME/extension
 allowlisting, size caps, org-scoped storage paths (with a database-level
@@ -1135,6 +1133,128 @@ backend locally** — Supabase Storage does not run on this Windows host
 (reproduced three separate times across this overall effort); `storage.objects`
 RLS is shim-verified only. Real Storage-backed verification needs a working
 Railway/staging deployment — currently blocked (§28).
+
+### 16.9 Fourth round: the E2E flake root-caused for real — a genuine wrong-Supabase-project data leak (2026-08-30)
+
+**§16.8's own E2E finding is superseded by this section, not merely
+extended — its "concurrency/load" attribution was wrong, and this
+section says so plainly rather than quietly overwriting it.** Continuing
+the same investigation immediately afterward (the residual single-spec
+failure noted as "left as a disclosed, unresolved operational finding"),
+this round definitively root-caused it — and it was never load-related
+at all.
+
+**The concurrency theory was tested and refuted, not assumed away**:
+`--workers=1` (fully serial — no test runs concurrently with any other,
+at any point) still reproduced the exact same failure, three times in a
+row, on a completely fresh `.next` build each time. A pure function of
+static inputs (which regulatory resolution is) cannot behave differently
+based on unrelated tests having run earlier in the same process unless
+something genuinely stateful is involved — this result is what
+motivated dropping the load hypothesis and instrumenting for real
+evidence instead of tuning further.
+
+**Live Postgres instrumentation, not guesswork**: a temporary,
+diagnostic-only redefinition of `app.emission_determination_matches_regulatory_record`
+(applied directly to local Postgres via `psql`, never touching a
+migration file, fully reverted afterward and confirmed byte-identical
+to the committed definition via `provolatile` and a full function-body
+diff) added a distinct `RAISE WARNING` at every one of its 21
+false-returning branches. `docker logs supabase_db_snowkap-cbam` then
+showed, for the real `authenticator@postgres` connection handling the
+actual failing request: `DBG19 dataset not active/found id=8895df69-993b-49af-9a68-268019b214fe version=2026-definitive-corrected`
+— the claimed dataset id didn't exist as ACTIVE in local Postgres at
+all. Querying local `regulatory_datasets` directly confirmed there is
+exactly one row, `efcd5c92-e7d5-4eef-ba79-d0ea642f6abb` — a completely
+different id for the same version string. Querying the **hosted**
+regulatory Supabase project directly (via `scripts/regulatory`'s own
+`supabase/.temp/pooler-url` mechanism, the same connection path
+`pnpm regulatory:verify` uses) confirmed `8895df69-993b-49af-9a68-268019b214fe`
+is **that project's own ACTIVE `DEFAULT_EMISSION_VALUES` row, exact
+byte-for-byte match**.
+
+**Root cause, confirmed not inferred**: this dev machine's `.env`
+documents the hosted regulatory project's credentials (needed for
+`scripts/regulatory/*.py`/`pnpm regulatory:verify`, which deliberately
+run against the hosted project); `.env.local` correctly overrides
+`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`/`NEXT_PUBLIC_SUPABASE_URL`/
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` to the local instance for product code.
+Next's own documented precedence (`.env.local` > `.env`) worked
+correctly for `NEXT_PUBLIC_SUPABASE_URL` (inlined at build time,
+confirmed local throughout) — but did **not** hold for the plain,
+runtime-read `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` under Next.js
+16's standalone production server (`node .next/standalone/server.js`,
+exactly what `playwright.config.ts`'s `webServer` runs — the same
+server every single E2E run in this whole investigation has used, isolated
+runs included). A second, fresh diagnostic (application-level
+`console.error` logging `process.env.SUPABASE_URL` directly at the
+regulatory repository's own dataset-fetch call site) confirmed it
+resolved to the remote URL **consistently, every single call**, not
+merely on a first call later self-corrected — which is exactly why an
+earlier attempted fix (hardening `src/infrastructure/supabase/client.ts`'s
+memoized client to rebuild if env changes between calls) did not, on
+its own, fix anything: the value never changed, it was simply wrong
+the entire time.
+
+Why did isolated single-spec runs used earlier in this session's own
+investigation (§16.8, the previous round) consistently pass, if this
+is a deterministic, always-wrong resolution? Not fully explained, and
+not asserted as fact here — the practical determination did not depend
+on resolving it further once the fix (below) was verified working
+across multiple fresh runs. One plausible, unconfirmed contributor:
+those earlier isolated checks were run before this diagnostic round's
+own live queries against the hosted project (which required sourcing
+`.env` into a shell for `pnpm regulatory:verify`), and some part of
+the standalone server's env resolution may be sensitive to the
+process tree's own inherited environment at spawn time in a way this
+report did not fully characterize — flagged as an open question, not
+papered over.
+
+**Fixed, verified working, not merely theorized**:
+
+1. `src/infrastructure/supabase/{client,admin-client}.ts` — both
+   memoized clients now re-derive env on every call and rebuild if it
+   differs from the cached value. Real hardening, kept even though it
+   alone did not fix this specific case (see above) — TDD, both files
+   previously had zero test coverage.
+2. `playwright.config.ts` — rather than depend on Next's own
+   standalone-server env-file loading (the actual root cause, outside
+   this repo's control and not guaranteed stable across Next
+   versions), explicitly parses `.env.local` then `.env` itself
+   (matching Next's own documented precedence, first-value-wins) and
+   passes the resolved values directly into `webServer.env`, which
+   Node guarantees reaches the spawned process's real `process.env`
+   regardless of the standalone server's own behavior.
+
+**Verification, not assumption**: two consecutive full-batch runs
+(`pnpm exec playwright test`, default settings — `workers: 3`,
+`retries: 2`, `expect.timeout: 10_000`, the rate-limit bypass, and now
+this fix, all together — with a fresh `.next` build each time) both
+completed **24 passed / 0 failed / 8 skipped**. This is the first
+fully green full-batch result across this entire multi-round
+investigation. `pnpm typecheck` clean; `pnpm test` — 1121 passed, 14
+skipped, re-run in isolation after an earlier concurrent run (racing
+against a simultaneously-executing E2E batch, both hammering local
+Postgres at once) produced 2-3 false-alarm integration-test failures
+purely from resource contention, not a real regression, confirmed by
+the clean re-run; `pnpm regulatory:verify` — `RESULT: VALID`.
+
+**Scope honestly bounded**: this is a real, live-reproduced defect in
+this codebase's client-caching pattern (fixed, general-purpose
+hardening, kept regardless of the specific trigger) layered under a
+genuinely local-dev-machine-specific configuration collision (a
+checked-out `.env` pointing at the hosted project, present only on
+machines that also run the regulatory pipeline locally) interacting
+with a Next.js 16 standalone-server behavior this report does not
+claim to fully understand or guarantee is fixed at the Next.js level
+— only worked around, reliably, at this repo's own config boundary.
+It would **not** occur in CI or Railway, neither of which has a
+`.env` file at all (env vars are injected directly, with no file-based
+precedence question). Full technical detail, including the exact
+diagnostic methodology (temporary SQL instrumentation via `psql`,
+confirmed fully reverted; the remote-project cross-check query), is
+preserved in this session's own transcript for anyone who needs to
+re-verify or extend this investigation.
 
 ## 19. Explainability
 
@@ -1252,30 +1372,43 @@ regression test.
 
 Three full-journey Playwright specs (importer, producer, cross-org-sharing)
 plus smoke and topbar-responsive specs, established and passing earlier
-this overall effort against real local Supabase. **Re-run in this session**
-(2026-08-30, §16.8 has the full narrative): a full-batch run
-(`pnpm exec playwright test`, default parallel settings) produced 11
-failures, all root-caused to a real but self-inflicted cause — this
-session's own cumulative sign-up volume (manual + automated) exceeding
-`signUpAction`'s `SIGN_UP_RATE_LIMIT` (5 per 10 minutes, in-memory,
-per-process) within one run — **not** a code regression. Every one of
-the 7 spec files was then confirmed passing individually against a
-fresh dev-server process: `importer-journey`, `producer-journey`,
-`cross-org-sharing-journey`, `importer-auth-smoke`, `producer-auth-smoke`,
-`topbar-tablet-responsive`, and all 12 of `shell.spec.ts`'s sub-tests.
-This is real, direct, positive evidence that this session's code changes
-(capability-gate route hardening, `team/actions.ts` rate limiting, the
-onboarding text fix, and the six test-coverage-backfill files) introduced
-no E2E regression — not merely an assumption carried forward. **New,
-disclosed operational finding** (§16.8): `pnpm exec playwright test` run
-as one bare batch — the way `README.md`/CI document running it — cannot
-reliably complete locally without risking this same rate-limit collision,
-independently of the pre-existing CI caveat below. **CI caveat, found by
-this session's documentation audit and not yet fixed**: `ci.yml` stops local
+this overall effort against real local Supabase. **Re-run in this session,
+across two rounds** (2026-08-30, §16.8/§16.9 have the full narrative —
+read both, in order, for the honest account of how this was actually
+diagnosed): a full-batch run (`pnpm exec playwright test`, default
+settings) initially produced 11 failures. Two distinct, real causes were
+found and fixed, not one: (1) the suite's own cumulative sign-up volume
+exceeding `signUpAction`'s `SIGN_UP_RATE_LIMIT` (5 per 10 minutes,
+in-memory, per-process) within one run — fixed with an explicit,
+narrowly-scoped test-only bypass (`DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS`,
+§16.8); and (2) a genuine wrong-Supabase-project data leak under Next.js
+16's standalone production server — this dev machine's `.env` (hosted
+regulatory project) was winning over `.env.local` (correct local
+override) for two runtime-read variables, causing the regulatory
+adapter to silently read from the wrong project — fixed by hardening
+the memoized Supabase clients and having `playwright.config.ts` resolve
+and inject the correct environment itself rather than depend on Next's
+own standalone env-file loading (§16.9). An intermediate "concurrency/
+load" theory was tested (worker count reduced, timeouts raised, retries
+added) and looked like it helped at first, but `--workers=1` (fully
+serial) still reproduced the failure 100% of the time, which is what
+prompted live Postgres instrumentation instead of further tuning —
+§16.9 documents this honestly rather than presenting only the final
+answer. **Verified, not assumed**: with both fixes in place, two
+consecutive full-batch runs (`pnpm exec playwright test`, default
+settings, fresh `.next` build each time) both completed **24 passed / 0
+failed / 8 skipped** — the first fully green full-batch result in this
+investigation. This is real, direct, positive evidence that this
+session's code changes (capability-gate route hardening, rate-limiting
+fixes, the onboarding text fix, and all of this session's test-coverage
+backfills) introduced no E2E regression. **CI caveat, found by this
+session's documentation audit and not yet fixed**: `ci.yml` stops local
 Supabase *before* running the Playwright suite, and the E2E specs neither
 skip nor tolerate its absence — meaning these three journey specs are
-currently locally-verified only, never actually green in CI. Named as a
-known limitation (§35), not fixed in this session.
+still never actually exercised in CI as currently configured, independent
+of everything above (both fixes make local runs reliable; neither
+touches this separate CI gap). Named as a known limitation (§35), not
+fixed in this session.
 
 ## 27. Regulatory verification
 
@@ -1461,13 +1594,13 @@ directly-observed gaps.
 - CI stops local Supabase before running the Playwright E2E suite (§26) —
   those three journey specs are locally-verified only, never actually green
   in CI as currently configured.
-- Running the full local E2E suite as one bare `pnpm exec playwright test`
-  batch risks a self-inflicted `SIGN_UP_RATE_LIMIT` collision (§16.8, §26)
-  — the suite's own natural sign-up volume can exceed the 5-per-10-minute
-  budget within a single run, independent of the CI gap above. Every spec
-  passes cleanly when run individually against a fresh dev server; no fix
-  (a test/CI rate-limit bypass mechanism) exists yet, and none was added
-  this round.
+- ~~Running the full local E2E suite as one bare `pnpm exec playwright test`
+  batch risks a self-inflicted `SIGN_UP_RATE_LIMIT` collision~~ — **fixed
+  this round** (§16.8/§16.9, §26): a test-only rate-limit bypass plus a
+  fix for a separate, genuine wrong-Supabase-project data leak under
+  Next's standalone server together made the full batch reliably green
+  (two consecutive 24/0/8 runs). Independent of the CI gap immediately
+  above, which remains open.
 - No reusable data-table component; command palette is a disabled stub;
   zero site-wide `aria-live` beyond this session's one addition; no
   automated accessibility scan (§21).
