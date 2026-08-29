@@ -24,10 +24,15 @@ import {
   initialTeamActionState,
 } from "./action-state";
 
+import {
+  formatDate,
+} from "../../lib/utils";
+
 export interface PendingInvitationRow {
   invitationId: string;
   email: string;
   role: "ADMIN" | "MEMBER";
+  expiresAt: string;
 }
 
 export function PendingInvitationsList(
@@ -81,12 +86,18 @@ function PendingInvitationItem(
   return (
     <li className="flex flex-col gap-1">
       <div className="flex items-center justify-between gap-4 text-sm">
-        <span className="text-[var(--text-primary)]">
-          {invitation.email}
-          <span className="ml-2 text-[var(--text-tertiary)]">
-            {invitation.role}
+        <div className="flex flex-col">
+          <span className="text-[var(--text-primary)]">
+            {invitation.email}
+            <span className="ml-2 text-[var(--text-tertiary)]">
+              {invitation.role}
+            </span>
           </span>
-        </span>
+
+          <span className="text-xs text-[var(--text-tertiary)]">
+            Expires {formatDate(invitation.expiresAt)}
+          </span>
+        </div>
 
         <form action={formAction}>
           <input

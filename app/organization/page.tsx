@@ -28,6 +28,10 @@ import {
   OrganizationSettingsForm,
 } from "./organization-settings-form";
 
+import {
+  DangerZone,
+} from "./danger-zone";
+
 export default async function OrganizationSettingsPage() {
   const supabase =
     await getServerSupabaseClient();
@@ -84,6 +88,16 @@ export default async function OrganizationSettingsPage() {
           }}
         />
       </Card>
+
+      <div className="mt-6">
+        <DangerZone
+          organization={{
+            id: organization.id,
+            slug: organization.slug,
+            createdAt: organization.created_at,
+          }}
+        />
+      </div>
     </AppShell>
   );
 }

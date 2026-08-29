@@ -24,3 +24,28 @@ export function cn(
     ),
   );
 }
+
+/**
+ * Date-only formatting (no time component) for read-only timestamps
+ * shown across the app -- invitation expiry, membership deactivation
+ * date, organization creation date. Locale is fixed (en-GB) rather than
+ * left to the runtime default so server-rendered and client-hydrated
+ * output can't disagree and trip a hydration mismatch -- the same
+ * reasoning as the (time-inclusive) formatTimestamp helpers in
+ * app/status/page.tsx and
+ * app/(producer)/sharing/status/shared-data-status-list.tsx, which this
+ * doesn't replace: both of those need a time component their callers
+ * don't.
+ */
+export function formatDate(
+  iso: string,
+): string {
+  return new Date(
+    iso,
+  ).toLocaleDateString(
+    "en-GB",
+    {
+      dateStyle: "medium",
+    },
+  );
+}

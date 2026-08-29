@@ -108,6 +108,7 @@ export default async function AcceptInvitationPage() {
                   invitationId: item.invitation.id,
                   organizationName: item.organizationName,
                   role: item.invitation.role,
+                  expiresAt: item.invitation.expires_at,
                 }
               ),
             )}
@@ -127,6 +128,7 @@ export default async function AcceptInvitationPage() {
                     grantId: item.grant.id,
                     grantorOrganizationName: item.grantorOrganizationName,
                     installationName: item.installationName,
+                    expiresAt: item.grant.expires_at,
                   }
                 ),
               )}

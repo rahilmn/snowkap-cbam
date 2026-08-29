@@ -20,10 +20,19 @@ import {
   initialAcceptInvitationActionState,
 } from "./action-state";
 
+import {
+  formatDate,
+} from "../../lib/utils";
+
 export interface AcceptableSharingGrantInvitation {
   grantId: string;
   grantorOrganizationName: string;
   installationName: string;
+  // Null = this bootstrap invitation carries no expiry of its own
+  // (sharing_grants.expires_at, unlike organization_invitations.expires_at,
+  // is nullable -- see accept_sharing_grant_invitation's own handling in
+  // 20260829300000/20260829360000, which only checks it "if not null").
+  expiresAt: string | null;
 }
 
 export function AcceptSharingGrantList(
@@ -85,6 +94,12 @@ function AcceptSharingGrantItem(
             Wants to share {invitation.installationName}'s emissions data
             with you
           </span>
+
+          {invitation.expiresAt ? (
+            <span className="text-xs text-[var(--text-tertiary)]">
+              Expires {formatDate(invitation.expiresAt)}
+            </span>
+          ) : null}
         </div>
 
         {activeOrganizationName ? (

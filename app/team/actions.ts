@@ -20,6 +20,8 @@ import {
 
 import {
   changeMemberRole,
+  deactivateMember,
+  reactivateMember,
   removeMember,
 } from "../../src/application/organizations/manage-membership";
 
@@ -45,6 +47,12 @@ function messageFor(
 
     case "MEMBERSHIP_NOT_FOUND":
       return "That member no longer exists.";
+
+    case "ALREADY_DEACTIVATED":
+      return "That member has already been deactivated.";
+
+    case "NOT_DEACTIVATED":
+      return "That member is already active.";
 
     default:
       return "Something went wrong. Please try again.";
@@ -191,6 +199,149 @@ export async function removeMemberAction(
 
   const result =
     await removeMember(
+      supabase,
+      orgSummary.context.org_id,
+      parsed.data.membershipId as never,
+    );
+
+  if (result.status === "REJECTED") {
+    return {
+      status: "error",
+      message: messageFor(result.reason),
+    };
+  }
+
+  revalidatePath(
+    "/team",
+  );
+
+  return {
+    status: "idle",
+  };
+}
+
+const deactivateMemberSchema =
+  z.object({
+    membershipId:
+      z.string().min(1),
+  });
+
+/**
+ * Offboarding path -- see deactivateMember's own doc comment
+ * (manage-membership.ts) for why this preserves the row instead of
+ * deleting it. Same fetch-invariant-persist-audit shape and the same
+ * REJECTED/messageFor handling as changeRoleAction/removeMemberAction
+ * above, including LAST_OWNER: deactivating an org's last active OWNER
+ * is refused for the same reason removing one is (isLastActiveOwner,
+ * src/domain/organizations/invariants.ts).
+ */
+export async function deactivateMemberAction(
+  _previousState: TeamActionState,
+  formData: FormData,
+): Promise<TeamActionState> {
+  const parsed =
+    deactivateMemberSchema.safeParse(
+      {
+        membershipId: formData.get("membershipId"),
+      },
+    );
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Invalid request.",
+    };
+  }
+
+  const supabase =
+    await getServerSupabaseClient();
+
+  const orgSummary =
+    await getCurrentOrgSummary(
+      supabase,
+      await getPreferredOrgId(),
+    );
+
+  if (!orgSummary) {
+    return {
+      status: "error",
+      message: "You are not a member of an organization.",
+    };
+  }
+
+  const result =
+    await deactivateMember(
+      supabase,
+      orgSummary.context.org_id,
+      parsed.data.membershipId as never,
+    );
+
+  if (result.status === "REJECTED") {
+    return {
+      status: "error",
+      message: messageFor(result.reason),
+    };
+  }
+
+  revalidatePath(
+    "/team",
+  );
+
+  return {
+    status: "idle",
+  };
+}
+
+const reactivateMemberSchema =
+  z.object({
+    membershipId:
+      z.string().min(1),
+  });
+
+/**
+ * Reverse of deactivateMemberAction -- see reactivateMember's own doc
+ * comment (manage-membership.ts). No LAST_OWNER case reachable here
+ * (reactivation only ever adds an active owner back), but NOT_DEACTIVATED
+ * is: a second reactivate submitted from a stale row (e.g. two admin
+ * tabs open on the same member) is rejected rather than silently
+ * treated as a no-op.
+ */
+export async function reactivateMemberAction(
+  _previousState: TeamActionState,
+  formData: FormData,
+): Promise<TeamActionState> {
+  const parsed =
+    reactivateMemberSchema.safeParse(
+      {
+        membershipId: formData.get("membershipId"),
+      },
+    );
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Invalid request.",
+    };
+  }
+
+  const supabase =
+    await getServerSupabaseClient();
+
+  const orgSummary =
+    await getCurrentOrgSummary(
+      supabase,
+      await getPreferredOrgId(),
+    );
+
+  if (!orgSummary) {
+    return {
+      status: "error",
+      message: "You are not a member of an organization.",
+    };
+  }
+
+  const result =
+    await reactivateMember(
       supabase,
       orgSummary.context.org_id,
       parsed.data.membershipId as never,

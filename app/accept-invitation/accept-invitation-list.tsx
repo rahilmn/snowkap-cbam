@@ -20,10 +20,15 @@ import {
   initialAcceptInvitationActionState,
 } from "./action-state";
 
+import {
+  formatDate,
+} from "../../lib/utils";
+
 export interface AcceptableInvitation {
   invitationId: string;
   organizationName: string;
   role: "ADMIN" | "MEMBER";
+  expiresAt: string;
 }
 
 export function AcceptInvitationList(
@@ -74,6 +79,10 @@ function AcceptInvitationItem(
 
           <span className="text-sm text-[var(--text-secondary)]">
             Invited as {invitation.role}
+          </span>
+
+          <span className="text-xs text-[var(--text-tertiary)]">
+            Expires {formatDate(invitation.expiresAt)}
           </span>
         </div>
 

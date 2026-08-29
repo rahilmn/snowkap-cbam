@@ -5,7 +5,9 @@ import {
 } from "react";
 
 import {
+  RotateCcw,
   UserMinus,
+  UserX,
 } from "lucide-react";
 
 import {
@@ -13,11 +15,21 @@ import {
 } from "../../components/ui/button";
 
 import {
+  Badge,
+} from "../../components/ui/badge";
+
+import {
   FieldError,
 } from "../../components/ui/field-error";
 
 import {
+  formatDate,
+} from "../../lib/utils";
+
+import {
   changeRoleAction,
+  deactivateMemberAction,
+  reactivateMemberAction,
   removeMemberAction,
 } from "./actions";
 
@@ -30,6 +42,7 @@ export interface TeamMemberRow {
   userId: string;
   email: string;
   role: "OWNER" | "ADMIN" | "MEMBER";
+  deactivatedAt: string | null;
 }
 
 const ROLE_OPTIONS: TeamMemberRow["role"][] = [
@@ -58,26 +71,43 @@ export function TeamMemberList(
   }
 
   return (
-    <ul className="divide-y divide-[var(--border-default)]">
-      {members.map(
-        (member) => (
-          <TeamMemberListItem
-            key={member.membershipId}
-            member={member}
-            // A member can't manage their own row through this UI --
-            // self-service role changes/leaving isn't built yet (see
-            // 20260828110000_membership_management_policies.sql's
-            // header comment), so the controls are simply hidden for
-            // your own row rather than sent to an action that would
-            // reject them anyway.
-            canManage={
-              canManage &&
-              member.userId !== currentUserId
-            }
-          />
-        ),
-      )}
-    </ul>
+    <>
+      {canManage ? (
+        <p className="border-b border-[var(--border-default)] p-4 text-xs text-[var(--text-tertiary)]">
+          <strong className="font-medium text-[var(--text-secondary)]">
+            Deactivate
+          </strong>{" "}
+          suspends a member's access while keeping their history --
+          reactivate them any time.{" "}
+          <strong className="font-medium text-[var(--text-secondary)]">
+            Remove
+          </strong>{" "}
+          permanently deletes their membership and cannot be undone --
+          use it only to correct a mistaken invite.
+        </p>
+      ) : null}
+
+      <ul className="divide-y divide-[var(--border-default)]">
+        {members.map(
+          (member) => (
+            <TeamMemberListItem
+              key={member.membershipId}
+              member={member}
+              // A member can't manage their own row through this UI --
+              // self-service role changes/leaving isn't built yet (see
+              // 20260828110000_membership_management_policies.sql's
+              // header comment), so the controls are simply hidden for
+              // your own row rather than sent to an action that would
+              // reject them anyway.
+              canManage={
+                canManage &&
+                member.userId !== currentUserId
+              }
+            />
+          ),
+        )}
+      </ul>
+    </>
   );
 }
 
@@ -101,6 +131,26 @@ function TeamMemberListItem(
     );
 
   const [
+    deactivateState,
+    deactivateFormAction,
+    deactivatePending,
+  ] =
+    useActionState(
+      deactivateMemberAction,
+      initialTeamActionState,
+    );
+
+  const [
+    reactivateState,
+    reactivateFormAction,
+    reactivatePending,
+  ] =
+    useActionState(
+      reactivateMemberAction,
+      initialTeamActionState,
+    );
+
+  const [
     removeState,
     removeFormAction,
     removePending,
@@ -110,13 +160,34 @@ function TeamMemberListItem(
       initialTeamActionState,
     );
 
+  const isDeactivated =
+    member.deactivatedAt !== null;
+
   return (
-    <li className="flex flex-col gap-1.5 p-4">
+    <li
+      className={
+        isDeactivated
+          ? "flex flex-col gap-1.5 p-4 opacity-70"
+          : "flex flex-col gap-1.5 p-4"
+      }
+    >
       <div className="flex items-center justify-between gap-4">
         <div className="flex flex-col">
-          <span className="text-sm font-medium text-[var(--text-primary)]">
+          <span className="flex items-center gap-2 text-sm font-medium text-[var(--text-primary)]">
             {member.email}
+
+            {isDeactivated ? (
+              <Badge tone="warning">
+                Deactivated
+              </Badge>
+            ) : null}
           </span>
+
+          {isDeactivated && member.deactivatedAt ? (
+            <span className="text-xs text-[var(--text-tertiary)]">
+              Since {formatDate(member.deactivatedAt)}
+            </span>
+          ) : null}
         </div>
 
         {canManage ? (
@@ -153,6 +224,52 @@ function TeamMemberListItem(
               </select>
             </form>
 
+            {isDeactivated ? (
+              <form action={reactivateFormAction}>
+                <input
+                  type="hidden"
+                  name="membershipId"
+                  value={member.membershipId}
+                />
+
+                <Button
+                  type="submit"
+                  variant="secondary"
+                  size="sm"
+                  loading={reactivatePending}
+                  aria-label={`Reactivate ${member.email}`}
+                  title="Reactivate: restores this member's access"
+                >
+                  <RotateCcw
+                    className="size-4"
+                    aria-hidden="true"
+                  />
+                </Button>
+              </form>
+            ) : (
+              <form action={deactivateFormAction}>
+                <input
+                  type="hidden"
+                  name="membershipId"
+                  value={member.membershipId}
+                />
+
+                <Button
+                  type="submit"
+                  variant="secondary"
+                  size="sm"
+                  loading={deactivatePending}
+                  aria-label={`Deactivate ${member.email}`}
+                  title="Deactivate: suspends access, keeps history, reversible"
+                >
+                  <UserX
+                    className="size-4"
+                    aria-hidden="true"
+                  />
+                </Button>
+              </form>
+            )}
+
             <form action={removeFormAction}>
               <input
                 type="hidden"
@@ -162,11 +279,11 @@ function TeamMemberListItem(
 
               <Button
                 type="submit"
-                variant="ghost"
+                variant="destructive"
                 size="sm"
                 loading={removePending}
                 aria-label={`Remove ${member.email}`}
-                title={`Remove ${member.email}`}
+                title="Remove: permanently deletes this membership, cannot be undone"
               >
                 <UserMinus
                   className="size-4"
@@ -184,6 +301,14 @@ function TeamMemberListItem(
 
       <FieldError>
         {roleState.status === "error" ? roleState.message : null}
+      </FieldError>
+
+      <FieldError>
+        {deactivateState.status === "error" ? deactivateState.message : null}
+      </FieldError>
+
+      <FieldError>
+        {reactivateState.status === "error" ? reactivateState.message : null}
       </FieldError>
 
       <FieldError>

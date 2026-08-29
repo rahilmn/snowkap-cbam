@@ -73,6 +73,7 @@ export default async function TeamPage() {
               user_id: string;
               email: string;
               role: "OWNER" | "ADMIN" | "MEMBER";
+              deactivated_at: string | null;
             },
           ) => (
             {
@@ -80,6 +81,7 @@ export default async function TeamPage() {
               userId: row.user_id,
               email: row.email,
               role: row.role,
+              deactivatedAt: row.deactivated_at,
             }
           ),
         );
@@ -120,6 +122,7 @@ export default async function TeamPage() {
                 invitationId: invitation.id,
                 email: invitation.email,
                 role: invitation.role,
+                expiresAt: invitation.expires_at,
               }
             ),
           )}
