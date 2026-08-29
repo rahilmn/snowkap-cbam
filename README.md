@@ -16,8 +16,8 @@ both importer and producer/operator organizations (shipment intake and
 classification, regulatory resolution, calculation, "Why this number?"
 explainability, period reporting/export, declaration preparation
 through LOCK, installation/operator management, actual-emissions entry
-and verification, cross-org sharing) all exist, are backed by 44
-applied Supabase migrations, and are covered by 967 passing automated
+and verification, cross-org sharing) all exist, are backed by 56
+applied Supabase migrations, and are covered by 1032 passing automated
 tests plus three full-journey Playwright E2E suites
 (`tests/e2e/{importer,producer,cross-org-sharing}-journey.spec.ts`) run
 against real local Supabase. See

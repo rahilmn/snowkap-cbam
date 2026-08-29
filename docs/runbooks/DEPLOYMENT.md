@@ -12,17 +12,34 @@ credentials this procedure depends on), and
 [`OPERATIONAL_DIAGNOSTICS.md`](./OPERATIONAL_DIAGNOSTICS.md) (what to do
 once something is live and misbehaving).
 
-**Status, honestly, as of 2026-08-29**: no staging or production
-Railway project is connected to this environment, and no staging or
-production Supabase project exists either — see `README.md`'s "Current
-state" ("Staging/production deployment is not yet live... not yet
-available in this environment") and master plan §41, which still lists
-"Production Supabase/Railway/DNS provisioning + go/no-go" as an
-owner-input item needed by P12. **Nothing in this document has been
-executed against a real Railway environment.** It is written to be
-immediately actionable the moment one exists — every step below is a
-description of a ready, unexecuted procedure, derived directly from
-this repo's actual `Dockerfile`, `railway.json`, `.github/workflows/ci.yml`,
+**Status, honestly, as of 2026-08-30 (corrected — see below)**: a
+production Railway project *does* now exist, owner-provisioned, at
+`https://snowkap-cbam-production.up.railway.app` — but it is currently
+**down**: every request (root and `/api/health` alike) returns
+Railway's own platform-level `502 Bad Gateway` / "Application failed to
+respond" page, meaning the container itself never successfully bound to
+a port to answer any request at all (see
+`docs/plans/P13_RELEASE_READINESS_REPORT.md` §29 for the full,
+repeatedly-reconfirmed evidence, including live Request IDs). This
+session has no Railway CLI/dashboard/API access, so the actual deploy
+logs, build output, or environment-variable configuration cannot be
+inspected from here — see that same §29 for the two most plausible,
+code-verified failure theories (a missing `NEXT_PUBLIC_SUPABASE_URL`/
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` Docker build-arg, or a missing
+`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` runtime variable failing the
+healthcheck) — neither is confirmed, only plausible from this repo's own
+config files. No staging Railway project or staging/production Supabase
+project exists yet. **Nothing in this document has been executed
+successfully against a real Railway environment** — the one real
+deployment that exists has never been observed to work. This document
+was originally written (2026-08-29) before any Railway project existed
+at all, framed as "no Railway project is connected" throughout; that
+framing is now stale wherever it appears below and should be read as
+"a Railway project exists but has never yet been observed healthy," not
+"no Railway project exists." It remains written to be immediately
+actionable the moment the deployment is fixed — every step below is a
+description of a ready procedure, derived directly from this repo's
+actual `Dockerfile`, `railway.json`, `.github/workflows/ci.yml`,
 and `app/api/health/route.ts` (not an invented design), not a record of
 a completed deployment. Where this document distinguishes "designed"
 from "verified locally," that distinction is real — see the "Local

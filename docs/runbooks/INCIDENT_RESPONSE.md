@@ -77,10 +77,11 @@ is no call site that does this today — see that function's own doc
 comment for the audit that confirmed it — but it's worth knowing the
 limit of the guarantee when reading an unfamiliar future log line).
 
-**Where to actually read them, today**: there is no Railway project
-connected to this environment (`DEPLOYMENT.md`'s status note applies
-here too) and no log drain adopted (master plan §41 still lists this as
-an open decision) — so today, these JSON lines are visible only in
+**Where to actually read them, today**: a Railway project exists but is
+currently down and unreachable from this session (`DEPLOYMENT.md`'s
+corrected status note applies here too — no dashboard/CLI access
+either way) and no log drain adopted (master plan §41 still lists this
+as an open decision) — so today, these JSON lines are visible only in
 whatever terminal is running `pnpm dev` / `pnpm start`, or in
 `docker logs <container>` for a locally-run image. Once a Railway
 project exists, its own "Logs" tab (or `railway logs` via the CLI)
@@ -128,8 +129,9 @@ not because it's the intended end state — master plan §32 describes
 test-fired at P12" as the target, but no error tracker is adopted yet
 (§41 still lists "Sentry/error tracking" as an open owner decision —
 confirmed by grep: no `@sentry/*` dependency in `package.json`), no
-Railway project is connected to trigger a Railway-health alert from,
-and nothing in this repository configures a paging tool. For a
+Railway project this session can reach to trigger or observe a
+Railway-health alert from (see `DEPLOYMENT.md`'s corrected status
+note), and nothing in this repository configures a paging tool. For a
 genuinely unresolvable issue today, the real path is: the team's normal
 communication channel (not named here, per the same convention
 `SUPPORT_ACCESS.md` uses — this repo doesn't contain or govern one),

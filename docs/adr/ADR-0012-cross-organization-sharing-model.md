@@ -46,6 +46,21 @@ is an explicit, audited action — never automatic.
   audit trail. Kept only as the bootstrap invitation *transport* (an
   email carrying a signed, expiring token), not as the standing access
   mechanism.
+
+  **Correction (2026-08-30, found stale during the P13 final
+  non-blocked-work audit)**: the paragraph above describes the
+  *intended* transport, not what was actually built. The implemented
+  bootstrap mechanism is a bare `invited_email` text column, matched
+  case-insensitively against the accepting user's confirmed auth email
+  at acceptance time (`src/application/sharing/manage-sharing-grants.ts`)
+  — there is no signed token of any kind, no expiry token, and no email
+  is ever actually sent (confirmed by grep: no mail-dispatch call
+  anywhere in that file). `README.md`'s own "Current state" section
+  already discloses this plainly ("the bootstrap-by-email sharing
+  invite does not actually send an email yet") and cites this ADR; this
+  ADR itself just never carried the same disclosure, so a reader
+  relying on the ADR alone would wrongly believe the signed-token email
+  transport was implemented. It is not, as of this correction.
 - **Blanket organization relationship** ("partner org sees everything")
   — rejected as too coarse: it would over-share any *future*
   installation the producer adds, with no way to scope a relationship

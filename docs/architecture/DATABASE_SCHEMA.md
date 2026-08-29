@@ -9,21 +9,28 @@
 > `20260829440000_p11_review_shipment_lines_numeric_format_ck.sql`
 > (39 migrations); **the "P13 additions" section near the end of this
 > document covers the five migrations applied since**
-> (`20260829450000`–`20260829490000`, 44 migrations total as of this
-> update — see [`MIGRATION_LOG.md`](./MIGRATION_LOG.md) for the full
-> ordered list). Read both: the body for the schema's shape, the P13
-> section for what changed on top of it. Update this document as new
-> migrations land — do not let it drift back into describing an earlier
-> phase as if it were current.
+> (`20260829450000`–`20260829490000`, 44 migrations total as of that
+> update) — **and the "Further P13 additions" section after it covers
+> twelve more** (`20260829500000`–`20260829610000`, 56 migrations total
+> as of 2026-08-30 — see [`MIGRATION_LOG.md`](./MIGRATION_LOG.md) for the
+> full ordered list). Read all three: the body for the schema's shape,
+> the two P13 sections for what changed on top of it, in order. Update
+> this document as new migrations land — do not let it drift back into
+> describing an earlier phase as if it were current (as the 44-migration
+> count itself had, until this pass).
 
 This document covers the **entire** applied `public` schema: the protected
 regulatory foundation (6 tables) and the full product schema (15 tables + 1
 view) built on top of it across phases P3–P11. Row Level Security is enabled
 on every table in both groups, and — contrary to an earlier version of this
 document — the product schema is **not** a future phase: it exists today,
-with 56 RLS policies, ~16 `app`-schema helper functions, 6 `public`-schema
-SECURITY DEFINER RPCs, and 13 triggers already applied and exercised by the
-integration test suite.
+with 56 RLS policies, 27 `app`-schema helper functions, 6 `public`-schema
+SECURITY DEFINER RPCs, and 19 triggers already applied and exercised by the
+integration test suite (counts re-verified live against local Postgres
+2026-08-30 — see "Further P13 additions" near the end of this document for
+what changed since the "P13 additions" section's own 44-migration count;
+the 44 → 56 migration-count gap is exactly the source of the trigger/function
+growth here).
 
 The regulatory tables remain **protected** per
 [`docs/adr/ADR-0005-protected-regulatory-subsystem.md`](../adr/ADR-0005-protected-regulatory-subsystem.md)
@@ -1238,3 +1245,65 @@ a new table — all five are policy/trigger/function redefinitions on
 already-documented tables, via this codebase's established
 drop-and-recreate-in-a-new-migration pattern (see this document's own
 "forward-only" framing above).
+
+## Further P13 additions (found stale during the final non-blocked-work audit, 2026-08-30)
+
+Twelve more migrations landed after the "P13 additions" section above was
+written (`20260829500000`–`20260829610000`), during this session's own
+final adversarial audit and its blocker-remediation round (see
+`docs/plans/P13_RELEASE_READINESS_REPORT.md` §16.6 for the full narrative
+of most of these). Like the five above, none touch the protected
+regulatory zone or add a new table — all are policy/trigger/function
+redefinitions, several of them multiple corrective iterations on the same
+underlying fix (the `shipment_line_determination_forgery_fix` series took
+six iterations total, v1 through v6, after independent review found the
+first attempts still incomplete — see the release-readiness report for
+why). One-line purpose per migration (see `MIGRATION_LOG.md` and the files
+themselves for the full detail already written into each one):
+
+- **`20260829500000`/`_v2` (`20260829530000`)/`_v3` (`20260829580000`)/`_v5`
+  (`20260829600000`)/`_v6` (`20260829610000`)** — the
+  `shipment_lines.emission_determination` forgery-fix series: closes a
+  chain of successively-discovered gaps in the `WITH CHECK` validating a
+  claimed ACTUAL determination against its real `emission_data` row (the
+  final, held fix is `app.validate_emission_determination_write()` plus
+  its `BEFORE INSERT/UPDATE` trigger — a full account of why five earlier
+  attempts each turned out incomplete is in the release-readiness report,
+  not repeated here).
+- **`20260829510000`** — `storage.buckets.file_size_limit`/`allowed_mime_types`
+  set on the `evidence` bucket, closing a direct-Storage-API bypass of the
+  application-layer 20 MiB/MIME-allowlist upload-safety controls.
+- **`20260829520000`** — `audit_events.occurred_at` pinned to the
+  server-observed transaction time via a new `BEFORE INSERT` trigger,
+  `app.pin_audit_event_occurred_at()`, closing a client-supplied-timestamp
+  forgery that could backdate/future-date audit rows and push real events
+  off the (unpaginated) Audit screen.
+- **`20260829540000`** — `app.emission_determination_matches_regulatory_record`
+  gains an org-relationship check, closing a cross-org boolean-oracle
+  information-disclosure side channel surfaced while re-verifying
+  `20260829530000` (an org with no relationship to an installation could
+  otherwise use accept/reject responses to a guessed value to recover a
+  competitor's real emission figures).
+- **`20260829550000`** — `organizations` UPDATE RLS tightened to
+  OWNER-only (`app.user_is_owner_of`), matching the application layer's
+  own already-OWNER-only `updateOrganizationProfile` check (Wall 2 had
+  been left more permissive than Wall 1).
+- **`20260829560000`** — `evidence_files` DELETE RLS refuses deletion once
+  the owning `emission_data` record's `verification_status = 'VERIFIED'`,
+  matching the application layer's own guard (Wall 2 catching up to
+  Wall 1 again).
+- **`20260829570000`** — a DB-level aggregate guard closes a
+  check-then-act race across two *different* membership rows that could
+  leave an organization with zero active OWNERs (each of two OWNERs
+  independently demoting/removing the other, both single-row CAS guards
+  succeeding independently).
+- **`20260829590000`** — grants `service_role` schema `USAGE` on `app`
+  plus explicit `EXECUTE` on seven previously-ungranted helper functions,
+  closing a "permission denied for schema app" gap discovered while
+  writing a regression test that simulates a non-application actor.
+
+None of these twelve add a new table; the schema's table/view counts in
+the body above remain accurate. RLS policy, trigger, and `app`-schema
+function counts, however, do not — see the intro paragraph's corrected
+counts above (56/27/6/19, re-verified live 2026-08-30, not carried
+forward from the 44-migration-era count this section used to cite).

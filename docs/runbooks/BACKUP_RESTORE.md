@@ -152,7 +152,11 @@ $ grep -c "^CREATE FUNCTION" snowkap_product_schema_20260829_110611.sql
 
 All 21 tables' `CREATE TABLE` statements are present (`organizations`
 through `suppliers` — the full list in `DATABASE_SCHEMA.md` plus every
-P4–P10 product table), all 20 `app`-schema functions, and a `COPY ...
+P4–P10 product table), all 20 functions that existed at drill time (14
+`app`-schema + 6 `public`-schema RPCs — corrected 2026-08-30: the
+original wording here called all 20 "`app`-schema functions," which
+overstated the schema attribution by 6; the total count of 20 was
+already right), and a `COPY ...
 FROM stdin` data block per table with real rows — e.g.
 `default_emission_values` (12,540 rows, matching the README's stated
 count and `pnpm regulatory:verify`'s own invariant) and `organizations`
@@ -303,6 +307,24 @@ functions, 88/88 indexes, and all 12 in-scope triggers (the one
 apparent mismatch, 13 vs. 12, was `realtime.subscription`'s internal
 `tr_check_filters` trigger — Supabase Realtime infrastructure, outside
 `public`/`app`, correctly not part of this dump).
+
+**These specific fidelity numbers are now stale relative to the current
+schema (found during the P13 final non-blocked-work audit, 2026-08-30)**:
+twelve more migrations landed after this drill ran (`20260829500000`–
+`20260829610000` — see `DATABASE_SCHEMA.md`'s "Further P13 additions"
+section), adding 13 more `app`-schema functions (27 total now, not 20)
+and at least 5 more triggers (19 total now, not 13 including the
+Realtime one, or 18 in-scope). The table count (21) is still accurate —
+no `CREATE TABLE` landed in that window — and the dump/restore
+*mechanics* this drill proved remain valid and would work identically
+re-run today; only the specific fidelity numbers quoted as evidence
+above describe the schema as it existed on 2026-08-29, not the current
+one. `docs/plans/P13_RELEASE_READINESS_REPORT.md` §33 cites this same
+drill as "Local: real, tested" without flagging this drift — this note
+is the flag. Re-running the drill verbatim (as this document's own
+intro already recommends before release-readiness sign-off) would
+produce updated numbers; that re-run was not performed as part of this
+correction pass, to avoid claiming a fresh drill that didn't happen.
 
 **Why dump-content vs. restored-content, not "live source right now" vs.
 restored**: this is a shared local dev Postgres with other work running

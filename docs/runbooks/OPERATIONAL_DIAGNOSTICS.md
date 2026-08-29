@@ -11,9 +11,10 @@ out what actually occurred.
 
 ## The three real surfaces, today
 
-**Railway's own logs (once connected).** Not connected in this
-environment yet — see `DEPLOYMENT.md`'s status note. Once it is:
-Railway captures this app's stdout as-is (`src/infrastructure/observability/logger.ts`'s
+**Railway's own logs (once reachable).** A Railway project exists but
+is currently down and this session has no dashboard/CLI access to it
+either way — see `DEPLOYMENT.md`'s corrected status note (2026-08-30).
+Once the deployment is healthy and reachable: Railway captures this app's stdout as-is (`src/infrastructure/observability/logger.ts`'s
 one-line-per-event structured JSON — see `INCIDENT_RESPONSE.md`'s "Reading
 the structured JSON logs" section for the exact shape and redaction
 rule, not repeated here), viewable in Railway's dashboard "Logs" tab or

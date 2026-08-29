@@ -40,9 +40,17 @@ Two things this table already tells you that are easy to miss:
   (typecheck, test, build, Playwright smoke, secret scan) — it declares
   no `secrets:` and needs none; the credential-dependent test suites
   self-skip (see `tests/integration/module-load.test.ts`). The
-  secret-bearing CI gate and the Railway deployment described in master
-  plan §29/§31 are not wired yet (no Railway project exists in this
-  environment). So today, `SUPABASE_SERVICE_ROLE_KEY` and
+  secret-bearing CI gate is not wired yet, and while a Railway project
+  now exists (corrected 2026-08-30 — see `DEPLOYMENT.md`'s status
+  note), it is currently down and this session cannot inspect or
+  update its environment variables. **Caution this section didn't
+  carry before**: if `SUPABASE_SERVICE_ROLE_KEY`/`SUPABASE_DB_PASSWORD`
+  were ever set as Railway service variables (unconfirmed from here),
+  rotating the value in Supabase without also updating Railway's copy
+  would leave the deployment permanently unable to authenticate even
+  after its current 502 is otherwise fixed — check Railway's own
+  variable configuration before rotating, once dashboard access exists.
+  For local dev today, `SUPABASE_SERVICE_ROLE_KEY` and
   `SUPABASE_DB_PASSWORD` live in exactly one place per person: each
   developer's own local, gitignored `.env`. That materially changes the
   blast radius and downtime profile of a rotation right now — see each
@@ -80,8 +88,13 @@ process, an open test-watch process, or an in-progress
 process restarts, even after `.env` is edited. Restart every such
 process after updating the key.
 
-**How to verify without downtime.** There is no shared runtime to keep
-up today (no Railway), so "without downtime" for this secret currently
+**How to verify without downtime.** The one shared runtime that exists
+(Railway) is already down and unreachable from this session, so there
+is no *healthy* shared runtime whose uptime this rotation could affect
+today (corrected 2026-08-30 from "no Railway" — a project exists, it's
+just not up; see `DEPLOYMENT.md`'s status note, and this file's own
+note above about checking Railway's variable configuration before
+rotating). So "without downtime" for this secret currently
 means "without breaking your own or a teammate's local workflow between
 old-key revocation and new-key update" — sequence it as: (1) update
 your own `.env` and confirm `pnpm test`'s integration suites and

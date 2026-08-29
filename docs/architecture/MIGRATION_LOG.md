@@ -119,6 +119,23 @@ follow-up, the same "grep-proof or it's wrong" discipline
 | `20260829480000` | `p13_review_emission_data_verification_and_evidence_integrity_fix.sql` | Live-reproduced, three findings: `evidence_file_ids` forgery + `status='ACTIVE'` bypass, `verifier_user_id` never pinned to `auth.uid()`, `verifier_user_id`/`rejection_reason` mutable after the fact |
 | `20260829490000` | `p13_review_emission_data_evidence_uuid_cast_hardening.sql` | Live-reproduced: `emission_data_update_own_org`'s evidence_file_ids anti-join used a bare `::uuid` cast, crashing with a raw Postgres error instead of a clean policy rejection on a malformed entry |
 
+## P13 — Blocker-remediation round (found stale in this log 2026-08-30; added during the final non-blocked-work audit)
+
+| Version | File | Purpose |
+|---|---|---|
+| `20260829500000` | `p13_review_shipment_line_determination_forgery_fix.sql` | `shipment_lines.emission_determination` forgery fix, iteration 1 (superseded by v2/v3/v5/v6 below — see `P13_RELEASE_READINESS_REPORT.md` §16.6 for the full six-iteration account) |
+| `20260829510000` | `p13_review_evidence_bucket_size_mime_limits.sql` | Live-reproduced: the `evidence` Storage bucket set neither `file_size_limit` nor `allowed_mime_types`, bypassing the application-layer upload-safety controls via a direct Storage API call |
+| `20260829520000` | `p13_review_audit_events_occurred_at_immutable.sql` | Live-reproduced: `audit_events.occurred_at` was client-supplied and unconstrained, allowing backdated/future-dated forged rows |
+| `20260829530000` | `p13_review_shipment_line_determination_forgery_fix_v2.sql` | Forgery fix, iteration 2 |
+| `20260829540000` | `p13_review_shipment_line_actual_determination_cross_org_oracle_fix.sql` | Live-reproduced while re-verifying `20260829530000`: a cross-org boolean-oracle information-disclosure side channel via the SECURITY DEFINER validation function |
+| `20260829550000` | `p13_review_organizations_update_owner_only.sql` | Live-reproduced (finding S5): `organizations` UPDATE RLS allowed ADMIN, not just OWNER, matching the application layer up to Wall 2 |
+| `20260829560000` | `p13_review_evidence_files_verified_delete_lock.sql` | Live-reproduced (finding S6): any member could delete evidence files backing an already-VERIFIED emission_data record |
+| `20260829570000` | `p13_review_memberships_last_owner_race_fix.sql` | Live-reproduced (finding S10): a check-then-act race across two different OWNER rows could leave an org with zero active owners |
+| `20260829580000` | `p13_review_shipment_line_determination_forgery_fix_v3.sql` | Forgery fix, iteration 3 |
+| `20260829590000` | `p13_review_app_schema_service_role_execute_grants.sql` | Live-reproduced while writing a regression test: `service_role` lacked schema `USAGE` on `app` plus `EXECUTE` on seven helper functions |
+| `20260829600000` | `p13_review_shipment_line_determination_forgery_fix_v5.sql` | Forgery fix, iteration 5 (iteration 4 was a test-only change, not a migration) |
+| `20260829610000` | `p13_review_shipment_line_determination_forgery_fix_v6.sql` | Forgery fix, iteration 6 — the fix that finally held under three independent Opus reviews; see `P13_RELEASE_READINESS_REPORT.md` §16.6 |
+
 ## Not yet reflected in this log at the code level (tracked, not migrations)
 
 Two authorization findings from the P13 audit remain open by design,

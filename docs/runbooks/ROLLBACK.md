@@ -10,10 +10,14 @@ outline into an actual step-by-step procedure. It assumes
 [`DEPLOYMENT.md`](./DEPLOYMENT.md) has already been read (this document
 does not repeat that document's environment/build/healthcheck details).
 
-**Status, honestly, as of 2026-08-29**: exactly as `DEPLOYMENT.md`
-states, no staging or production Railway project is connected to this
-environment. **This procedure has not been rehearsed against a real
-Railway environment.** Master plan §43 itself flags the rehearsal as a
+**Status, honestly, as of 2026-08-30 (corrected)**: a production
+Railway project now exists (see `DEPLOYMENT.md`'s corrected status
+note) but is currently down (`502`, container never bound to a port) —
+there is a real deployment to roll back *from*, but rolling *back* to a
+previous build presupposes a previous *working* build exists in
+Railway's history, which cannot be confirmed without dashboard access
+this session doesn't have. **This procedure has not been rehearsed
+against a real Railway environment.** Master plan §43 itself flags the rehearsal as a
 P12 deliverable ("rehearsed P12"), not something already done, and §44
 lists "Rollback rehearsed" as an outstanding production-readiness
 checklist item. What follows is the precise, ready procedure — derived
@@ -189,7 +193,10 @@ rollback and a data question are on the table at once.
 
 Master plan §43's "staging always one step ahead" applies to rollback
 rehearsal the same as it applies to forward deployment (`DEPLOYMENT.md`
-§5): **rehearse the redeploy-previous-build action on staging before
+§6, "Where staging and production diverge" — renumbered from §5 by
+commit d4dd505; corrected here 2026-08-30, found stale during the P13
+final non-blocked-work audit): **rehearse the redeploy-previous-build
+action on staging before
 trusting it for a real production incident.** Concretely, once a
 staging Railway project exists: deploy two consecutive builds to
 staging, then exercise §1's "redeploy previous build" path to go back

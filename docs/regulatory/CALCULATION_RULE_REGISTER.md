@@ -129,9 +129,17 @@ the paragraph above.
 - **Source URL**: `https://eur-lex.europa.eu/eli/reg/2023/956/oj/eng` (Article 7, Annex
   IV points 1(c) and 4.1).
 - **Golden regression fixture**: `src/domain/calculations/calculate-line-emissions.test.ts`
-  — exact CN8 match with a MAPPED country (mass good), OTHER_COUNTRIES_FALLBACK with an
-  UNLISTED country (mass good), an electricity good (MWh basis), exact decimal precision,
-  and every non-computable status including UNIT_UNSUPPORTED.
+  — exact CN8 match with a MAPPED country (mass good), an electricity good (MWh basis,
+  both DEFAULT and ACTUAL determinations, including abbreviated unit spellings like
+  `tCO2e/MWh`), exact decimal precision, and every non-computable status including
+  UNIT_UNSUPPORTED. **Correction (2026-08-30, found stale during the P13 final
+  non-blocked-work audit)**: this entry previously also claimed coverage of
+  "OTHER_COUNTRIES_FALLBACK with an UNLISTED country" — the file has no such case
+  (every fixture uses a fixed `country_mapping: { status: "MAPPED", ... }`); that
+  combination is exercised at the resolver/repository level instead (see
+  `src/domain/regulatory/resolve-default-value.test.ts` and the R7 fallback
+  integration tests), not by this engine-level fixture. Removed rather than left
+  to mislead a future reader checking this rule's own regression coverage.
 - **Known gaps from the mandatory P6 engine review** (2026-08-28), tracked rather than
   fixed in this pass: (1) `calculation_results`' RLS policy constrains org/actor/line/
   shipment-status scope but not the *correctness* of the written values — any
