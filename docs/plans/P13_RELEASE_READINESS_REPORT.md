@@ -184,11 +184,29 @@ unit/integration tests for `generateOrRefreshDeclarationDraft`,
 
 ## 7. Producer/operator journey
 
-Verified this session: signed into the same dual-capability test
+Verified this session: signed into a producer-capability test
 organization, confirmed the producer-side navigation (Installations,
 Production data, Emissions, Evidence, Verification, Sharing, Activity) is
 present and correctly capability-gated, confirmed the Installations screen's
 empty state and operator/installation registration form render correctly.
+
+**Correction (2026-08-30, found stale during this round's own live
+verification)**: the paragraph above previously said "the same
+dual-capability test organization" — inaccurate. `deriveExperience()`
+(`components/shell/app-shell.tsx`, unchanged since it was first
+introduced, per its own commit's history) shows the producer sidebar
+**only** when an org holds `PRODUCER_OPERATOR` and *not*
+`IMPORTER_DECLARANT` — a dual-capability org (both capabilities held)
+gets the importer sidebar, by explicit, documented, tested design (its
+own doc comment: "A real experience switcher for dual-capability orgs
+is not yet built... a reasonable default until it is"). Live-confirmed
+directly this round: adding `PRODUCER_OPERATOR` to an already-
+`IMPORTER_DECLARANT` org via Organization settings, then hard-reloading,
+still shows only the importer sidebar — producer screens remain fully
+functional and correctly rendered, just reachable only by direct URL,
+never via the sidebar, for a dual-capability org. Not a regression;
+this has always been the behavior. See §35 for this now added as its
+own disclosed limitation, since it wasn't listed there before.
 
 Full data-entry → evidence → verification → sharing was not re-walked
 end-to-end in this session's own browser pass (time-scoped decision, and the
@@ -936,7 +954,7 @@ owner-level Railway access this session doesn't have):
   found and locally reproduced two independent, code-verified failure
   paths that would each present exactly as the observed persistent 502.
   **Path A (build-time)**: running
-  `NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_ANON_KEY= NODE_ENV=production next build`
+  `NEXT_PUBLIC_SUPABASE_URL="" NEXT_PUBLIC_SUPABASE_ANON_KEY="" NODE_ENV=production next build`
   in this repo fails outright while prerendering
   `/(importer)/declarations/page`, with `getServerSupabaseClient()`
   throwing because those two build-time variables are unset — and the
@@ -1604,6 +1622,13 @@ directly-observed gaps.
 - No reusable data-table component; command palette is a disabled stub;
   zero site-wide `aria-live` beyond this session's one addition; no
   automated accessibility scan (§21).
+- No experience switcher for dual-capability organizations: `deriveExperience()`
+  (`components/shell/app-shell.tsx`) shows the producer sidebar only when an
+  org holds `PRODUCER_OPERATOR` and not `IMPORTER_DECLARANT` — a dual-capability
+  org gets the importer sidebar only, by explicit documented design, not a bug.
+  Producer screens remain fully functional and correctly authorized for such
+  an org, reachable only by direct URL rather than sidebar navigation until a
+  real switcher is built. Live-confirmed this round (§7 correction above).
 - `audit_events`' event_type catalog has no compile-time TypeScript binding
   to the actual set of event types application code can emit — fails
   *closed* (a mismatched value is rejected by RLS, not silently accepted),
