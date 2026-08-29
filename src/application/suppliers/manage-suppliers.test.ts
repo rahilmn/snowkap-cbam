@@ -10,11 +10,26 @@ import {
   removeSupplier,
 } from "./manage-suppliers";
 
+import type {
+  OrgContext,
+} from "../organizations/org-context";
+
 const orgId =
   "org-1" as never;
 
 const actorUserId =
   "user-1" as never;
+
+function memberContext(
+  capabilities: OrgContext["capabilities"] = ["IMPORTER_DECLARANT"],
+): OrgContext {
+  return {
+    org_id: orgId,
+    user_id: actorUserId,
+    role: "MEMBER",
+    capabilities,
+  };
+}
 
 const supplierRow =
   {
@@ -157,8 +172,7 @@ describe(
             mockSupabase(
               { insertResult: { data: supplierRow, error: null } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             {
               name: "Acme Steel GmbH",
               country: "DE",
@@ -181,8 +195,7 @@ describe(
             mockSupabase(
               {},
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             {
               name: "Acme Steel GmbH",
               country: "Germany",
@@ -210,8 +223,7 @@ describe(
                 },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             {
               name: "Unknown Supplier",
               country: null,
@@ -222,6 +234,64 @@ describe(
 
         expect(result.status).toBe(
           "OK",
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "createSupplier must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await createSupplier(
+                supabase,
+                memberContext(["PRODUCER_OPERATOR"]),
+                {
+                  name: "Acme Steel GmbH",
+                  country: "DE",
+                  contactName: null,
+                  contactEmail: null,
+                },
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding IMPORTER_DECLARANT",
+          async () => {
+            const result =
+              await createSupplier(
+                mockSupabase(
+                  { insertResult: { data: supplierRow, error: null } },
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
+                {
+                  name: "Acme Steel GmbH",
+                  country: "DE",
+                  contactName: null,
+                  contactEmail: null,
+                },
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );
@@ -239,8 +309,7 @@ describe(
             mockSupabase(
               {},
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "supplier-1" as never,
           );
 
@@ -258,8 +327,7 @@ describe(
             mockSupabase(
               { deleteError: { message: "denied" } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "supplier-1" as never,
           );
 
@@ -287,8 +355,7 @@ describe(
                 auditInsertCalled,
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "supplier-1" as never,
           );
 
@@ -316,13 +383,60 @@ describe(
                 ownershipFetchResult: { data: null, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "supplier-1" as never,
           );
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "SUPPLIER_NOT_FOUND" },
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "removeSupplier must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await removeSupplier(
+                supabase,
+                memberContext(["PRODUCER_OPERATOR"]),
+                "supplier-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding IMPORTER_DECLARANT",
+          async () => {
+            const result =
+              await removeSupplier(
+                mockSupabase(
+                  {},
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
+                "supplier-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "OK" },
+            );
+          },
         );
       },
     );

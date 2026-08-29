@@ -110,6 +110,9 @@ function statusForUploadRejection(
     case "EMISSION_DATA_NOT_FOUND":
       return 404;
 
+    case "CAPABILITY_NOT_HELD":
+      return 403;
+
     case "FILE_TOO_LARGE":
       return 413;
 
@@ -266,8 +269,7 @@ export async function POST(
   const result =
     await uploadEvidenceFile(
       supabase,
-      orgSummary.context.org_id,
-      user.id as never,
+      orgSummary.context,
       {
         emissionDataId: emissionDataId as never,
         fileName: file.name,

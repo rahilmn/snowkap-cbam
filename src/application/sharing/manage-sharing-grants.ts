@@ -23,6 +23,7 @@ import type {
 
 import {
   hasAdminAccess,
+  hasCapability,
   type OrgContext,
 } from "../organizations/org-context";
 
@@ -105,6 +106,14 @@ export type IssueSharingGrantResult =
       status: "REJECTED";
       reason:
         | "PERMISSION_DENIED"
+        // The caller's org doesn't hold PRODUCER_OPERATOR -- issuing a
+        // sharing grant over one of the org's own installations is a
+        // producer-only workflow (master plan §6/§14). Checked alongside
+        // the ADMIN+ role check, before any database read (P10/P11
+        // capability-matrix hardening pass -- see
+        // docs/architecture/AUTHORIZATION_MATRIX.md's "Capability
+        // enforcement" section).
+        | "CAPABILITY_NOT_HELD"
         | "SELF_GRANT_NOT_ALLOWED"
         | "INVALID_INPUT"
         | "INSTALLATION_NOT_FOUND"
@@ -194,6 +203,13 @@ export async function issueSharingGrant(
     return {
       status: "REJECTED",
       reason: "PERMISSION_DENIED",
+    };
+  }
+
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
     };
   }
 

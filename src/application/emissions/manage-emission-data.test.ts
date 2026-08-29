@@ -36,6 +36,22 @@ const memberContext =
     capabilities: ["PRODUCER_OPERATOR"],
   } as never;
 
+const memberNoCapabilityContext =
+  {
+    org_id: "org-1",
+    user_id: "member-1",
+    role: "MEMBER",
+    capabilities: ["IMPORTER_DECLARANT"],
+  } as never;
+
+const adminNoCapabilityContext =
+  {
+    org_id: "org-1",
+    user_id: "admin-1",
+    role: "ADMIN",
+    capabilities: ["IMPORTER_DECLARANT"],
+  } as never;
+
 const baseRow =
   {
     id: "emission-data-1",
@@ -251,8 +267,7 @@ describe(
                 ],
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             validInput,
           );
 
@@ -279,8 +294,7 @@ describe(
             },
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext,
           validInput,
         );
 
@@ -325,8 +339,7 @@ describe(
             },
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext,
           validInput,
         );
 
@@ -361,8 +374,7 @@ describe(
               {},
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             { ...validInput, cnScope: [] },
           );
 
@@ -384,8 +396,7 @@ describe(
             makeMockSupabase(
               {},
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             { ...validInput, directSpecific: "not-a-number" },
           );
 
@@ -403,8 +414,7 @@ describe(
             makeMockSupabase(
               {},
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             { ...validInput, indirectSpecific: "not-a-number" },
           );
 
@@ -428,8 +438,7 @@ describe(
               },
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             validInput,
           );
 
@@ -459,8 +468,7 @@ describe(
                 ],
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             validInput,
           );
 
@@ -488,8 +496,7 @@ describe(
             },
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext,
           validInput,
         );
 
@@ -497,6 +504,61 @@ describe(
           recorder.ops.some((op) => op.table === "audit_events" && op.op === "insert"),
         ).toBe(
           true,
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const recorder: Recorder =
+              { fromCalls: [], ops: [] };
+
+            const result =
+              await recordEmissionData(
+                makeMockSupabase(
+                  {},
+                  recorder,
+                ),
+                memberNoCapabilityContext,
+                validInput,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+
+            expect(recorder.fromCalls).toEqual(
+              [],
+            );
+          },
+        );
+
+        it(
+          "allows an org holding PRODUCER_OPERATOR",
+          async () => {
+            const result =
+              await recordEmissionData(
+                makeMockSupabase(
+                  {
+                    installations: { data: { org_id: "org-1" }, error: null },
+                    emission_data: [
+                      { data: null, error: null },
+                      { data: baseRow, error: null },
+                    ],
+                  },
+                ),
+                memberContext,
+                validInput,
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );
@@ -516,8 +578,7 @@ describe(
                 emission_data: { data: baseRow, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             "emission-data-1" as never,
           );
 
@@ -540,8 +601,7 @@ describe(
                 emission_data: { data: { ...baseRow, status: "ACTIVE" }, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             "emission-data-1" as never,
           );
 
@@ -561,8 +621,7 @@ describe(
                 emission_data: { data: { ...baseRow, entered_by_org_id: "org-2" }, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             "emission-data-1" as never,
           );
 
@@ -586,8 +645,7 @@ describe(
             },
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext,
           "emission-data-1" as never,
         );
 
@@ -595,6 +653,57 @@ describe(
           recorder.ops.some((op) => op.table === "audit_events" && op.op === "insert"),
         ).toBe(
           true,
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const recorder: Recorder =
+              { fromCalls: [], ops: [] };
+
+            const result =
+              await submitForVerification(
+                makeMockSupabase(
+                  {},
+                  recorder,
+                ),
+                memberNoCapabilityContext,
+                "emission-data-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+
+            expect(recorder.fromCalls).toEqual(
+              [],
+            );
+          },
+        );
+
+        it(
+          "allows an org holding PRODUCER_OPERATOR",
+          async () => {
+            const result =
+              await submitForVerification(
+                makeMockSupabase(
+                  {
+                    emission_data: { data: baseRow, error: null },
+                  },
+                ),
+                memberContext,
+                "emission-data-1" as never,
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );
@@ -682,6 +791,32 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "PERMISSION_DENIED" },
+        );
+
+        expect(recorder.fromCalls).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "rejects CAPABILITY_NOT_HELD for an ADMIN whose org lacks PRODUCER_OPERATOR, without touching the database",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await verifyEmissionData(
+            makeMockSupabase(
+              {},
+              recorder,
+            ),
+            adminNoCapabilityContext,
+            "emission-data-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
         );
 
         expect(recorder.fromCalls).toEqual(
@@ -799,6 +934,33 @@ describe(
     );
 
     it(
+      "rejects CAPABILITY_NOT_HELD for an ADMIN whose org lacks PRODUCER_OPERATOR, without touching the database",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await rejectEmissionData(
+            makeMockSupabase(
+              {},
+              recorder,
+            ),
+            adminNoCapabilityContext,
+            "emission-data-1" as never,
+            "Some reason",
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+        );
+
+        expect(recorder.fromCalls).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
       "rejects REJECTION_REASON_REQUIRED for an empty reason, as ADMIN",
       async () => {
         const result =
@@ -851,8 +1013,7 @@ describe(
               },
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             "emission-data-1" as never,
           );
 
@@ -888,8 +1049,7 @@ describe(
               },
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             "emission-data-1" as never,
           );
 
@@ -940,8 +1100,7 @@ describe(
             },
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext,
           "emission-data-1" as never,
         );
 
@@ -1012,8 +1171,7 @@ describe(
                 emission_data: { data: baseRow, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             "emission-data-1" as never,
           );
 
@@ -1037,8 +1195,7 @@ describe(
               },
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             "emission-data-1" as never,
           );
 
@@ -1050,6 +1207,61 @@ describe(
           recorder.ops.some((op) => op.table === "emission_data" && op.op === "update"),
         ).toBe(
           false,
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const recorder: Recorder =
+              { fromCalls: [], ops: [] };
+
+            const result =
+              await activateEmissionData(
+                makeMockSupabase(
+                  {},
+                  recorder,
+                ),
+                memberNoCapabilityContext,
+                "emission-data-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+
+            expect(recorder.fromCalls).toEqual(
+              [],
+            );
+          },
+        );
+
+        it(
+          "allows an org holding PRODUCER_OPERATOR",
+          async () => {
+            const result =
+              await activateEmissionData(
+                makeMockSupabase(
+                  {
+                    emission_data: [
+                      { data: verifiedDraftRow, error: null },
+                      { data: null, error: null },
+                      { data: null, error: null },
+                    ],
+                  },
+                ),
+                memberContext,
+                "emission-data-1" as never,
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );
@@ -1069,8 +1281,7 @@ describe(
                 emission_data: { data: baseRow, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             "emission-data-1" as never,
           );
 
@@ -1090,13 +1301,63 @@ describe(
                 emission_data: { data: { ...baseRow, status: "ACTIVE" }, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext,
             "emission-data-1" as never,
           );
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "RECORD_NOT_DRAFT" },
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const recorder: Recorder =
+              { fromCalls: [], ops: [] };
+
+            const result =
+              await discardEmissionData(
+                makeMockSupabase(
+                  {},
+                  recorder,
+                ),
+                memberNoCapabilityContext,
+                "emission-data-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+
+            expect(recorder.fromCalls).toEqual(
+              [],
+            );
+          },
+        );
+
+        it(
+          "allows an org holding PRODUCER_OPERATOR",
+          async () => {
+            const result =
+              await discardEmissionData(
+                makeMockSupabase(
+                  {
+                    emission_data: { data: baseRow, error: null },
+                  },
+                ),
+                memberContext,
+                "emission-data-1" as never,
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );

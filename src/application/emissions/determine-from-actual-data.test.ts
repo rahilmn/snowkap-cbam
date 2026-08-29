@@ -9,11 +9,26 @@ import {
   redetermineLineFromActualData,
 } from "./determine-from-actual-data";
 
+import type {
+  OrgContext,
+} from "../organizations/org-context";
+
 const orgId =
   "org-1" as never;
 
 const actorUserId =
   "user-1" as never;
+
+function memberContext(
+  capabilities: OrgContext["capabilities"] = ["IMPORTER_DECLARANT"],
+): OrgContext {
+  return {
+    org_id: orgId,
+    user_id: actorUserId,
+    role: "MEMBER",
+    capabilities,
+  };
+}
 
 const lineId =
   "line-1" as never;
@@ -214,8 +229,7 @@ describe(
                 emission_data: { data: verifiedActiveRow, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -276,8 +290,7 @@ describe(
               },
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -313,8 +326,7 @@ describe(
                 shipment_lines: { data: null, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -335,8 +347,7 @@ describe(
                 shipment_lines: { data: { ...lineRow, org_id: "org-2" }, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -367,8 +378,7 @@ describe(
               },
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -396,8 +406,7 @@ describe(
                 emission_data: { data: null, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -422,8 +431,7 @@ describe(
                 },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -448,8 +456,7 @@ describe(
                 },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -474,8 +481,7 @@ describe(
                 },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -501,8 +507,7 @@ describe(
                 sharing_grants: { data: null, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -527,8 +532,7 @@ describe(
                 },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -556,8 +560,7 @@ describe(
             },
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
           emissionDataId,
         );
@@ -593,8 +596,7 @@ describe(
             },
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
           emissionDataId,
         );
@@ -624,6 +626,62 @@ describe(
               determination_method: "ACTUAL",
             },
           ),
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "determineLineFromActualData must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await determineLineFromActualData(
+                supabase,
+                memberContext(["PRODUCER_OPERATOR"]),
+                lineId,
+                emissionDataId,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding IMPORTER_DECLARANT",
+          async () => {
+            const result =
+              await determineLineFromActualData(
+                makeMockSupabase(
+                  {
+                    shipment_lines: [
+                      { data: lineRow, error: null },
+                      { data: updatedLineRow, error: null },
+                    ],
+                    emission_data: { data: verifiedActiveRow, error: null },
+                  },
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
+                lineId,
+                emissionDataId,
+              );
+
+            expect(result.status).toBe(
+              "DETERMINED",
+            );
+          },
         );
       },
     );
@@ -676,8 +734,7 @@ describe(
             recorder,
             okRpcResult,
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
           emissionDataId,
         );
@@ -720,8 +777,7 @@ describe(
               },
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -752,8 +808,7 @@ describe(
               undefined,
               okRpcResult,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -783,8 +838,7 @@ describe(
                 error: null,
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -811,8 +865,7 @@ describe(
               undefined,
               { data: null, error: { message: "transport failure" } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -854,8 +907,7 @@ describe(
                 emission_data: { data: verifiedActiveRow, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -889,8 +941,7 @@ describe(
                 emission_data: { data: verifiedActiveRow, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             emissionDataId,
           );
@@ -924,8 +975,7 @@ describe(
             },
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
           emissionDataId,
         );
@@ -967,8 +1017,7 @@ describe(
             },
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
           emissionDataId,
         );
@@ -1011,8 +1060,7 @@ describe(
             },
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
           emissionDataId,
         );
@@ -1069,8 +1117,7 @@ describe(
               error: null,
             },
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
           emissionDataId,
         );
@@ -1084,6 +1131,68 @@ describe(
           expect.objectContaining(
             { p_determination_kind: "REDETERMINED" },
           ),
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "redetermineLineFromActualData must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await redetermineLineFromActualData(
+                supabase,
+                memberContext(["PRODUCER_OPERATOR"]),
+                lineId,
+                emissionDataId,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding IMPORTER_DECLARANT",
+          async () => {
+            const result =
+              await redetermineLineFromActualData(
+                makeMockSupabase(
+                  {
+                    shipment_lines: [
+                      {
+                        data: {
+                          ...lineRow,
+                          emission_determination: { method: "DEFAULT", resolution: {} },
+                        },
+                        error: null,
+                      },
+                      { data: updatedLineRow, error: null },
+                    ],
+                    emission_data: { data: verifiedActiveRow, error: null },
+                  },
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
+                lineId,
+                emissionDataId,
+              );
+
+            expect(result.status).toBe(
+              "DETERMINED",
+            );
+          },
         );
       },
     );

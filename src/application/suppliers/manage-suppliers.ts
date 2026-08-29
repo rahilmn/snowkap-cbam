@@ -14,8 +14,12 @@ import type {
   OperatorId,
   OrganizationId,
   SupplierId,
-  UserId,
 } from "../../domain/shared/ids";
+
+import {
+  hasCapability,
+  type OrgContext,
+} from "../organizations/org-context";
 
 import {
   recordAuditEvent,
@@ -83,14 +87,39 @@ export interface SupplierInput {
 
 export type ManageSupplierResult =
   | { status: "OK"; supplier: Supplier }
-  | { status: "REJECTED"; reason: "INVALID_COUNTRY" | "PERSIST_FAILED" };
+  | {
+      status: "REJECTED";
+      reason:
+        | "INVALID_COUNTRY"
+        | "PERSIST_FAILED"
+        // The caller's org doesn't hold IMPORTER_DECLARANT -- suppliers
+        // are an importer-only workflow (master plan §6/§14: the
+        // importer's own counterparty records). Checked BEFORE any
+        // database read, same posture as every hasAdminAccess gate
+        // elsewhere in this codebase (P10/P11 capability-matrix
+        // hardening pass -- see docs/architecture/AUTHORIZATION_MATRIX.md's
+        // "Capability enforcement" section).
+        | "CAPABILITY_NOT_HELD";
+    };
 
 export async function createSupplier(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   input: SupplierInput,
 ): Promise<ManageSupplierResult> {
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const country =
     input.country
       ? parseCountryCode(
@@ -156,7 +185,10 @@ export async function createSupplier(
 
 export type RemoveSupplierResult =
   | { status: "OK" }
-  | { status: "REJECTED"; reason: "SUPPLIER_NOT_FOUND" | "PERSIST_FAILED" };
+  | {
+      status: "REJECTED";
+      reason: "SUPPLIER_NOT_FOUND" | "PERSIST_FAILED" | "CAPABILITY_NOT_HELD";
+    };
 
 interface SupplierOwnershipRow {
   org_id: string;
@@ -178,10 +210,22 @@ interface SupplierOwnershipRow {
  */
 export async function removeSupplier(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   supplierId: SupplierId,
 ): Promise<RemoveSupplierResult> {
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const { data: existing, error: fetchError } =
     await supabase
       .from("suppliers")

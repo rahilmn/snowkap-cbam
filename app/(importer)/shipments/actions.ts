@@ -34,6 +34,9 @@ function messageFor(
     case "DUPLICATE_REFERENCE":
       return "A shipment with that reference already exists.";
 
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM importer/declarant.";
+
     default:
       return "Something went wrong. Please try again.";
   }
@@ -106,8 +109,7 @@ export async function createShipmentAction(
   const result =
     await createShipment(
       supabase,
-      orgSummary.context.org_id,
-      user.id as never,
+      orgSummary.context,
       {
         reference: parsed.data.reference,
         releaseDate: parsed.data.releaseDate,

@@ -33,6 +33,11 @@ import type {
 } from "../../domain/shared/ids";
 
 import {
+  hasCapability,
+  type OrgContext,
+} from "../organizations/org-context";
+
+import {
   recordAuditEvent,
 } from "../audit/record-audit-event";
 
@@ -55,7 +60,15 @@ export type DetermineFromActualDataRejectionReason =
   | "DATA_INTEGRITY_ERROR"
   | "SHIPMENT_NOT_EDITABLE"
   | "FETCH_FAILED"
-  | "PERSIST_FAILED";
+  | "PERSIST_FAILED"
+  // The caller's org doesn't hold IMPORTER_DECLARANT -- determining a
+  // shipment line's emissions (even from a shared ACTUAL dataset) is an
+  // importer-only workflow (master plan §6/§14). Checked BEFORE any
+  // database read, same posture as every hasAdminAccess gate elsewhere
+  // in this codebase (P10/P11 capability-matrix hardening pass -- see
+  // docs/architecture/AUTHORIZATION_MATRIX.md's "Capability
+  // enforcement" section).
+  | "CAPABILITY_NOT_HELD";
 
 export type DetermineFromActualDataResult =
   | {
@@ -628,15 +641,21 @@ async function recordSharedDataConsumptionIfCrossOrg(
  */
 export async function determineLineFromActualData(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   lineId: ShipmentLineId,
   emissionDataId: EmissionDataId,
 ): Promise<DetermineFromActualDataResult> {
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
   return performDetermination(
     supabase,
-    orgId,
-    actorUserId,
+    context.org_id,
+    context.user_id,
     lineId,
     emissionDataId,
     {
@@ -676,15 +695,21 @@ export async function determineLineFromActualData(
  */
 export async function redetermineLineFromActualData(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   lineId: ShipmentLineId,
   emissionDataId: EmissionDataId,
 ): Promise<DetermineFromActualDataResult> {
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
   return performDetermination(
     supabase,
-    orgId,
-    actorUserId,
+    context.org_id,
+    context.user_id,
     lineId,
     emissionDataId,
     {

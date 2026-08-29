@@ -16,11 +16,26 @@ import type {
   RegulatoryRepository,
 } from "../../infrastructure/regulatory/regulatory-repository";
 
+import type {
+  OrgContext,
+} from "../organizations/org-context";
+
 const orgId =
   "org-1" as never;
 
 const actorUserId =
   "user-1" as never;
+
+function memberContext(
+  capabilities: OrgContext["capabilities"] = ["IMPORTER_DECLARANT"],
+): OrgContext {
+  return {
+    org_id: orgId,
+    user_id: actorUserId,
+    role: "MEMBER",
+    capabilities,
+  };
+}
 
 /**
  * Only findCbamGoodsByCode is consulted by calculateLine (for the
@@ -226,8 +241,7 @@ describe(
               { insertPayloads },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -282,8 +296,7 @@ describe(
               },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -312,8 +325,7 @@ describe(
               { lineFetchResult: { data: null, error: null } },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -347,8 +359,7 @@ describe(
               },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -371,8 +382,7 @@ describe(
               { insertResult: { error: { message: "db error" } } },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -391,8 +401,7 @@ describe(
               { insertResult: { error: { code: "42501", message: "denied" } } },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -429,8 +438,7 @@ describe(
             mockRepository(
               "IRON_STEEL",
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -477,8 +485,7 @@ describe(
             mockRepository(
               "CEMENT",
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -534,8 +541,7 @@ describe(
               {},
             ),
             repository,
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -547,6 +553,56 @@ describe(
 
         expect(repositoryCalled).toBe(
           false,
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "calculateLine must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await calculateLine(
+                supabase,
+                mockRepository(),
+                memberContext(["PRODUCER_OPERATOR"]),
+                lineId,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding IMPORTER_DECLARANT",
+          async () => {
+            const result =
+              await calculateLine(
+                mockSupabase(
+                  {},
+                ),
+                mockRepository(),
+                memberContext(["IMPORTER_DECLARANT"]),
+                lineId,
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );

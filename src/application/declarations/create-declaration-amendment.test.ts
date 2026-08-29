@@ -27,6 +27,14 @@ const memberContext =
     capabilities: ["IMPORTER_DECLARANT"],
   } as never;
 
+const adminNoCapabilityContext =
+  {
+    org_id: orgId,
+    user_id: "admin-1",
+    role: "ADMIN",
+    capabilities: ["PRODUCER_OPERATOR"],
+  } as never;
+
 function filedDeclarationRow(
   overrides: Record<string, unknown> = {},
 ) {
@@ -148,6 +156,32 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "PERMISSION_DENIED" },
+        );
+
+        expect(recorder.fromCalls).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "rejects CAPABILITY_NOT_HELD for an ADMIN whose org lacks IMPORTER_DECLARANT, before any database read",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [] };
+
+        const result =
+          await createDeclarationAmendment(
+            makeMockSupabase(
+              {},
+              recorder,
+            ),
+            adminNoCapabilityContext,
+            "decl-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
         );
 
         expect(recorder.fromCalls).toEqual(

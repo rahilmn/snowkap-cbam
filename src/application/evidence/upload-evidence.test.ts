@@ -19,11 +19,26 @@ import {
   uploadEvidenceFile,
 } from "./upload-evidence";
 
+import type {
+  OrgContext,
+} from "../organizations/org-context";
+
 const orgId =
   "org-1" as never;
 
 const actorUserId =
   "user-1" as never;
+
+function memberContext(
+  capabilities: OrgContext["capabilities"] = ["PRODUCER_OPERATOR"],
+): OrgContext {
+  return {
+    org_id: orgId,
+    user_id: actorUserId,
+    role: "MEMBER",
+    capabilities,
+  };
+}
 
 const emissionDataId =
   "emission-data-1" as never;
@@ -223,8 +238,7 @@ describe(
               {},
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             validInput,
           );
 
@@ -280,8 +294,7 @@ describe(
             {},
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           validInput,
         );
 
@@ -325,8 +338,7 @@ describe(
             {},
             recorder,
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           validInput,
         );
 
@@ -358,8 +370,7 @@ describe(
               {},
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             validInput,
           );
 
@@ -388,8 +399,7 @@ describe(
               {},
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             { ...validInput, mimeType: "text/plain", fileName: "notes.txt" },
           );
 
@@ -424,8 +434,7 @@ describe(
               {},
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             { ...validInput, mimeType: "application/pdf", fileName: "payload.exe" },
           );
 
@@ -454,8 +463,7 @@ describe(
               {},
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             { ...validInput, fileBytes: new Uint8Array(MAX_EVIDENCE_FILE_SIZE_BYTES + 1) },
           );
 
@@ -484,8 +492,7 @@ describe(
               { uploadError: { message: "storage denied" } },
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             validInput,
           );
 
@@ -517,8 +524,7 @@ describe(
               {},
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             validInput,
           );
 
@@ -553,8 +559,7 @@ describe(
               {},
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             validInput,
           );
 
@@ -572,6 +577,60 @@ describe(
           recorder.storageOps.some((op) => op.op === "remove"),
         ).toBe(
           true,
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const recorder =
+              makeRecorder();
+
+            const result =
+              await uploadEvidenceFile(
+                makeMockSupabase(
+                  {},
+                  {},
+                  recorder,
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
+                validInput,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+
+            expect(recorder.fromCalls).toEqual(
+              [],
+            );
+          },
+        );
+
+        it(
+          "allows an org holding PRODUCER_OPERATOR",
+          async () => {
+            const result =
+              await uploadEvidenceFile(
+                makeMockSupabase(
+                  {
+                    emission_data: { data: { entered_by_org_id: "org-1", evidence_file_ids: [] }, error: null },
+                    evidence_files: { data: evidenceFileRow, error: null },
+                    audit_events: { data: null, error: null },
+                  },
+                ),
+                memberContext(["PRODUCER_OPERATOR"]),
+                validInput,
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );
@@ -598,8 +657,7 @@ describe(
               {},
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "evidence-file-1" as never,
           );
 
@@ -653,8 +711,7 @@ describe(
               {},
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "evidence-file-1" as never,
           );
 
@@ -683,8 +740,7 @@ describe(
               { removeError: { message: "storage denied" } },
               recorder,
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "evidence-file-1" as never,
           );
 
@@ -696,6 +752,59 @@ describe(
           recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
         ).toBe(
           false,
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const recorder =
+              makeRecorder();
+
+            const result =
+              await removeEvidenceFile(
+                makeMockSupabase(
+                  {},
+                  {},
+                  recorder,
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
+                "evidence-file-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+
+            expect(recorder.fromCalls).toEqual(
+              [],
+            );
+          },
+        );
+
+        it(
+          "allows an org holding PRODUCER_OPERATOR",
+          async () => {
+            const result =
+              await removeEvidenceFile(
+                makeMockSupabase(
+                  {
+                    evidence_files: { data: evidenceFileRow, error: null },
+                    emission_data: { data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1"] }, error: null },
+                  },
+                ),
+                memberContext(["PRODUCER_OPERATOR"]),
+                "evidence-file-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "OK" },
+            );
+          },
         );
       },
     );

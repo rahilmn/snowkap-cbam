@@ -12,10 +12,10 @@ import type {
   Shipment,
 } from "../../domain/shipments/types";
 
-import type {
-  OrganizationId,
-  UserId,
-} from "../../domain/shared/ids";
+import {
+  hasCapability,
+  type OrgContext,
+} from "../organizations/org-context";
 
 import {
   recordAuditEvent,
@@ -38,7 +38,17 @@ export type CreateShipmentResult =
   | { status: "OK"; shipment: Shipment }
   | {
       status: "REJECTED";
-      reason: "INVALID_DATE" | "DUPLICATE_REFERENCE" | "PERSIST_FAILED";
+      reason:
+        | "INVALID_DATE"
+        | "DUPLICATE_REFERENCE"
+        | "PERSIST_FAILED"
+        // The caller's org doesn't hold IMPORTER_DECLARANT -- shipments
+        // are an importer-only workflow (master plan §6/§14). Checked
+        // BEFORE any database read, same posture as every hasAdminAccess
+        // gate elsewhere in this codebase (P10/P11 capability-matrix
+        // hardening pass -- see docs/architecture/AUTHORIZATION_MATRIX.md's
+        // "Capability enforcement" section).
+        | "CAPABILITY_NOT_HELD";
     };
 
 /**
@@ -50,10 +60,22 @@ export type CreateShipmentResult =
  */
 export async function createShipment(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   input: CreateShipmentInput,
 ): Promise<CreateShipmentResult> {
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const releaseDateResult =
     parseIsoDate(
       input.releaseDate,

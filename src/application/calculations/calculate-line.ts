@@ -24,14 +24,17 @@ import type {
 } from "../../domain/shared/decimal";
 
 import type {
-  OrganizationId,
   ShipmentLineId,
-  UserId,
 } from "../../domain/shared/ids";
 
 import type {
   RegulatoryRepository,
 } from "../../infrastructure/regulatory/regulatory-repository";
+
+import {
+  hasCapability,
+  type OrgContext,
+} from "../organizations/org-context";
 
 import {
   recordAuditEvent,
@@ -41,7 +44,15 @@ export type CalculateLineRejectionReason =
   | "LINE_NOT_FOUND"
   | "FETCH_FAILED"
   | "PERSIST_FAILED"
-  | "SHIPMENT_NOT_EDITABLE";
+  | "SHIPMENT_NOT_EDITABLE"
+  // The caller's org doesn't hold IMPORTER_DECLARANT -- calculating a
+  // shipment line's embedded emissions is an importer-only workflow
+  // (master plan §6/§14). Checked BEFORE any database read, same
+  // posture as every hasAdminAccess gate elsewhere in this codebase
+  // (P10/P11 capability-matrix hardening pass -- see
+  // docs/architecture/AUTHORIZATION_MATRIX.md's "Capability
+  // enforcement" section).
+  | "CAPABILITY_NOT_HELD";
 
 export type CalculateLineResult =
   | { status: "OK"; calculation: LineEmissionsCalculation }
@@ -134,10 +145,22 @@ export async function resolveGoodSectorForActualLine(
 export async function calculateLine(
   supabase: SupabaseClient,
   repository: RegulatoryRepository,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   lineId: ShipmentLineId,
 ): Promise<CalculateLineResult> {
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const { data, error } =
     await supabase
       .from("shipment_lines")

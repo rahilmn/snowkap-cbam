@@ -24,10 +24,8 @@ import {
 } from "../../domain/emissions/summarize-determination-for-audit";
 
 import type {
-  OrganizationId,
   ShipmentId,
   ShipmentLineId,
-  UserId,
 } from "../../domain/shared/ids";
 
 import type {
@@ -37,6 +35,11 @@ import type {
 import {
   classifyLine,
 } from "./classify-line";
+
+import {
+  hasCapability,
+  type OrgContext,
+} from "../organizations/org-context";
 
 import {
   recordAuditEvent,
@@ -77,7 +80,14 @@ export type ManageLineRejectionReason =
   | "SHIPMENT_NOT_FOUND"
   | "FETCH_FAILED"
   | "PERSIST_FAILED"
-  | "SHIPMENT_NOT_EDITABLE";
+  | "SHIPMENT_NOT_EDITABLE"
+  // The caller's org doesn't hold IMPORTER_DECLARANT -- shipment lines
+  // are an importer-only workflow (master plan §6/§14). Checked BEFORE
+  // any database read, same posture as every hasAdminAccess gate
+  // elsewhere in this codebase (P10/P11 capability-matrix hardening
+  // pass -- see docs/architecture/AUTHORIZATION_MATRIX.md's "Capability
+  // enforcement" section).
+  | "CAPABILITY_NOT_HELD";
 
 export type ManageLineResult =
   | { status: "OK"; line: ShipmentLine }
@@ -225,11 +235,23 @@ async function resolveLineClassification(
 export async function addLine(
   supabase: SupabaseClient,
   repository: RegulatoryRepository,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   shipmentId: ShipmentId,
   input: AddLineInput,
 ): Promise<ManageLineResult> {
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const quantityResult =
     parseDecimalString(
       input.quantity.value,
@@ -370,11 +392,23 @@ export async function addLine(
 export async function updateLine(
   supabase: SupabaseClient,
   repository: RegulatoryRepository,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   lineId: ShipmentLineId,
   input: AddLineInput,
 ): Promise<ManageLineResult> {
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const quantityResult =
     parseDecimalString(
       input.quantity.value,
@@ -560,10 +594,22 @@ export async function updateLine(
 
 export async function removeLine(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   lineId: ShipmentLineId,
 ): Promise<RemoveLineResult> {
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   // `orgId` is the caller's *active* org (from the client-writable
   // preferred-org cookie, validated only as "a membership the caller
   // has"), not necessarily the org that owns `lineId` -- same precedent

@@ -27,6 +27,14 @@ const memberContext =
     capabilities: ["IMPORTER_DECLARANT"],
   } as never;
 
+const adminNoCapabilityContext =
+  {
+    org_id: orgId,
+    user_id: "admin-1",
+    role: "ADMIN",
+    capabilities: ["PRODUCER_OPERATOR"],
+  } as never;
+
 interface RpcCall {
   fnName: string;
   args: unknown;
@@ -74,6 +82,33 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "PERMISSION_DENIED" },
+        );
+
+        expect(calls).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "rejects CAPABILITY_NOT_HELD for an ADMIN whose org lacks IMPORTER_DECLARANT, before calling the RPC at all",
+      async () => {
+        const calls: RpcCall[] =
+          [];
+
+        const result =
+          await recordDeclarationFiled(
+            makeMockSupabase(
+              { data: null, error: null },
+              calls,
+            ),
+            adminNoCapabilityContext,
+            "decl-1" as never,
+            "EU/CBAM/2026/1",
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
         );
 
         expect(calls).toEqual(

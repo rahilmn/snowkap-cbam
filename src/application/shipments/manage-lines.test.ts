@@ -18,11 +18,26 @@ import type {
   CbamGoodSummary,
 } from "../../domain/regulatory/types";
 
+import type {
+  OrgContext,
+} from "../organizations/org-context";
+
 const orgId =
   "org-1" as never;
 
 const actorUserId =
   "user-1" as never;
+
+function memberContext(
+  capabilities: OrgContext["capabilities"] = ["IMPORTER_DECLARANT"],
+): OrgContext {
+  return {
+    org_id: orgId,
+    user_id: actorUserId,
+    role: "MEMBER",
+    capabilities,
+  };
+}
 
 const shipmentId =
   "ship-1" as never;
@@ -277,8 +292,7 @@ describe(
               },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             validInput,
           );
@@ -317,8 +331,7 @@ describe(
               },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             validInput,
           );
@@ -340,8 +353,7 @@ describe(
               {},
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             { ...validInput, quantity: { kind: "MASS", value: "not-a-number" } },
           );
@@ -361,8 +373,7 @@ describe(
               {},
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             { ...validInput, originCountry: "Germany" },
           );
@@ -384,8 +395,7 @@ describe(
             mockRepository(
               [],
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             validInput,
           );
@@ -405,8 +415,7 @@ describe(
               {},
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             { ...validInput, quantity: { kind: "ENERGY", value: "10" } },
           );
@@ -426,8 +435,7 @@ describe(
               { shipmentResult: { data: null, error: null } },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             validInput,
           );
@@ -452,14 +460,68 @@ describe(
               },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             validInput,
           );
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "SHIPMENT_NOT_EDITABLE" },
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "addLine must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await addLine(
+                supabase,
+                mockRepository(),
+                memberContext(["PRODUCER_OPERATOR"]),
+                shipmentId,
+                validInput,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding IMPORTER_DECLARANT",
+          async () => {
+            const result =
+              await addLine(
+                mockSupabase(
+                  {
+                    maxLineNumberResult: { data: [], error: null },
+                    insertResult: { data: lineRow, error: null },
+                  },
+                ),
+                mockRepository(),
+                memberContext(["IMPORTER_DECLARANT"]),
+                shipmentId,
+                validInput,
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );
@@ -478,8 +540,7 @@ describe(
               { updateResult: { data: lineRow, error: null } },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             validInput,
           );
@@ -520,8 +581,7 @@ describe(
             },
           ),
           mockRepository(),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
           validInput,
         );
@@ -557,8 +617,7 @@ describe(
               { updateResult: { data: null, error: null } },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             validInput,
           );
@@ -578,8 +637,7 @@ describe(
               { lineFetchResult: { data: null, error: null } },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             validInput,
           );
@@ -613,8 +671,7 @@ describe(
               },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             validInput,
           );
@@ -653,8 +710,7 @@ describe(
               },
             ),
             mockRepository(),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
             validInput,
           );
@@ -665,6 +721,58 @@ describe(
 
         expect(updatePayloads).toHaveLength(
           0,
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "updateLine must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await updateLine(
+                supabase,
+                mockRepository(),
+                memberContext(["PRODUCER_OPERATOR"]),
+                lineId,
+                validInput,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding IMPORTER_DECLARANT",
+          async () => {
+            const result =
+              await updateLine(
+                mockSupabase(
+                  { updateResult: { data: lineRow, error: null } },
+                ),
+                mockRepository(),
+                memberContext(["IMPORTER_DECLARANT"]),
+                lineId,
+                validInput,
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );
@@ -687,8 +795,7 @@ describe(
                 },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -706,8 +813,7 @@ describe(
             mockSupabase(
               { deleteResult: { data: null, error: null } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -735,8 +841,7 @@ describe(
                 deleteCalls,
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -746,6 +851,59 @@ describe(
 
         expect(deleteCalls).toHaveLength(
           0,
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "removeLine must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await removeLine(
+                supabase,
+                memberContext(["PRODUCER_OPERATOR"]),
+                lineId,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding IMPORTER_DECLARANT",
+          async () => {
+            const result =
+              await removeLine(
+                mockSupabase(
+                  {
+                    deleteResult: {
+                      data: { shipment_id: "ship-1", line_number: 1 },
+                      error: null,
+                    },
+                  },
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
+                lineId,
+              );
+
+            expect(result).toEqual(
+              { status: "OK" },
+            );
+          },
         );
       },
     );

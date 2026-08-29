@@ -23,11 +23,26 @@ import type {
   RegulatoryValue,
 } from "../../domain/regulatory/types";
 
+import type {
+  OrgContext,
+} from "../organizations/org-context";
+
 const orgId =
   "org-1" as never;
 
 const actorUserId =
   "user-1" as never;
+
+function memberContext(
+  capabilities: OrgContext["capabilities"] = ["IMPORTER_DECLARANT"],
+): OrgContext {
+  return {
+    org_id: orgId,
+    user_id: actorUserId,
+    role: "MEMBER",
+    capabilities,
+  };
+}
 
 const lineId =
   "line-1" as never;
@@ -264,8 +279,7 @@ describe(
             mockMapper(
               { status: "MAPPED", regulatory_country_name: "China" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -325,8 +339,7 @@ describe(
             mockMapper(
               { status: "UNLISTED" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -370,8 +383,7 @@ describe(
             mockMapper(
               { status: "MAPPED", regulatory_country_name: "China" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -404,8 +416,7 @@ describe(
             mockMapper(
               { status: "MAPPED", regulatory_country_name: "China" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -431,8 +442,7 @@ describe(
             mockMapper(
               { status: "MAPPED", regulatory_country_name: "China" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -481,8 +491,7 @@ describe(
             mockMapper(
               { status: "MAPPED", regulatory_country_name: "China" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -510,8 +519,7 @@ describe(
             mockMapper(
               { status: "UNLISTED" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -535,8 +543,7 @@ describe(
             mockMapper(
               { status: "MAPPED", regulatory_country_name: "China" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -574,8 +581,7 @@ describe(
             mockMapper(
               { status: "MAPPED", regulatory_country_name: "China" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -604,8 +610,7 @@ describe(
           mockMapper(
             { status: "MAPPED", regulatory_country_name: "China" },
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
         );
 
@@ -638,8 +643,7 @@ describe(
           mockMapper(
             { status: "MAPPED", regulatory_country_name: "China" },
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
         );
 
@@ -690,8 +694,7 @@ describe(
             mockMapper(
               { status: "MAPPED", regulatory_country_name: "China" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -733,8 +736,7 @@ describe(
             mockMapper(
               { status: "MAPPED", regulatory_country_name: "China" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -746,6 +748,71 @@ describe(
           result.status === "DETERMINED" ? result.resolution.reason : null,
         ).toBe(
           "EXACT_CN8_MATCH",
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "determineLineEmissions must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await determineLineEmissions(
+                supabase,
+                mockRepository(
+                  [record()],
+                ),
+                mockMapper(
+                  { status: "MAPPED", regulatory_country_name: "China" },
+                ),
+                memberContext(["PRODUCER_OPERATOR"]),
+                lineId,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding IMPORTER_DECLARANT",
+          async () => {
+            const result =
+              await determineLineEmissions(
+                mockSupabase(
+                  {
+                    updateResult: {
+                      data: { ...lineRow, id: "line-1" },
+                      error: null,
+                    },
+                  },
+                ),
+                mockRepository(
+                  [record()],
+                ),
+                mockMapper(
+                  { status: "MAPPED", regulatory_country_name: "China" },
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
+                lineId,
+              );
+
+            expect(result.status).toBe(
+              "DETERMINED",
+            );
+          },
         );
       },
     );
@@ -795,8 +862,7 @@ describe(
             mockMapper(
               { status: "MAPPED", regulatory_country_name: "China" },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             lineId,
           );
 
@@ -845,8 +911,7 @@ describe(
           mockMapper(
             { status: "MAPPED", regulatory_country_name: "China" },
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
         );
 
@@ -894,8 +959,7 @@ describe(
           mockMapper(
             { status: "MAPPED", regulatory_country_name: "China" },
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           lineId,
         );
 
@@ -905,6 +969,75 @@ describe(
 
         expect(updateCalls[0]?.predicate).toBe(
           "none",
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "redetermineLineEmissions must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await redetermineLineEmissions(
+                supabase,
+                mockRepository(
+                  [record()],
+                ),
+                mockMapper(
+                  { status: "MAPPED", regulatory_country_name: "China" },
+                ),
+                memberContext(["PRODUCER_OPERATOR"]),
+                lineId,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding IMPORTER_DECLARANT",
+          async () => {
+            const result =
+              await redetermineLineEmissions(
+                mockSupabase(
+                  {
+                    lineFetchResult: {
+                      data: {
+                        ...lineRow,
+                        emission_determination: { method: "DEFAULT", resolution: {} },
+                      },
+                      error: null,
+                    },
+                    updateResult: { data: { ...lineRow, id: "line-1" }, error: null },
+                  },
+                ),
+                mockRepository(
+                  [record()],
+                ),
+                mockMapper(
+                  { status: "MAPPED", regulatory_country_name: "China" },
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
+                lineId,
+              );
+
+            expect(result.status).toBe(
+              "DETERMINED",
+            );
+          },
         );
       },
     );

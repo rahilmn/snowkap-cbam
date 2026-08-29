@@ -8,6 +8,7 @@ import type {
 
 import {
   hasAdminAccess,
+  hasCapability,
   type OrgContext,
 } from "../organizations/org-context";
 
@@ -17,6 +18,13 @@ export type RecordDeclarationFiledResult =
       status: "REJECTED";
       reason:
         | "PERMISSION_DENIED"
+        // The caller's org doesn't hold IMPORTER_DECLARANT -- declarations
+        // are an importer-only workflow (master plan §6/§14). Checked
+        // alongside the ADMIN+ role check, before the RPC is ever called
+        // (P10/P11 capability-matrix hardening pass -- see
+        // docs/architecture/AUTHORIZATION_MATRIX.md's "Capability
+        // enforcement" section).
+        | "CAPABILITY_NOT_HELD"
         // Never sent to the RPC at all -- the declarant's own filing
         // record is the entire substance of "recording a filing," and
         // is never optional. Named separately from the RPC's own
@@ -86,6 +94,13 @@ export async function recordDeclarationFiled(
     return {
       status: "REJECTED",
       reason: "PERMISSION_DENIED",
+    };
+  }
+
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
     };
   }
 

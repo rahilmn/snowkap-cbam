@@ -49,6 +49,9 @@ function draftMessageFor(
     case "PERMISSION_DENIED":
       return "Declaration preparation requires ADMIN or OWNER access.";
 
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM importer/declarant.";
+
     case "PERIOD_HAS_READY_DECLARATION":
       return "A declaration for this period is already marked READY. Reopen it, or wait for it to be filed, before starting a new one.";
 
@@ -72,6 +75,9 @@ function readyMessageFor(
   switch (reason) {
     case "PERMISSION_DENIED":
       return "Declaration preparation requires ADMIN or OWNER access.";
+
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM importer/declarant.";
 
     case "NOT_FOUND":
       return "That declaration could not be found.";
@@ -97,6 +103,9 @@ function filedMessageFor(
     case "PERMISSION_DENIED":
     case "NOT_ADMIN":
       return "Recording a filing requires ADMIN or OWNER access.";
+
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM importer/declarant.";
 
     case "EMPTY_FILED_REFERENCE":
       return "Enter the filing reference exactly as it appears on the declarant's own official-channel confirmation -- this field can't be blank.";
@@ -130,6 +139,9 @@ function amendmentMessageFor(
   switch (reason) {
     case "PERMISSION_DENIED":
       return "Creating an amendment requires ADMIN or OWNER access.";
+
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM importer/declarant.";
 
     case "NOT_FOUND":
       return "That declaration could not be found.";

@@ -20,8 +20,10 @@ itself.
   `ADMIN+` (ADMIN or OWNER, via `hasAdminAccess`), or `MEMBER+` (any
   active member — day-to-day data entry and reads, §14's default).
 - **Capability** — whether the service checks `org.capabilities`
-  (`IMPORTER_DECLARANT` / `PRODUCER_OPERATOR`) before acting. As of
-  this audit: **nothing does** — see "Capability enforcement" below.
+  (`IMPORTER_DECLARANT` / `PRODUCER_OPERATOR`) before acting. Originally
+  **nothing did**; the P14 hardening pass closed this for every write
+  service named in the matrix below — see "Capability enforcement"
+  below for the closure and what was deliberately left out.
 - **Enforcement point** — where in the code the role check actually
   executes. Most services check inside the application-layer function
   itself (Wall 1, `hasAdminAccess(context)`); a few rely entirely on a
@@ -36,11 +38,11 @@ itself.
 
 | Service / action | Role | Capability | Enforcement point | Proof |
 |---|---|---|---|---|
-| `createShipment` | MEMBER+ | none checked | org membership only (no explicit role check needed/expected) | `src/application/shipments/create-shipment.test.ts` |
-| `addLine` / `updateLine` / `removeLine` | MEMBER+ | none checked | org membership only | `src/application/shipments/manage-lines.test.ts` |
-| `transitionShipmentStatus` — `MARK_READY` / `REOPEN` / `VOID` | MEMBER+ | none checked | org membership only (§14 names LOCK specifically as ADMIN-tier and says nothing narrowing the other three) | `src/application/shipments/transition-shipment.test.ts` → describe `"LOCK role gate"` → it `"does not require ADMIN+ for VOID..."` (`transition-shipment.test.ts:470`) |
+| `createShipment` | MEMBER+ | **IMPORTER_DECLARANT** | `hasCapability(context, "IMPORTER_DECLARANT")` in the service, before any DB read — `src/application/shipments/create-shipment.ts` | `create-shipment.test.ts` → describe `"capability gate"` |
+| `addLine` / `updateLine` / `removeLine` | MEMBER+ | **IMPORTER_DECLARANT** | `hasCapability(context, "IMPORTER_DECLARANT")` in each function, before any DB read — `src/application/shipments/manage-lines.ts` | `manage-lines.test.ts` → describe `"capability gate"` under each of `addLine`/`updateLine`/`removeLine` |
+| `transitionShipmentStatus` — `MARK_READY` / `REOPEN` / `VOID` / `LOCK` | MEMBER+ (LOCK: **ADMIN+**) | none checked — see the P14 capability-enforcement closure below for why this one was deliberately left out of that pass | org membership only (§14 names LOCK specifically as ADMIN-tier and says nothing narrowing the other three) | `src/application/shipments/transition-shipment.test.ts` → describe `"LOCK role gate"` → it `"does not require ADMIN+ for VOID..."` (`transition-shipment.test.ts:470`) |
 | `transitionShipmentStatus` — `LOCK` | **ADMIN+** | none checked | `hasAdminAccess(context)` in the service, before any DB read — `src/application/shipments/transition-shipment.ts:87` | `transition-shipment.test.ts` → describe `"LOCK role gate"` (`transition-shipment.test.ts:372`) — MEMBER rejected `PERMISSION_DENIED` with zero DB calls; ADMIN and OWNER both succeed |
-| `listShipments` / `getShipmentDetail` | MEMBER+ | none checked | reads, org-scoped | `list-shipments.test.ts`, `get-shipment-detail.test.ts` |
+| `listShipments` / `getShipmentDetail` | MEMBER+ | none checked (reads are out of this matrix's capability-gating scope — see the P14 section) | reads, org-scoped | `list-shipments.test.ts`, `get-shipment-detail.test.ts` |
 
 **`transitionShipmentStatus`'s application-layer (Wall 1) LOCK gate was
 added by this audit; RLS (Wall 2) had already enforced it since P4** —
@@ -51,11 +53,11 @@ correction.
 
 | Service / action | Role | Capability | Enforcement point | Proof |
 |---|---|---|---|---|
-| `recordEmissionData` / `submitForVerification` / `discardEmissionData` / `activateEmissionData` | MEMBER+ | none checked | org membership only | `manage-emission-data.test.ts` |
-| `verifyEmissionData` | **ADMIN+** | none checked | `hasAdminAccess(context)`, before any DB read — `manage-emission-data.ts:544` | `manage-emission-data.test.ts:668` ("rejects PERMISSION_DENIED for a plain MEMBER, without touching the database") |
-| `rejectEmissionData` | **ADMIN+** | none checked | `hasAdminAccess(context)` — `manage-emission-data.ts:576` | `manage-emission-data.test.ts:775` |
-| `determineLineEmissions` / `redetermineLineEmissions` | MEMBER+ | none checked | org membership only | `resolve-line-emissions.test.ts` |
-| `determineLineFromActualData` / `redetermineLineFromActualData` | MEMBER+ | none checked | org membership only | `determine-from-actual-data.test.ts` |
+| `recordEmissionData` / `submitForVerification` / `discardEmissionData` / `activateEmissionData` | MEMBER+ | **PRODUCER_OPERATOR** | `hasCapability(context, "PRODUCER_OPERATOR")` in each function, before any DB read — `manage-emission-data.ts` | `manage-emission-data.test.ts` → describe `"capability gate"` under each of `recordEmissionData`/`submitForVerification`/`activateEmissionData`/`discardEmissionData` |
+| `verifyEmissionData` | **ADMIN+** | **PRODUCER_OPERATOR** | `hasAdminAccess(context)` then `hasCapability(context, "PRODUCER_OPERATOR")`, both before any DB read — `manage-emission-data.ts:544` | `manage-emission-data.test.ts:668` ("rejects PERMISSION_DENIED for a plain MEMBER, without touching the database") and the adjacent `"rejects CAPABILITY_NOT_HELD for an ADMIN whose org lacks PRODUCER_OPERATOR..."` case |
+| `rejectEmissionData` | **ADMIN+** | **PRODUCER_OPERATOR** | `hasAdminAccess(context)` then `hasCapability(context, "PRODUCER_OPERATOR")` — `manage-emission-data.ts:576` | `manage-emission-data.test.ts:775` and its adjacent `"rejects CAPABILITY_NOT_HELD..."` case |
+| `determineLineEmissions` / `redetermineLineEmissions` | MEMBER+ | **IMPORTER_DECLARANT** (a shipment line is always an importer-org record — determining its emissions is the importer's own workflow, the same reasoning as `calculateLine` below) | `hasCapability(context, "IMPORTER_DECLARANT")` in each function, before any DB read — `resolve-line-emissions.ts` | `resolve-line-emissions.test.ts` → describe `"capability gate"` under each of `determineLineEmissions`/`redetermineLineEmissions` |
+| `determineLineFromActualData` / `redetermineLineFromActualData` | MEMBER+ | **IMPORTER_DECLARANT** (same reasoning as `determineLineEmissions` — this is the ACTUAL-data determination pair for the same importer-owned shipment line, not a producer action) | `hasCapability(context, "IMPORTER_DECLARANT")` in each function, before any DB read — `determine-from-actual-data.ts` | `determine-from-actual-data.test.ts` → describe `"capability gate"` under each of `determineLineFromActualData`/`redetermineLineFromActualData` |
 
 `activateEmissionData` is the producer's own "publish" step and is
 **not** ADMIN-gated in the current code, even though §14 groups
@@ -70,20 +72,20 @@ worth flagging, not changed" if this reading turns out to be wrong.
 
 | Service / action | Role | Capability | Enforcement point | Proof |
 |---|---|---|---|---|
-| `issueSharingGrant` | **ADMIN+** (grantor org) | none checked | `hasAdminAccess(context)` — `manage-sharing-grants.ts:193` | `manage-sharing-grants.test.ts:327` |
-| `revokeSharingGrant` | **ADMIN+** (grantor org) | none checked | `hasAdminAccess(context)` — `manage-sharing-grants.ts:502` | `manage-sharing-grants.test.ts:816` (plain MEMBER denied); `:842` (an ADMIN of the *grantee* org — the wrong side — also denied) |
-| `acceptSharingGrant` | MEMBER+ (grantee org) — deliberate, not an oversight | none checked | org/grantee-side ownership check only | `manage-sharing-grants.test.ts:601` (`granteeMemberContext`, role `MEMBER`, succeeds) |
-| `acceptSharingGrantInvitation` | MEMBER+ (any member of the resolving org) | none checked | `accept_sharing_grant_invitation()` RPC re-verifies membership itself (`NOT_A_MEMBER`) | `tests/integration/sharing-grants-isolation.test.ts` |
+| `issueSharingGrant` | **ADMIN+** (grantor org) | **PRODUCER_OPERATOR** | `hasAdminAccess(context)` then `hasCapability(context, "PRODUCER_OPERATOR")`, both before any DB read — `manage-sharing-grants.ts:193` | `manage-sharing-grants.test.ts:327` (PERMISSION_DENIED) and the adjacent `"rejects CAPABILITY_NOT_HELD for an ADMIN whose org lacks PRODUCER_OPERATOR..."` case |
+| `revokeSharingGrant` | **ADMIN+** (grantor org) | none checked — deliberate, see the P14 capability-enforcement closure below | `hasAdminAccess(context)` — `manage-sharing-grants.ts:502` | `manage-sharing-grants.test.ts:816` (plain MEMBER denied); `:842` (an ADMIN of the *grantee* org — the wrong side — also denied) |
+| `acceptSharingGrant` | MEMBER+ (grantee org) — deliberate, not an oversight | none checked (deliberate — accepting is the receiving/cross-capability side, see the P14 section) | org/grantee-side ownership check only | `manage-sharing-grants.test.ts:601` (`granteeMemberContext`, role `MEMBER`, succeeds) |
+| `acceptSharingGrantInvitation` | MEMBER+ (any member of the resolving org) | none checked (deliberate — same reasoning as `acceptSharingGrant`) | `accept_sharing_grant_invitation()` RPC re-verifies membership itself (`NOT_A_MEMBER`) | `tests/integration/sharing-grants-isolation.test.ts` |
 | `listSharingGrantsIssued` / `listSharingGrantsReceived` / `listMyPendingSharingGrantInvitations` | MEMBER+ | none checked | reads, org-scoped | `manage-sharing-grants.test.ts` |
 
 ## Declarations (importer)
 
 | Service / action | Role | Capability | Enforcement point | Proof |
 |---|---|---|---|---|
-| `createDeclarationAmendment` | **ADMIN+** | none checked | `hasAdminAccess(context)` — `create-declaration-amendment.ts:72` | `create-declaration-amendment.test.ts:133` |
-| `generateOrRefreshDeclarationDraft` | **ADMIN+** | none checked | `hasAdminAccess(context)` — `generate-or-refresh-declaration-draft.ts:79` | `generate-or-refresh-declaration-draft.test.ts:147` |
-| `markDeclarationReady` | **ADMIN+** | none checked | `hasAdminAccess(context)` — `mark-declaration-ready.ts:77` | `mark-declaration-ready.test.ts:194` |
-| `recordDeclarationFiled` | **ADMIN+** | none checked | `hasAdminAccess(context)` — `record-declaration-filed.ts:85` | `record-declaration-filed.test.ts:59` |
+| `createDeclarationAmendment` | **ADMIN+** | **IMPORTER_DECLARANT** | `hasAdminAccess(context)` then `hasCapability(context, "IMPORTER_DECLARANT")`, both before any DB read — `create-declaration-amendment.ts:72` | `create-declaration-amendment.test.ts:133` and the adjacent `"rejects CAPABILITY_NOT_HELD..."` case |
+| `generateOrRefreshDeclarationDraft` | **ADMIN+** | **IMPORTER_DECLARANT** | `hasAdminAccess(context)` then `hasCapability(context, "IMPORTER_DECLARANT")` — `generate-or-refresh-declaration-draft.ts:79` | `generate-or-refresh-declaration-draft.test.ts:147` and the adjacent `"rejects CAPABILITY_NOT_HELD..."` case |
+| `markDeclarationReady` | **ADMIN+** | **IMPORTER_DECLARANT** | `hasAdminAccess(context)` then `hasCapability(context, "IMPORTER_DECLARANT")` — `mark-declaration-ready.ts:77` | `mark-declaration-ready.test.ts:194` and the adjacent `"rejects CAPABILITY_NOT_HELD..."` case |
+| `recordDeclarationFiled` | **ADMIN+** | **IMPORTER_DECLARANT** | `hasAdminAccess(context)` then `hasCapability(context, "IMPORTER_DECLARANT")` — `record-declaration-filed.ts:85` | `record-declaration-filed.test.ts:59` and the adjacent `"rejects CAPABILITY_NOT_HELD..."` case |
 | `listDeclarations` / `getDeclarationDetail` | **ADMIN+**, but not inside the service | none checked | `hasAdminAccess(orgSummary.context)` in the *page component*, not the service — `app/(importer)/declarations/page.tsx:87`, `app/(importer)/declarations/[id]/page.tsx:116` | **none** — see "Findings — worth flagging, not changed" |
 
 ## Organizations
@@ -103,22 +105,23 @@ worth flagging, not changed" if this reading turns out to be wrong.
 
 | Service / action | Role | Capability | Enforcement point | Proof |
 |---|---|---|---|---|
-| `createInstallation` / `removeInstallation` | MEMBER+ | none checked | org membership + ownership re-check on delete | `manage-installations.test.ts` |
-| `createOperator` / `removeOperator` | MEMBER+ | none checked | org membership + ownership re-check on delete | `manage-operators.test.ts` |
-| `createSupplier` / `removeSupplier` | MEMBER+ | none checked | org membership + ownership re-check on delete | `manage-suppliers.test.ts` |
+| `createInstallation` / `removeInstallation` | MEMBER+ | **PRODUCER_OPERATOR** | `hasCapability(context, "PRODUCER_OPERATOR")` in each function, before any DB read, plus org membership + ownership re-check on delete | `manage-installations.test.ts` → describe `"capability gate"` under each of `createInstallation`/`removeInstallation` |
+| `createOperator` / `removeOperator` | MEMBER+ | **PRODUCER_OPERATOR** | `hasCapability(context, "PRODUCER_OPERATOR")` in each function, before any DB read, plus org membership + ownership re-check on delete | `manage-operators.test.ts` → describe `"capability gate"` under each of `createOperator`/`removeOperator` |
+| `createSupplier` / `removeSupplier` | MEMBER+ | **IMPORTER_DECLARANT** (suppliers are the importer's own counterparty records, not a producer concept) | `hasCapability(context, "IMPORTER_DECLARANT")` in each function, before any DB read, plus org membership + ownership re-check on delete | `manage-suppliers.test.ts` → describe `"capability gate"` under each of `createSupplier`/`removeSupplier` |
 
 ## Evidence (producer)
 
 | Service / action | Role | Capability | Enforcement point | Proof |
 |---|---|---|---|---|
-| `uploadEvidenceFile` / `removeEvidenceFile` / `getEvidenceDownloadUrl` / `listEvidenceFiles` | MEMBER+ | none checked | org/record ownership check | `upload-evidence.test.ts` |
+| `uploadEvidenceFile` / `removeEvidenceFile` | MEMBER+ | **PRODUCER_OPERATOR** | `hasCapability(context, "PRODUCER_OPERATOR")` in each function, before any DB read, plus org/record ownership check | `upload-evidence.test.ts` → describe `"capability gate"` under each of `uploadEvidenceFile`/`removeEvidenceFile` |
+| `getEvidenceDownloadUrl` / `listEvidenceFiles` | MEMBER+ | none checked (reads — out of this pass's scope, see the P14 section) | org/record ownership check | `upload-evidence.test.ts` |
 
 ## Calculations
 
 | Service / action | Role | Capability | Enforcement point | Proof |
 |---|---|---|---|---|
-| `calculateLine` | MEMBER+ | none checked | org membership only | `calculate-line.test.ts` |
-| `reproduceCalculationResult` | MEMBER+ (deliberate divergence from §21's literal "admin check" wording — read-only over a result the member can already see rendered; see `app/(importer)/shipments/[id]/actions.ts`'s own doc comment on `verifyCalculationReproducibilityAction`, P8 security review finding #4) | none checked | org membership only | `reproduce-calculation-result.test.ts` |
+| `calculateLine` | MEMBER+ | **IMPORTER_DECLARANT** | `hasCapability(context, "IMPORTER_DECLARANT")` in the service, before any DB read — `calculate-line.ts` | `calculate-line.test.ts` → describe `"capability gate"` |
+| `reproduceCalculationResult` | MEMBER+ (deliberate divergence from §21's literal "admin check" wording — read-only over a result the member can already see rendered; see `app/(importer)/shipments/[id]/actions.ts`'s own doc comment on `verifyCalculationReproducibilityAction`, P8 security review finding #4) | none checked (a read, out of this pass's scope) | org membership only | `reproduce-calculation-result.test.ts` |
 
 ## Reporting / audit (both experiences, reads only — lower priority per this audit's scope)
 
@@ -181,6 +184,154 @@ gaps," not a sweeping retrofit), this is reported here rather than
 fixed. It is a strong candidate for the P10/P11 hardening pass — see
 master plan §38's "matrix is the permanent net" framing: the matrix
 above should grow a non-empty capability column once this lands.
+
+### P14 closure — the P10/P11 hardening-pass candidate above, done
+
+This section closes the finding above. Every write-side service the
+finding named, plus every other write-side service in the same
+importer/producer-flavored category found by re-reading this matrix's
+own tables end to end, now takes a full `OrgContext` and checks
+`hasCapability` before any database read — the matrix's Capability
+column above is no longer empty for any of them.
+
+**Fixed — importer-only, now require `IMPORTER_DECLARANT`:**
+
+- `createShipment` (`src/application/shipments/create-shipment.ts`)
+- `addLine` / `updateLine` / `removeLine` (`manage-lines.ts`)
+- `calculateLine` (`src/application/calculations/calculate-line.ts`)
+- `determineLineEmissions` / `redetermineLineEmissions`
+  (`src/application/emissions/resolve-line-emissions.ts`)
+- `determineLineFromActualData` / `redetermineLineFromActualData`
+  (`src/application/emissions/determine-from-actual-data.ts`) — not
+  named in the original finding's example list, but the same category
+  as the pair above (determining an importer-owned shipment line's
+  emissions, just from a shared ACTUAL dataset instead of the
+  regulatory default-value resolver), found by re-reading this file
+  during the closure pass
+- `createDeclarationAmendment` / `generateOrRefreshDeclarationDraft` /
+  `markDeclarationReady` / `recordDeclarationFiled`
+  (`src/application/declarations/*.ts`) — these four already took a
+  full `OrgContext` (for their existing `hasAdminAccess` gate), so only
+  the `hasCapability` check itself was new here, not a signature change
+- `createSupplier` / `removeSupplier`
+  (`src/application/suppliers/manage-suppliers.ts`)
+
+**Fixed — producer-only, now require `PRODUCER_OPERATOR`:**
+
+- `createInstallation` / `removeInstallation`
+  (`src/application/installations/manage-installations.ts`)
+- `createOperator` / `removeOperator`
+  (`src/application/installations/manage-operators.ts`)
+- `recordEmissionData` / `submitForVerification` / `discardEmissionData`
+  / `activateEmissionData` (`src/application/emissions/manage-emission-data.ts`)
+- `verifyEmissionData` / `rejectEmissionData` (same file) — already took
+  a full `OrgContext` for their existing `hasAdminAccess` gate; only the
+  `hasCapability` check was new
+- `uploadEvidenceFile` / `removeEvidenceFile`
+  (`src/application/evidence/upload-evidence.ts`)
+- `issueSharingGrant` (`src/application/sharing/manage-sharing-grants.ts`)
+  — already took a full `OrgContext`; only the `hasCapability` check was
+  new
+
+For every function above that did NOT already take `OrgContext`, its
+signature changed from a bare `orgId: OrganizationId` (plus, where
+applicable, a separate `actorUserId: UserId`) to a single
+`context: OrgContext`, mirroring the pattern
+`transitionShipmentStatus`/`verifyEmissionData` already established:
+the capability check runs first (before any DB read, same "Wall 1,
+before Wall 2" posture as every `hasAdminAccess` gate in this matrix),
+then `context.org_id`/`context.user_id` are destructured locally so the
+rest of each function body is otherwise unchanged. Every real call site
+(`app/**/actions.ts`, `app/api/evidence/upload/route.ts`) already
+resolved a full `OrgContext` via `getCurrentOrgSummary` upstream for its
+own nav/role checks, so no call site needed a second capability lookup
+— each was updated to pass `orgSummary.context` (or, in the two
+`requireOrgAndUser()`-style helpers, `setup.orgSummary.context`)
+instead of `orgSummary.context.org_id, user.id`.
+
+Every gate follows this codebase's established `{status, reason}`
+convention and rejects with a new `"CAPABILITY_NOT_HELD"` reason,
+distinct from `"PERMISSION_DENIED"` (role) so a caller — and this
+matrix — can tell "wrong role" from "wrong capability" apart. Each
+gated function has a `describe("capability gate", ...)` block (or, for
+the four functions that already had a role-gate test, an adjacent `it`
+right after the existing `PERMISSION_DENIED` case) proving two things:
+a context lacking the required capability is rejected with
+`CAPABILITY_NOT_HELD` before any database call, and a context holding
+it succeeds. Every one of those tests was written and confirmed
+failing (for the right reason — either a raw argument-shape mismatch
+once the call sites were updated to the new signature, or, for the four
+functions with no signature change, the call falling through past the
+check straight into its normal DB/RPC path) before the corresponding
+`hasCapability` check was added, per this codebase's TDD discipline.
+Full test list: `create-shipment.test.ts`, `manage-lines.test.ts`,
+`calculate-line.test.ts`, `resolve-line-emissions.test.ts`,
+`determine-from-actual-data.test.ts`,
+`create-declaration-amendment.test.ts`, `mark-declaration-ready.test.ts`,
+`generate-or-refresh-declaration-draft.test.ts`,
+`record-declaration-filed.test.ts`, `manage-suppliers.test.ts`,
+`manage-installations.test.ts`, `manage-operators.test.ts`,
+`manage-emission-data.test.ts`, `upload-evidence.test.ts`,
+`manage-sharing-grants.test.ts` — 50 new passing tests across those 15
+files (925 total, up from the 875 that passed before this pass; nothing
+existing was weakened or deleted).
+
+**Deliberately NOT gated in this pass, with reasons (per this task's
+own "don't gate something that shouldn't be gated" instruction):**
+
+1. **`transitionShipmentStatus`** (`shipments/transition-shipment.ts`).
+   A real candidate — a shipment is always an importer-org record — but
+   not named in the original finding's example list, and every path
+   that could *create* a shipment for a non-`IMPORTER_DECLARANT` org is
+   now closed by `createShipment`'s own gate above; the residual
+   exposure is narrow (an org that held `IMPORTER_DECLARANT` when its
+   shipments were created, then had the capability revoked, could still
+   transition those pre-existing shipments) and not exercised by any
+   test in this repo. Named here rather than silently assumed safe, and
+   a reasonable candidate for a follow-up pass, not fixed in this one.
+2. **`revokeSharingGrant`** (`sharing/manage-sharing-grants.ts`). Not
+   gated directly, but effectively closed as a side effect of gating
+   `issueSharingGrant`: the function's own ownership check
+   (`fetched.grant.grantor_org_id !== context.org_id`, `NOT_FOUND`
+   otherwise) means the only way an org's `context.org_id` can ever
+   equal a real `sharing_grants` row's `grantor_org_id` is for that org
+   to have successfully issued the grant in the first place — which
+   `issueSharingGrant`'s new gate now requires `PRODUCER_OPERATOR` for.
+   No currently-reachable exploit path; still, a direct
+   `hasCapability` check here would be more robust against a future
+   grantor-assignment path this reasoning doesn't anticipate, so this is
+   named rather than silently relied upon.
+3. **`acceptSharingGrant` / `acceptSharingGrantInvitation`**. Explicitly
+   NOT gated — this task's own instructions name accepting a grant on
+   the receiving side as inherently cross-capability (a
+   `PRODUCER_OPERATOR` org's grantee is, definitionally, an
+   `IMPORTER_DECLARANT` org, and vice versa is nonsensical but not this
+   function's job to police), matching `acceptSharingGrant`'s existing
+   doc comment ("not itself a privileged escalation... any MEMBER of
+   the grantee org may accept").
+4. **Every read-only service** — `listShipments`, `getShipmentDetail`,
+   `getEvidenceDownloadUrl`, `listEvidenceFiles`, `listDeclarations`,
+   `getDeclarationDetail`, `reproduceCalculationResult`,
+   `listSharingGrantsIssued`/`listSharingGrantsReceived`/
+   `listMyPendingSharingGrantInvitations`, every `list*`/`get*` in
+   installations/operators/suppliers/emissions — deliberately left
+   ungated, matching this matrix's existing convention that reads are
+   scoped by `org_id` (tenant isolation, already enforced) rather than
+   by capability: nothing about *reading* an org's own already-visible
+   data is a capability-specific action the way *creating* an importer-
+   or producer-flavored record is, and gating reads was never part of
+   the original finding's own framing ("a member of org A still can
+   never see org B's data" was never the gap; capability-appropriate
+   *writes* were).
+5. **`classifyLine`** (`shipments/classify-line.ts`), listed as a
+   candidate in this task's own framing, turned out to have no
+   `OrgContext`/`orgId` parameter at all to check against — it is a
+   pure regulatory-classification helper (repository, a declared code,
+   an as-of date) called internally by `addLine`/`updateLine`'s own
+   `resolveLineClassification` step and exercised directly only by its
+   own unit test. There is nothing org-scoped inside it to gate; the
+   capability check that matters for "can this caller classify a line
+   at all" already lives in `addLine`/`updateLine` themselves.
 
 ## Findings — gaps found and fixed
 
@@ -265,8 +416,9 @@ above should grow a non-empty capability column once this lands.
    Not fixed for the same reason as finding 1 (no current exploit path,
    and the correct fix is a signature change this audit's scope asks to
    report rather than retrofit).
-3. **Capability enforcement** — see the dedicated section above. Named
-   there in full rather than repeated here.
+3. **Capability enforcement** — see the dedicated section above.
+   Originally named here as unfixed; closed by the P14 pass documented
+   in that same section's "P14 closure" subsection.
 
 ## P10 review response (2026-08-29)
 

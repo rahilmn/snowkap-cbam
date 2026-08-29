@@ -52,6 +52,14 @@ const granteeMemberContext =
     capabilities: ["IMPORTER_DECLARANT"],
   } as never;
 
+const adminNoCapabilityContext =
+  {
+    org_id: "org-1",
+    user_id: "admin-1",
+    role: "ADMIN",
+    capabilities: ["IMPORTER_DECLARANT"],
+  } as never;
+
 const baseRow =
   {
     id: "grant-1",
@@ -341,6 +349,32 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "PERMISSION_DENIED" },
+        );
+
+        expect(recorder.fromCalls).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "rejects CAPABILITY_NOT_HELD for an ADMIN whose org lacks PRODUCER_OPERATOR, without touching the database",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await issueSharingGrant(
+            makeMockSupabase(
+              {},
+              recorder,
+            ),
+            adminNoCapabilityContext,
+            validInput,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
         );
 
         expect(recorder.fromCalls).toEqual(

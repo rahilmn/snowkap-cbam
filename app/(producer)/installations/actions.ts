@@ -117,8 +117,7 @@ export async function createOperatorAction(
   const result =
     await createOperator(
       setup.supabase,
-      setup.orgSummary.context.org_id,
-      setup.user.id as never,
+      setup.orgSummary.context,
       {
         provenance: "OPERATOR_PROVIDED",
         name: parsed.data.name,
@@ -133,7 +132,9 @@ export async function createOperatorAction(
       message:
         result.reason === "INVALID_COUNTRY"
           ? "Country must be a 2-letter ISO code (e.g. DE, CN)."
-          : "Something went wrong. Please try again.",
+          : result.reason === "CAPABILITY_NOT_HELD"
+            ? "Your organization is not set up as a CBAM producer/operator."
+            : "Something went wrong. Please try again.",
     };
   }
 
@@ -180,8 +181,7 @@ export async function removeOperatorAction(
   const result =
     await removeOperator(
       setup.supabase,
-      setup.orgSummary.context.org_id,
-      setup.user.id as never,
+      setup.orgSummary.context,
       parsed.data.operatorId as never,
     );
 
@@ -257,8 +257,7 @@ export async function createInstallationAction(
   const result =
     await createInstallation(
       setup.supabase,
-      setup.orgSummary.context.org_id,
-      setup.user.id as never,
+      setup.orgSummary.context,
       {
         operatorId: parsed.data.operatorId as never,
         provenance: "OPERATOR_PROVIDED",
@@ -276,6 +275,8 @@ export async function createInstallationAction(
         ? "Country must be a 2-letter ISO code (e.g. DE, CN)."
         : result.reason === "OPERATOR_NOT_FOUND"
         ? "Choose a valid operator."
+        : result.reason === "CAPABILITY_NOT_HELD"
+        ? "Your organization is not set up as a CBAM producer/operator."
         : "Something went wrong. Please try again.";
 
     return {
@@ -327,8 +328,7 @@ export async function removeInstallationAction(
   const result =
     await removeInstallation(
       setup.supabase,
-      setup.orgSummary.context.org_id,
-      setup.user.id as never,
+      setup.orgSummary.context,
       parsed.data.installationId as never,
     );
 

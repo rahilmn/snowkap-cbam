@@ -10,11 +10,26 @@ import {
   removeOperator,
 } from "./manage-operators";
 
+import type {
+  OrgContext,
+} from "../organizations/org-context";
+
 const orgId =
   "org-1" as never;
 
 const actorUserId =
   "user-1" as never;
+
+function memberContext(
+  capabilities: OrgContext["capabilities"] = ["PRODUCER_OPERATOR"],
+): OrgContext {
+  return {
+    org_id: orgId,
+    user_id: actorUserId,
+    role: "MEMBER",
+    capabilities,
+  };
+}
 
 const operatorRow =
   {
@@ -170,8 +185,7 @@ describe(
             mockSupabase(
               { insertResult: { data: operatorRow, error: null } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             {
               provenance: "OPERATOR_PROVIDED",
               name: "Acme Steelworks",
@@ -194,8 +208,7 @@ describe(
             mockSupabase(
               {},
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             {
               provenance: "OPERATOR_PROVIDED",
               name: "Acme Steelworks",
@@ -218,8 +231,7 @@ describe(
             mockSupabase(
               { insertResult: { data: null, error: { message: "denied" } } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             {
               provenance: "OPERATOR_PROVIDED",
               name: "Acme Steelworks",
@@ -247,8 +259,7 @@ describe(
               auditInsertCalled,
             },
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           {
             provenance: "OPERATOR_PROVIDED",
             name: "Acme Steelworks",
@@ -259,6 +270,64 @@ describe(
 
         expect(auditInsertCalled.value).toBe(
           true,
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "createOperator must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await createOperator(
+                supabase,
+                memberContext(["IMPORTER_DECLARANT"]),
+                {
+                  provenance: "OPERATOR_PROVIDED",
+                  name: "Acme Steelworks",
+                  country: "DE",
+                  contactEmail: null,
+                },
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding PRODUCER_OPERATOR",
+          async () => {
+            const result =
+              await createOperator(
+                mockSupabase(
+                  { insertResult: { data: operatorRow, error: null } },
+                ),
+                memberContext(["PRODUCER_OPERATOR"]),
+                {
+                  provenance: "OPERATOR_PROVIDED",
+                  name: "Acme Steelworks",
+                  country: "DE",
+                  contactEmail: null,
+                },
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );
@@ -276,8 +345,7 @@ describe(
             mockSupabase(
               {},
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "operator-1" as never,
           );
 
@@ -295,8 +363,7 @@ describe(
             mockSupabase(
               { deleteError: { message: "denied" } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "operator-1" as never,
           );
 
@@ -324,8 +391,7 @@ describe(
                 auditInsertCalled,
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "operator-1" as never,
           );
 
@@ -353,13 +419,60 @@ describe(
                 ownershipFetchResult: { data: null, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "operator-1" as never,
           );
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "OPERATOR_NOT_FOUND" },
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "removeOperator must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await removeOperator(
+                supabase,
+                memberContext(["IMPORTER_DECLARANT"]),
+                "operator-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding PRODUCER_OPERATOR",
+          async () => {
+            const result =
+              await removeOperator(
+                mockSupabase(
+                  {},
+                ),
+                memberContext(["PRODUCER_OPERATOR"]),
+                "operator-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "OK" },
+            );
+          },
         );
       },
     );

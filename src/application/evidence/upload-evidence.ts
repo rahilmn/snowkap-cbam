@@ -20,8 +20,12 @@ import type {
   EmissionDataId,
   EvidenceFileId,
   OrganizationId,
-  UserId,
 } from "../../domain/shared/ids";
+
+import {
+  hasCapability,
+  type OrgContext,
+} from "../organizations/org-context";
 
 import {
   recordAuditEvent,
@@ -194,7 +198,15 @@ export type UploadEvidenceResult =
         | "EMISSION_DATA_NOT_FOUND"
         | EvidenceUploadRejectionReason
         | "UPLOAD_FAILED"
-        | "PERSIST_FAILED";
+        | "PERSIST_FAILED"
+        // The caller's org doesn't hold PRODUCER_OPERATOR -- evidence for
+        // emission data is a producer-only workflow (master plan §6/§14).
+        // Checked BEFORE any database read, same posture as every
+        // hasAdminAccess gate elsewhere in this codebase (P10/P11
+        // capability-matrix hardening pass -- see
+        // docs/architecture/AUTHORIZATION_MATRIX.md's "Capability
+        // enforcement" section).
+        | "CAPABILITY_NOT_HELD";
     };
 
 /**
@@ -235,10 +247,22 @@ export type UploadEvidenceResult =
  */
 export async function uploadEvidenceFile(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   input: UploadEvidenceInput,
 ): Promise<UploadEvidenceResult> {
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const ownership =
     await fetchOwnedEmissionDataForEvidence(
       supabase,
@@ -402,7 +426,12 @@ export type RemoveEvidenceFileResult =
   | { status: "OK" }
   | {
       status: "REJECTED";
-      reason: "NOT_FOUND" | "FETCH_FAILED" | "STORAGE_DELETE_FAILED" | "PERSIST_FAILED";
+      reason:
+        | "NOT_FOUND"
+        | "FETCH_FAILED"
+        | "STORAGE_DELETE_FAILED"
+        | "PERSIST_FAILED"
+        | "CAPABILITY_NOT_HELD";
     };
 
 /**
@@ -426,10 +455,22 @@ export type RemoveEvidenceFileResult =
  */
 export async function removeEvidenceFile(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   evidenceFileId: EvidenceFileId,
 ): Promise<RemoveEvidenceFileResult> {
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const fetched =
     await fetchOwnedEvidenceFile(
       supabase,

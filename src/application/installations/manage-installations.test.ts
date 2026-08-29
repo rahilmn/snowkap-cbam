@@ -11,11 +11,26 @@ import {
   removeInstallation,
 } from "./manage-installations";
 
+import type {
+  OrgContext,
+} from "../organizations/org-context";
+
 const orgId =
   "org-1" as never;
 
 const actorUserId =
   "user-1" as never;
+
+function memberContext(
+  capabilities: OrgContext["capabilities"] = ["PRODUCER_OPERATOR"],
+): OrgContext {
+  return {
+    org_id: orgId,
+    user_id: actorUserId,
+    role: "MEMBER",
+    capabilities,
+  };
+}
 
 const installationRow =
   {
@@ -241,8 +256,7 @@ describe(
             mockSupabase(
               { insertResult: { data: installationRow, error: null } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             {
               operatorId: "operator-1" as never,
               provenance: "OPERATOR_PROVIDED",
@@ -268,8 +282,7 @@ describe(
             mockSupabase(
               {},
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             {
               operatorId: "operator-1" as never,
               provenance: "OPERATOR_PROVIDED",
@@ -305,8 +318,7 @@ describe(
                 auditInsertCalled,
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             {
               operatorId: "operator-1" as never,
               provenance: "OPERATOR_PROVIDED",
@@ -342,8 +354,7 @@ describe(
                 operatorOwnershipResult: { data: null, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             {
               operatorId: "operator-1" as never,
               provenance: "OPERATOR_PROVIDED",
@@ -369,8 +380,7 @@ describe(
             mockSupabase(
               { insertResult: { data: null, error: { message: "denied" } } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             {
               operatorId: "operator-1" as never,
               provenance: "OPERATOR_PROVIDED",
@@ -401,8 +411,7 @@ describe(
               auditInsertCalled,
             },
           ),
-          orgId,
-          actorUserId,
+          memberContext(),
           {
             operatorId: "operator-1" as never,
             provenance: "OPERATOR_PROVIDED",
@@ -416,6 +425,70 @@ describe(
 
         expect(auditInsertCalled.value).toBe(
           true,
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "createInstallation must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await createInstallation(
+                supabase,
+                memberContext(["IMPORTER_DECLARANT"]),
+                {
+                  operatorId: "operator-1" as never,
+                  provenance: "OPERATOR_PROVIDED",
+                  name: "Plant 1",
+                  country: "DE",
+                  unLocode: null,
+                  address: null,
+                  cbamInstallationId: null,
+                },
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding PRODUCER_OPERATOR",
+          async () => {
+            const result =
+              await createInstallation(
+                mockSupabase(
+                  { insertResult: { data: installationRow, error: null } },
+                ),
+                memberContext(["PRODUCER_OPERATOR"]),
+                {
+                  operatorId: "operator-1" as never,
+                  provenance: "OPERATOR_PROVIDED",
+                  name: "Plant 1",
+                  country: "DE",
+                  unLocode: null,
+                  address: null,
+                  cbamInstallationId: null,
+                },
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );
@@ -433,8 +506,7 @@ describe(
             mockSupabase(
               {},
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "installation-1" as never,
           );
 
@@ -452,8 +524,7 @@ describe(
             mockSupabase(
               { deleteError: { message: "denied" } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "installation-1" as never,
           );
 
@@ -477,8 +548,7 @@ describe(
             mockSupabase(
               { deleteError: { code: "23503", message: "violates foreign key constraint" } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "installation-1" as never,
           );
 
@@ -506,8 +576,7 @@ describe(
                 auditInsertCalled,
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "installation-1" as never,
           );
 
@@ -535,13 +604,60 @@ describe(
                 installationOwnershipResult: { data: null, error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             "installation-1" as never,
           );
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "INSTALLATION_NOT_FOUND" },
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "removeInstallation must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await removeInstallation(
+                supabase,
+                memberContext(["IMPORTER_DECLARANT"]),
+                "installation-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding PRODUCER_OPERATOR",
+          async () => {
+            const result =
+              await removeInstallation(
+                mockSupabase(
+                  {},
+                ),
+                memberContext(["PRODUCER_OPERATOR"]),
+                "installation-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "OK" },
+            );
+          },
         );
       },
     );

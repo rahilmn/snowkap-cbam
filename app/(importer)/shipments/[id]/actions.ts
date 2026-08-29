@@ -100,6 +100,9 @@ function lineMessageFor(
     case "SHIPMENT_NOT_EDITABLE":
       return "This shipment is locked or void and can no longer be edited.";
 
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM importer/declarant.";
+
     default:
       return "Something went wrong. Please try again.";
   }
@@ -114,6 +117,9 @@ function resolveEmissionsRejectionMessageFor(
 
     case "SHIPMENT_NOT_EDITABLE":
       return "This shipment is locked or void and can no longer be edited.";
+
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM importer/declarant.";
 
     default:
       return "Something went wrong. Please try again.";
@@ -317,8 +323,7 @@ export async function addLineAction(
     await addLine(
       supabase,
       getRegulatoryRepository(),
-      orgSummary.context.org_id,
-      user.id as never,
+      orgSummary.context,
       parsed.data.shipmentId as never,
       {
         cnCode: parsed.data.cnCode.trim(),
@@ -405,8 +410,7 @@ export async function removeLineAction(
   const result =
     await removeLine(
       supabase,
-      orgSummary.context.org_id,
-      user.id as never,
+      orgSummary.context,
       parsed.data.lineId as never,
     );
 
@@ -581,8 +585,7 @@ export async function resolveEmissionsAction(
       supabase,
       repository,
       mapper,
-      orgSummary.context.org_id,
-      user.id as never,
+      orgSummary.context,
       parsed.data.lineId as never,
     );
 
@@ -595,8 +598,7 @@ export async function resolveEmissionsAction(
         supabase,
         repository,
         mapper,
-        orgSummary.context.org_id,
-        user.id as never,
+        orgSummary.context,
         parsed.data.lineId as never,
       );
   }
@@ -641,6 +643,9 @@ function determineFromActualDataRejectionMessageFor(
 
     case "SHIPMENT_NOT_EDITABLE":
       return "This shipment is locked or void and can no longer be edited.";
+
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM importer/declarant.";
 
     default:
       return "Something went wrong. Please try again.";
@@ -723,8 +728,7 @@ export async function determineFromActualDataAction(
   let result =
     await determineLineFromActualData(
       supabase,
-      orgSummary.context.org_id,
-      user.id as never,
+      orgSummary.context,
       parsed.data.lineId as never,
       parsed.data.emissionDataId as never,
     );
@@ -736,8 +740,7 @@ export async function determineFromActualDataAction(
     result =
       await redetermineLineFromActualData(
         supabase,
-        orgSummary.context.org_id,
-        user.id as never,
+        orgSummary.context,
         parsed.data.lineId as never,
         parsed.data.emissionDataId as never,
       );
@@ -832,8 +835,7 @@ export async function calculateLineAction(
     await calculateLine(
       supabase,
       getRegulatoryRepository(),
-      orgSummary.context.org_id,
-      user.id as never,
+      orgSummary.context,
       parsed.data.lineId as never,
     );
 
@@ -845,7 +847,9 @@ export async function calculateLineAction(
           ? "That line could not be found."
           : result.reason === "SHIPMENT_NOT_EDITABLE"
             ? "This shipment is locked or void and can no longer be recalculated."
-            : "Something went wrong. Please try again.",
+            : result.reason === "CAPABILITY_NOT_HELD"
+              ? "Your organization is not set up as a CBAM importer/declarant."
+              : "Something went wrong. Please try again.",
     };
   }
 

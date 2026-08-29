@@ -97,8 +97,7 @@ export async function createSupplierAction(
   const result =
     await createSupplier(
       supabase,
-      orgSummary.context.org_id,
-      user.id as never,
+      orgSummary.context,
       {
         name: parsed.data.name,
         country,
@@ -113,7 +112,9 @@ export async function createSupplierAction(
       message:
         result.reason === "INVALID_COUNTRY"
           ? "Country must be a 2-letter ISO code (e.g. DE, CN)."
-          : "Something went wrong. Please try again.",
+          : result.reason === "CAPABILITY_NOT_HELD"
+            ? "Your organization is not set up as a CBAM importer/declarant."
+            : "Something went wrong. Please try again.",
     };
   }
 
@@ -179,8 +180,7 @@ export async function removeSupplierAction(
   const result =
     await removeSupplier(
       supabase,
-      orgSummary.context.org_id,
-      user.id as never,
+      orgSummary.context,
       parsed.data.supplierId as never,
     );
 

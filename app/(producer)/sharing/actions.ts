@@ -177,6 +177,8 @@ export async function inviteByEmailAction(
     const message =
       result.reason === "PERMISSION_DENIED"
         ? "Only an ADMIN or OWNER can share data."
+        : result.reason === "CAPABILITY_NOT_HELD"
+        ? "Your organization is not set up as a CBAM producer/operator."
         : result.reason === "INSTALLATION_NOT_FOUND"
         ? "Choose a valid installation."
         : result.reason === "INVALID_INPUT"

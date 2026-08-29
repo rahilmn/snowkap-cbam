@@ -8,11 +8,26 @@ import {
   createShipment,
 } from "./create-shipment";
 
+import type {
+  OrgContext,
+} from "../organizations/org-context";
+
 const orgId =
   "org-1" as never;
 
 const actorUserId =
   "user-1" as never;
+
+function memberContext(
+  capabilities: OrgContext["capabilities"] = ["IMPORTER_DECLARANT"],
+): OrgContext {
+  return {
+    org_id: orgId,
+    user_id: actorUserId,
+    role: "MEMBER",
+    capabilities,
+  };
+}
 
 function mockSupabase(
   {
@@ -79,8 +94,7 @@ describe(
             mockSupabase(
               { insertResult: { data: shipmentRow, error: null } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             { reference: "REF-001", releaseDate: "2026-03-15" },
           );
 
@@ -124,8 +138,7 @@ describe(
                 },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             { reference: "REF-002", releaseDate: "2025-11-01" },
           );
 
@@ -149,8 +162,7 @@ describe(
             mockSupabase(
               { insertResult: { data: null, error: null } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             { reference: "REF-003", releaseDate: "not-a-date" },
           );
 
@@ -173,8 +185,7 @@ describe(
                 },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             { reference: "REF-001", releaseDate: "2026-03-15" },
           );
 
@@ -197,13 +208,78 @@ describe(
                 },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             { reference: "REF-001", releaseDate: "2026-03-15" },
           );
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "PERSIST_FAILED" },
+        );
+      },
+    );
+
+    describe(
+      "capability gate",
+      () => {
+        it(
+          "rejects an org without IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
+          async () => {
+            const supabase =
+              {
+                from: () => {
+                  throw new Error(
+                    "createShipment must not read the database before the capability check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await createShipment(
+                supabase,
+                memberContext(["PRODUCER_OPERATOR"]),
+                { reference: "REF-001", releaseDate: "2026-03-15" },
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an org holding IMPORTER_DECLARANT",
+          async () => {
+            const result =
+              await createShipment(
+                mockSupabase(
+                  { insertResult: { data: shipmentRow, error: null } },
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
+                { reference: "REF-001", releaseDate: "2026-03-15" },
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
+        );
+
+        it(
+          "allows an org holding both capabilities",
+          async () => {
+            const result =
+              await createShipment(
+                mockSupabase(
+                  { insertResult: { data: shipmentRow, error: null } },
+                ),
+                memberContext(["IMPORTER_DECLARANT", "PRODUCER_OPERATOR"]),
+                { reference: "REF-001", releaseDate: "2026-03-15" },
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
         );
       },
     );

@@ -90,6 +90,9 @@ function recordMessageFor(
     case "INSTALLATION_NOT_FOUND":
       return "Choose a valid installation.";
 
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM producer/operator.";
+
     default:
       return "Something went wrong. Please try again.";
   }
@@ -123,6 +126,9 @@ function transitionMessageFor(
 
     case "PERMISSION_DENIED":
       return "Only an admin or owner can verify or reject emission data.";
+
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM producer/operator.";
 
     case "NOT_FOUND":
       return "That record could not be found.";
@@ -245,8 +251,7 @@ export async function recordEmissionDataAction(
   const result =
     await recordEmissionData(
       setup.supabase,
-      setup.orgSummary.context.org_id,
-      setup.user.id as never,
+      setup.orgSummary.context,
       {
         installationId: parsed.data.installationId as never,
         cnScope,
@@ -320,21 +325,18 @@ export async function transitionEmissionDataAction(
     parsed.data.action === "SUBMIT_FOR_VERIFICATION"
       ? await submitForVerification(
           setup.supabase,
-          setup.orgSummary.context.org_id,
-          setup.user.id as never,
+          setup.orgSummary.context,
           parsed.data.emissionDataId as never,
         )
       : parsed.data.action === "ACTIVATE"
       ? await activateEmissionData(
           setup.supabase,
-          setup.orgSummary.context.org_id,
-          setup.user.id as never,
+          setup.orgSummary.context,
           parsed.data.emissionDataId as never,
         )
       : await discardEmissionData(
           setup.supabase,
-          setup.orgSummary.context.org_id,
-          setup.user.id as never,
+          setup.orgSummary.context,
           parsed.data.emissionDataId as never,
         );
 
@@ -369,6 +371,9 @@ function removeEvidenceFileMessageFor(
 
     case "STORAGE_DELETE_FAILED":
       return "Could not remove the file from storage. Try again.";
+
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM producer/operator.";
 
     default:
       return "Something went wrong. Please try again.";
@@ -408,8 +413,7 @@ export async function removeEvidenceFileAction(
   const result =
     await removeEvidenceFile(
       setup.supabase,
-      setup.orgSummary.context.org_id,
-      setup.user.id as never,
+      setup.orgSummary.context,
       parsed.data.evidenceFileId as never,
     );
 

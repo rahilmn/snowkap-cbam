@@ -14,8 +14,12 @@ import type {
 import type {
   OperatorId,
   OrganizationId,
-  UserId,
 } from "../../domain/shared/ids";
+
+import {
+  hasCapability,
+  type OrgContext,
+} from "../organizations/org-context";
 
 import {
   recordAuditEvent,
@@ -79,14 +83,38 @@ export interface OperatorInput {
 
 export type ManageOperatorResult =
   | { status: "OK"; operator: Operator }
-  | { status: "REJECTED"; reason: "INVALID_COUNTRY" | "PERSIST_FAILED" };
+  | {
+      status: "REJECTED";
+      reason:
+        | "INVALID_COUNTRY"
+        | "PERSIST_FAILED"
+        // The caller's org doesn't hold PRODUCER_OPERATOR -- operators
+        // are a producer-only workflow (master plan §6/§14). Checked
+        // BEFORE any database read, same posture as every hasAdminAccess
+        // gate elsewhere in this codebase (P10/P11 capability-matrix
+        // hardening pass -- see docs/architecture/AUTHORIZATION_MATRIX.md's
+        // "Capability enforcement" section).
+        | "CAPABILITY_NOT_HELD";
+    };
 
 export async function createOperator(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   input: OperatorInput,
 ): Promise<ManageOperatorResult> {
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const country =
     parseCountryCode(
       input.country,
@@ -150,7 +178,10 @@ export async function createOperator(
 
 export type RemoveOperatorResult =
   | { status: "OK" }
-  | { status: "REJECTED"; reason: "OPERATOR_NOT_FOUND" | "PERSIST_FAILED" };
+  | {
+      status: "REJECTED";
+      reason: "OPERATOR_NOT_FOUND" | "PERSIST_FAILED" | "CAPABILITY_NOT_HELD";
+    };
 
 interface OperatorOwnershipRow {
   org_id: string;
@@ -172,10 +203,22 @@ interface OperatorOwnershipRow {
  */
 export async function removeOperator(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   operatorId: OperatorId,
 ): Promise<RemoveOperatorResult> {
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const { data: existing, error: fetchError } =
     await supabase
       .from("operators")

@@ -12,6 +12,7 @@ import type {
 
 import {
   hasAdminAccess,
+  hasCapability,
   type OrgContext,
 } from "../organizations/org-context";
 
@@ -48,6 +49,13 @@ export type GenerateOrRefreshDeclarationDraftResult =
         // refresh UPDATE below).
         | "CONCURRENT_MODIFICATION"
         | "PERMISSION_DENIED"
+        // The caller's org doesn't hold IMPORTER_DECLARANT -- declarations
+        // are an importer-only workflow (master plan §6/§14). Checked
+        // alongside the ADMIN+ role check, before any database read
+        // (P10/P11 capability-matrix hardening pass -- see
+        // docs/architecture/AUTHORIZATION_MATRIX.md's "Capability
+        // enforcement" section).
+        | "CAPABILITY_NOT_HELD"
         | "FETCH_FAILED"
         | "PERSIST_FAILED";
     };
@@ -80,6 +88,13 @@ export async function generateOrRefreshDeclarationDraft(
     return {
       status: "REJECTED",
       reason: "PERMISSION_DENIED",
+    };
+  }
+
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
     };
   }
 

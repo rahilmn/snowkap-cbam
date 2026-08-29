@@ -34,6 +34,7 @@ import type {
 
 import {
   hasAdminAccess,
+  hasCapability,
   type OrgContext,
 } from "../organizations/org-context";
 
@@ -89,7 +90,14 @@ export type RecordEmissionDataResult =
         | "INVALID_DIRECT_SPECIFIC"
         | "INVALID_INDIRECT_SPECIFIC"
         | "INSTALLATION_NOT_FOUND"
-        | "PERSIST_FAILED";
+        | "PERSIST_FAILED"
+        // The caller's org doesn't hold PRODUCER_OPERATOR -- emission
+        // data is a producer-only workflow (master plan §6/§14). Checked
+        // BEFORE any database read, same posture as every hasAdminAccess
+        // gate elsewhere in this codebase (P10/P11 capability-matrix
+        // hardening pass -- see docs/architecture/AUTHORIZATION_MATRIX.md's
+        // "Capability enforcement" section).
+        | "CAPABILITY_NOT_HELD";
     };
 
 interface InstallationOwnershipRow {
@@ -157,10 +165,22 @@ async function verifyInstallationOwnership(
  */
 export async function recordEmissionData(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   input: RecordEmissionDataInput,
 ): Promise<RecordEmissionDataResult> {
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   if (input.cnScope.length === 0) {
     return {
       status: "REJECTED",
@@ -338,7 +358,13 @@ export type EmissionDataActionResult =
         // depth, since evidence can be removed between verification and
         // activation and this gate must not assume verification's own
         // check is still valid.
-        | "EVIDENCE_INCOMPLETE";
+        | "EVIDENCE_INCOMPLETE"
+        // The caller's org doesn't hold PRODUCER_OPERATOR -- emission
+        // data is a producer-only workflow (master plan §6/§14). Checked
+        // BEFORE any database read (P10/P11 capability-matrix hardening
+        // pass -- see docs/architecture/AUTHORIZATION_MATRIX.md's
+        // "Capability enforcement" section).
+        | "CAPABILITY_NOT_HELD";
     };
 
 /**
@@ -500,14 +526,20 @@ async function applyTransition(
 
 export async function submitForVerification(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   emissionDataId: EmissionDataId,
 ): Promise<EmissionDataActionResult> {
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
   return applyTransition(
     supabase,
-    orgId,
-    actorUserId,
+    context.org_id,
+    context.user_id,
     emissionDataId,
     { action: "SUBMIT_FOR_VERIFICATION" },
     (record) => (
@@ -548,6 +580,13 @@ export async function verifyEmissionData(
     };
   }
 
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
   return applyTransition(
     supabase,
     context.org_id,
@@ -580,6 +619,13 @@ export async function rejectEmissionData(
     };
   }
 
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
   return applyTransition(
     supabase,
     context.org_id,
@@ -597,14 +643,20 @@ export async function rejectEmissionData(
 
 export async function discardEmissionData(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   emissionDataId: EmissionDataId,
 ): Promise<EmissionDataActionResult> {
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
   return applyTransition(
     supabase,
-    orgId,
-    actorUserId,
+    context.org_id,
+    context.user_id,
     emissionDataId,
     { action: "DISCARD" },
     (record) => (
@@ -641,10 +693,22 @@ export async function discardEmissionData(
  */
 export async function activateEmissionData(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   emissionDataId: EmissionDataId,
 ): Promise<EmissionDataActionResult> {
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const fetched =
     await fetchOwnedEmissionData(
       supabase,
