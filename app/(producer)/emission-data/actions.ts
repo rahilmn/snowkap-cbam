@@ -31,6 +31,15 @@ import {
   removeEvidenceFile,
 } from "../../../src/application/evidence/upload-evidence";
 
+import {
+  createInMemoryRateLimiter,
+  type RateLimitConfig,
+} from "../../../src/infrastructure/rate-limit/rate-limiter";
+
+import {
+  getClientIp,
+} from "../../../components/shell/get-client-ip";
+
 import type {
   ReportingPeriod,
 } from "../../../src/domain/shared/reporting-period";
@@ -38,6 +47,99 @@ import type {
 import type {
   EmissionDataScreenActionState,
 } from "./action-state";
+
+function rateLimitedState(
+  retryAfterMs: number,
+): EmissionDataScreenActionState {
+  const retryAfterSeconds =
+    Math.ceil(retryAfterMs / 1000);
+
+  return {
+    status: "error",
+    message:
+      `Too many requests. Try again in ${retryAfterSeconds} ` +
+      `${retryAfterSeconds === 1 ? "second" : "seconds"}.`,
+  };
+}
+
+/**
+ * A plain per-record create a legitimate producer can reasonably do
+ * many times in one session (entering emission data for several
+ * installations/CN-code scopes) -- generous, matching
+ * createShipmentAction's/createSupplierAction's own 60/10min for the
+ * same "ordinary bulk data entry" reasoning.
+ */
+const RECORD_EMISSION_DATA_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 60,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const recordEmissionDataLimiter =
+  createInMemoryRateLimiter(
+    RECORD_EMISSION_DATA_RATE_LIMIT,
+  );
+
+/**
+ * SUBMIT_FOR_VERIFICATION/ACTIVATE/DISCARD are ordinary lifecycle
+ * transitions a MEMBER can trigger -- real state changes, but routine
+ * ones a user may click through for several records while working a
+ * queue. Tighter than a plain create, looser than the ADMIN+-gated
+ * verify/reject actions below (which carry compliance weight this
+ * doesn't).
+ */
+const TRANSITION_EMISSION_DATA_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const transitionEmissionDataLimiter =
+  createInMemoryRateLimiter(
+    TRANSITION_EMISSION_DATA_RATE_LIMIT,
+  );
+
+/**
+ * Removing an evidence file is undoing a mistaken upload -- rarer and
+ * more consequential than the upload itself (already capped at
+ * 20/5min, app/api/evidence/upload/route.ts), but a producer
+ * correcting several wrong attachments while assembling a record's
+ * evidence should not be blocked. Same 30/10min as the ordinary
+ * lifecycle transitions above.
+ */
+const REMOVE_EVIDENCE_FILE_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const removeEvidenceFileLimiter =
+  createInMemoryRateLimiter(
+    REMOVE_EVIDENCE_FILE_RATE_LIMIT,
+  );
+
+/**
+ * verifyEmissionDataAction/rejectEmissionDataAction are ADMIN+-only
+ * compliance decisions (manage-emission-data.ts's own hasAdminAccess
+ * gate) -- the same "state-transition with real consequences" category
+ * as declarations' markDeclarationReadyAction, tighter than the
+ * ordinary MEMBER-level transitions above.
+ */
+const VERIFY_EMISSION_DATA_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const verifyEmissionDataLimiter =
+  createInMemoryRateLimiter(
+    VERIFY_EMISSION_DATA_RATE_LIMIT,
+  );
+
+const rejectEmissionDataLimiter =
+  createInMemoryRateLimiter(
+    VERIFY_EMISSION_DATA_RATE_LIMIT,
+  );
 
 async function requireOrgAndUser() {
   const supabase =
@@ -175,6 +277,18 @@ export async function recordEmissionDataAction(
   _previousState: EmissionDataScreenActionState,
   formData: FormData,
 ): Promise<EmissionDataScreenActionState> {
+  const rateLimitResult =
+    recordEmissionDataLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     recordEmissionDataSchema.safeParse(
       {
@@ -302,6 +416,18 @@ export async function transitionEmissionDataAction(
   _previousState: EmissionDataScreenActionState,
   formData: FormData,
 ): Promise<EmissionDataScreenActionState> {
+  const rateLimitResult =
+    transitionEmissionDataLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     transitionSchema.safeParse(
       {
@@ -392,6 +518,18 @@ export async function removeEvidenceFileAction(
   _previousState: EmissionDataScreenActionState,
   formData: FormData,
 ): Promise<EmissionDataScreenActionState> {
+  const rateLimitResult =
+    removeEvidenceFileLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     removeEvidenceFileSchema.safeParse(
       {
@@ -453,6 +591,18 @@ export async function verifyEmissionDataAction(
   _previousState: EmissionDataScreenActionState,
   formData: FormData,
 ): Promise<EmissionDataScreenActionState> {
+  const rateLimitResult =
+    verifyEmissionDataLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     verifySchema.safeParse(
       {
@@ -510,6 +660,18 @@ export async function rejectEmissionDataAction(
   _previousState: EmissionDataScreenActionState,
   formData: FormData,
 ): Promise<EmissionDataScreenActionState> {
+  const rateLimitResult =
+    rejectEmissionDataLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     rejectSchema.safeParse(
       {

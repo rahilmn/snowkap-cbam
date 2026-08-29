@@ -20,9 +20,37 @@ import {
   updateOrganizationProfile,
 } from "../../src/application/organizations/organization-profile";
 
+import {
+  createInMemoryRateLimiter,
+  type RateLimitConfig,
+} from "../../src/infrastructure/rate-limit/rate-limiter";
+
+import {
+  getClientIp,
+} from "../../components/shell/get-client-ip";
+
 import type {
   OrganizationSettingsActionState,
 } from "./action-state";
+
+/**
+ * OWNER-only, org-wide settings changes (name, EORI, CBAM declarant
+ * status, capabilities) -- infrequent by nature (an org has one
+ * profile, edited occasionally, not a per-record create a user repeats
+ * many times per session). Matches inviteMemberAction's own 20/10min
+ * (app/team/actions.ts) for the same "sensitive, rarely-legitimately-
+ * repeated settings mutation" reasoning.
+ */
+const UPDATE_ORGANIZATION_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 20,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const updateOrganizationLimiter =
+  createInMemoryRateLimiter(
+    UPDATE_ORGANIZATION_RATE_LIMIT,
+  );
 
 const updateOrganizationSchema =
   z.object({
@@ -46,6 +74,24 @@ export async function updateOrganizationAction(
   _previousState: OrganizationSettingsActionState,
   formData: FormData,
 ): Promise<OrganizationSettingsActionState> {
+  const rateLimitResult =
+    updateOrganizationLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    const retryAfterSeconds =
+      Math.ceil(rateLimitResult.retryAfterMs / 1000);
+
+    return {
+      status: "error",
+      message:
+        `Too many requests. Try again in ${retryAfterSeconds} ` +
+        `${retryAfterSeconds === 1 ? "second" : "seconds"}.`,
+    };
+  }
+
   const parsed =
     updateOrganizationSchema.safeParse(
       {

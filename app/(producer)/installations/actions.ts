@@ -28,9 +28,91 @@ import {
   removeInstallation,
 } from "../../../src/application/installations/manage-installations";
 
+import {
+  createInMemoryRateLimiter,
+  type RateLimitConfig,
+} from "../../../src/infrastructure/rate-limit/rate-limiter";
+
+import {
+  getClientIp,
+} from "../../../components/shell/get-client-ip";
+
 import type {
   InstallationsScreenActionState,
 } from "./action-state";
+
+function rateLimitedState(
+  retryAfterMs: number,
+): InstallationsScreenActionState {
+  const retryAfterSeconds =
+    Math.ceil(retryAfterMs / 1000);
+
+  return {
+    status: "error",
+    message:
+      `Too many requests. Try again in ${retryAfterSeconds} ` +
+      `${retryAfterSeconds === 1 ? "second" : "seconds"}.`,
+  };
+}
+
+/**
+ * Plain per-record creates a legitimate producer can reasonably repeat
+ * many times while registering a batch of operators/installations
+ * during onboarding -- generous, matching createShipmentAction's/
+ * createSupplierAction's own 60/10min for the same "ordinary bulk data
+ * entry" reasoning. One shared config/limiter pair per create action,
+ * since operators and installations are registered independently.
+ */
+const CREATE_OPERATOR_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 60,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const createOperatorLimiter =
+  createInMemoryRateLimiter(
+    CREATE_OPERATOR_RATE_LIMIT,
+  );
+
+const CREATE_INSTALLATION_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 60,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const createInstallationLimiter =
+  createInMemoryRateLimiter(
+    CREATE_INSTALLATION_RATE_LIMIT,
+  );
+
+/**
+ * Deletion is rarer and more consequential than creation (removing an
+ * operator/installation record, which INSTALLATION_HAS_DEPENDENTS
+ * already guards once real activity exists against it) -- tighter than
+ * the create limiters above, matching removeSupplierAction's own
+ * 30/10min.
+ */
+const REMOVE_OPERATOR_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const removeOperatorLimiter =
+  createInMemoryRateLimiter(
+    REMOVE_OPERATOR_RATE_LIMIT,
+  );
+
+const REMOVE_INSTALLATION_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const removeInstallationLimiter =
+  createInMemoryRateLimiter(
+    REMOVE_INSTALLATION_RATE_LIMIT,
+  );
 
 async function requireOrgAndUser() {
   const supabase =
@@ -89,6 +171,18 @@ export async function createOperatorAction(
   _previousState: InstallationsScreenActionState,
   formData: FormData,
 ): Promise<InstallationsScreenActionState> {
+  const rateLimitResult =
+    createOperatorLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     createOperatorSchema.safeParse(
       {
@@ -157,6 +251,18 @@ export async function removeOperatorAction(
   _previousState: InstallationsScreenActionState,
   formData: FormData,
 ): Promise<InstallationsScreenActionState> {
+  const rateLimitResult =
+    removeOperatorLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     removeOperatorSchema.safeParse(
       {
@@ -226,6 +332,18 @@ export async function createInstallationAction(
   _previousState: InstallationsScreenActionState,
   formData: FormData,
 ): Promise<InstallationsScreenActionState> {
+  const rateLimitResult =
+    createInstallationLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     createInstallationSchema.safeParse(
       {
@@ -304,6 +422,18 @@ export async function removeInstallationAction(
   _previousState: InstallationsScreenActionState,
   formData: FormData,
 ): Promise<InstallationsScreenActionState> {
+  const rateLimitResult =
+    removeInstallationLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     removeInstallationSchema.safeParse(
       {

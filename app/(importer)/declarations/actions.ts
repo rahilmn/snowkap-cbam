@@ -38,9 +38,118 @@ import {
   parsePeriodParams,
 } from "../../../src/application/reporting/parse-period-params";
 
+import {
+  createInMemoryRateLimiter,
+  type RateLimitConfig,
+} from "../../../src/infrastructure/rate-limit/rate-limiter";
+
+import {
+  getClientIp,
+} from "../../../components/shell/get-client-ip";
+
 import type {
   DeclarationActionState,
 } from "./action-state";
+
+function rateLimitedState(
+  retryAfterMs: number,
+): DeclarationActionState {
+  const retryAfterSeconds =
+    Math.ceil(retryAfterMs / 1000);
+
+  return {
+    status: "error",
+    message:
+      `Too many requests. Try again in ${retryAfterSeconds} ` +
+      `${retryAfterSeconds === 1 ? "second" : "seconds"}.`,
+  };
+}
+
+/**
+ * startDeclarationAction/refreshDeclarationDraftAction both bottom out
+ * in generateOrRefreshDeclarationDraft, which is the expensive call on
+ * this screen -- it re-derives completeness across every member
+ * shipment's own calculation result, not a single-row write. A real
+ * user legitimately hits "Generate/Refresh" more than once per period
+ * while iterating on shipment data, so this is more generous than the
+ * filing/amendment actions below, but still well short of
+ * createShipmentAction's 60/10min: each call is a heavier DB read/write
+ * than a single-record create.
+ */
+const GENERATE_DRAFT_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const startDeclarationLimiter =
+  createInMemoryRateLimiter(
+    GENERATE_DRAFT_RATE_LIMIT,
+  );
+
+const refreshDeclarationDraftLimiter =
+  createInMemoryRateLimiter(
+    GENERATE_DRAFT_RATE_LIMIT,
+  );
+
+/**
+ * markDeclarationReadyAction is a real state transition (DRAFT ->
+ * READY) with downstream consequences (it's the gate before filing),
+ * but a legitimate user can reasonably re-check readiness several
+ * times while fixing named blockers one at a time -- tighter than a
+ * plain create, looser than the one-shot filing/amendment actions
+ * below.
+ */
+const MARK_READY_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const markDeclarationReadyLimiter =
+  createInMemoryRateLimiter(
+    MARK_READY_RATE_LIMIT,
+  );
+
+/**
+ * recordDeclarationFiledAction atomically LOCKs every member shipment
+ * and records an official, real-world filing reference
+ * (record_declaration_filed()) -- this is the single most consequential
+ * mutation on this screen and happens at most once (successfully) per
+ * declaration. 10/10min is deliberately tight: no legitimate workflow
+ * calls this more than a handful of times per session (typically once
+ * per period, occasionally retried after fixing a validation error).
+ */
+const RECORD_FILED_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 10,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const recordDeclarationFiledLimiter =
+  createInMemoryRateLimiter(
+    RECORD_FILED_RATE_LIMIT,
+  );
+
+/**
+ * createDeclarationAmendmentAction creates a new, real declaration row
+ * off an already-filed original -- an infrequent, deliberate action
+ * (at most one active amendment per original, enforced by
+ * ALREADY_AMENDED below) rather than something a user does repeatedly
+ * in a session. Tighter than a plain create, looser than filing itself
+ * since a user might reasonably retry after an ALREADY_AMENDED/
+ * ORIGINAL_NOT_FILED rejection while finding the right declaration.
+ */
+const CREATE_AMENDMENT_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 15,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const createDeclarationAmendmentLimiter =
+  createInMemoryRateLimiter(
+    CREATE_AMENDMENT_RATE_LIMIT,
+  );
 
 function draftMessageFor(
   reason: string,
@@ -181,6 +290,18 @@ export async function startDeclarationAction(
   _previousState: DeclarationActionState,
   formData: FormData,
 ): Promise<DeclarationActionState> {
+  const rateLimitResult =
+    startDeclarationLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     startDeclarationSchema.safeParse(
       {
@@ -281,6 +402,18 @@ export async function refreshDeclarationDraftAction(
   _previousState: DeclarationActionState,
   formData: FormData,
 ): Promise<DeclarationActionState> {
+  const rateLimitResult =
+    refreshDeclarationDraftLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     refreshDeclarationSchema.safeParse(
       {
@@ -355,6 +488,18 @@ export async function markDeclarationReadyAction(
   _previousState: DeclarationActionState,
   formData: FormData,
 ): Promise<DeclarationActionState> {
+  const rateLimitResult =
+    markDeclarationReadyLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     declarationIdSchema.safeParse(
       {
@@ -428,6 +573,18 @@ export async function recordDeclarationFiledAction(
   _previousState: DeclarationActionState,
   formData: FormData,
 ): Promise<DeclarationActionState> {
+  const rateLimitResult =
+    recordDeclarationFiledLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     recordFiledSchema.safeParse(
       {
@@ -487,6 +644,18 @@ export async function createDeclarationAmendmentAction(
   _previousState: DeclarationActionState,
   formData: FormData,
 ): Promise<DeclarationActionState> {
+  const rateLimitResult =
+    createDeclarationAmendmentLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     z.object(
       {

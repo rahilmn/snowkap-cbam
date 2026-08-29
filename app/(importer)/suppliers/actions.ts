@@ -23,9 +23,66 @@ import {
   removeSupplier,
 } from "../../../src/application/suppliers/manage-suppliers";
 
+import {
+  createInMemoryRateLimiter,
+  type RateLimitConfig,
+} from "../../../src/infrastructure/rate-limit/rate-limiter";
+
+import {
+  getClientIp,
+} from "../../../components/shell/get-client-ip";
+
 import type {
   SupplierActionState,
 } from "./action-state";
+
+function rateLimitedState(
+  retryAfterMs: number,
+): SupplierActionState {
+  const retryAfterSeconds =
+    Math.ceil(retryAfterMs / 1000);
+
+  return {
+    status: "error",
+    message:
+      `Too many requests. Try again in ${retryAfterSeconds} ` +
+      `${retryAfterSeconds === 1 ? "second" : "seconds"}.`,
+  };
+}
+
+/**
+ * A plain per-record create a legitimate user can reasonably do many
+ * times in one working session (entering a batch of suppliers) --
+ * generous, matching createShipmentAction's own 60/10min for the same
+ * "ordinary bulk data entry" reasoning.
+ */
+const CREATE_SUPPLIER_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 60,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const createSupplierLimiter =
+  createInMemoryRateLimiter(
+    CREATE_SUPPLIER_RATE_LIMIT,
+  );
+
+/**
+ * Deletion is rarer and more consequential than creation (undoing a
+ * mistaken supplier record, potentially one already referenced
+ * elsewhere) -- tighter than the create limiter above, but still loose
+ * enough to clean up a genuinely bad batch import without friction.
+ */
+const REMOVE_SUPPLIER_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const removeSupplierLimiter =
+  createInMemoryRateLimiter(
+    REMOVE_SUPPLIER_RATE_LIMIT,
+  );
 
 const createSupplierSchema =
   z.object({
@@ -46,6 +103,18 @@ export async function createSupplierAction(
   _previousState: SupplierActionState,
   formData: FormData,
 ): Promise<SupplierActionState> {
+  const rateLimitResult =
+    createSupplierLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     createSupplierSchema.safeParse(
       {
@@ -137,6 +206,18 @@ export async function removeSupplierAction(
   _previousState: SupplierActionState,
   formData: FormData,
 ): Promise<SupplierActionState> {
+  const rateLimitResult =
+    removeSupplierLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     removeSupplierSchema.safeParse(
       {

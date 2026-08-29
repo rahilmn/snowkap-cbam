@@ -20,9 +20,37 @@ import {
   createShipment,
 } from "../../../src/application/shipments/create-shipment";
 
+import {
+  createInMemoryRateLimiter,
+  type RateLimitConfig,
+} from "../../../src/infrastructure/rate-limit/rate-limiter";
+
+import {
+  getClientIp,
+} from "../../../components/shell/get-client-ip";
+
 import type {
   ShipmentActionState,
 } from "./action-state";
+
+/**
+ * A plain per-record create a legitimate user can reasonably do many
+ * times in one working session (entering a batch of shipments), so
+ * this is deliberately generous -- matching createSupplierAction's and
+ * recordEmissionDataAction's own 60/10min for the same "ordinary bulk
+ * data entry" reasoning, well short of anything that would throttle
+ * real use while still bounding automated/scripted shipment creation.
+ */
+const CREATE_SHIPMENT_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 60,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const createShipmentLimiter =
+  createInMemoryRateLimiter(
+    CREATE_SHIPMENT_RATE_LIMIT,
+  );
 
 function messageFor(
   reason: string,
@@ -61,6 +89,24 @@ export async function createShipmentAction(
   _previousState: ShipmentActionState,
   formData: FormData,
 ): Promise<ShipmentActionState> {
+  const rateLimitResult =
+    createShipmentLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    const retryAfterSeconds =
+      Math.ceil(rateLimitResult.retryAfterMs / 1000);
+
+    return {
+      status: "error",
+      message:
+        `Too many requests. Try again in ${retryAfterSeconds} ` +
+        `${retryAfterSeconds === 1 ? "second" : "seconds"}.`,
+    };
+  }
+
   const parsed =
     createShipmentSchema.safeParse(
       {
