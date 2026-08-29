@@ -125,6 +125,56 @@ implementation exists — this is how every module in
 delete a test to make a suite green; never weaken an assertion because
 an implementation turned out to be harder than expected.
 
+## Adversarial / mutation-oriented testing against local Postgres
+
+Live-reproducing a security finding against real local Postgres (not a
+mock) is this codebase's own established, encouraged practice — most of
+the P7–P13 review rounds' findings were confirmed exactly this way, inside
+`begin; set local role authenticated; set local request.jwt.claims = ...;
+... rollback;` transactions. That pattern is correct and should keep being
+used. One incident, found and fixed 2026-08-29 (P13 final adversarial
+audit), narrows it:
+
+**Never assume a client-side "rollback" header actually rolls back a
+transaction.** One audit sub-agent's live reproduction used the
+supabase-js/PostgREST client with a `Prefer: tx=rollback` request header,
+believing it to be equivalent to a real `BEGIN ... ROLLBACK`. It is not —
+PostgREST's own transaction-end preference is commit-only in this
+project's configuration, so the header was silently ignored and the
+forged write **committed** to the local database. The agent's own
+reproduction script correctly captured the row's original state
+beforehand and supplied a restore script, which is what made recovery
+possible — but the forged value sat live in the database until the
+orchestrating session happened to read that finding's own report closely
+enough to notice.
+
+**Going forward, for any mutation-oriented adversarial test (a live
+forgery/bypass reproduction, not a read-only probe):**
+
+- Prefer a **real `psql` transaction** (`begin; ...; rollback;`) or a
+  direct `pg` /  Postgres client transaction over any HTTP-client-level
+  "rollback" header or option — a real `ROLLBACK` statement is the only
+  thing this database engine actually guarantees will undo a write.
+- If a client library's own transaction/rollback feature must be used
+  instead (e.g. because the reproduction needs to go through the real
+  REST API, not a direct SQL connection, to prove an HTTP-reachable
+  exploit), **verify the database state before and after** the mutating
+  call, in the same session, before trusting that "rollback" occurred —
+  a `SELECT` confirming the row is back to its original value is not
+  optional ceremony, it is the only real evidence the mutation didn't
+  stick.
+- If a mutation is ever found to have actually committed, say so
+  immediately and explicitly (not as a footnote), and supply an exact,
+  runnable restore script capturing the row's verified prior state —
+  exactly as the incident above did, which is what made the fast recovery
+  possible.
+- Where practical, prefer a disposable/isolated database or a project
+  seeded specifically for the adversarial run over the same local
+  instance other work in the session depends on — not always
+  practical for a single local Supabase project, but worth choosing when
+  there is a real alternative (e.g. a throwaway `supabase db branch`-style
+  environment, if one is available).
+
 ## Commands / gates
 
 See [`README.md`](README.md#commands). `pnpm typecheck` and `pnpm test`

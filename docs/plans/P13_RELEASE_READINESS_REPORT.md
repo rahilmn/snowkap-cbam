@@ -782,11 +782,19 @@ deploy logs to see what went wrong."*
 
 Checked multiple times across an extended window with substantial other
 work done in between (not a tight retry loop, per instruction) — the result
-was identical every time. This session has **no Railway CLI installed, no
-`RAILWAY_TOKEN`, no MCP connector, and no dashboard access** — there is no
-technical path from here to view actual deploy/build logs, environment
-variable configuration, or deployment history. This is the practical limit
-of what could be diagnosed from the public edge response alone.
+was identical every time (most recent Railway Request ID:
+`57sAennCTUGdihlbDcO5xA`). Read the actual response body directly (not just
+the status code): it is Railway's own static, platform-level "Application
+failed to respond" HTML template (embedded Railway logo SVG, a link to
+`docs.railway.com/guides/fixing-common-errors`), not anything the Next.js
+application itself produced — confirming the failure is at the
+container/infrastructure level, before the application process ever gets a
+chance to handle a request, not an in-app error page or a Next.js-level
+502. This session has **no Railway CLI installed, no `RAILWAY_TOKEN`, no
+MCP connector, and no dashboard access** — there is no technical path from
+here to view actual deploy/build logs, environment variable configuration,
+or deployment history. This is the practical limit of what could be
+diagnosed from the public edge response alone.
 
 **What this means concretely**: none of the following could be completed —
 deployed commit SHA (unobservable, since `/api/health` never returned a
