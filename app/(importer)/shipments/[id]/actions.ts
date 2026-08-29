@@ -192,6 +192,9 @@ function transitionMessageFor(
     case "NOT_FOUND":
       return "That shipment could not be found.";
 
+    case "PERMISSION_DENIED":
+      return "Only an ADMIN or OWNER can lock a shipment.";
+
     default:
       return "Something went wrong. Please try again.";
   }
@@ -480,8 +483,7 @@ export async function transitionShipmentAction(
   const result =
     await transitionShipmentStatus(
       supabase,
-      orgSummary.context.org_id,
-      user.id as never,
+      orgSummary.context,
       parsed.data.shipmentId as never,
       parsed.data.action as ShipmentTransitionAction,
     );

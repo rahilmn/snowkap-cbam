@@ -13,10 +13,13 @@ import type {
 } from "../../domain/shipments/types";
 
 import type {
-  OrganizationId,
   ShipmentId,
-  UserId,
 } from "../../domain/shared/ids";
+
+import {
+  hasAdminAccess,
+  type OrgContext,
+} from "../organizations/org-context";
 
 import {
   recordAuditEvent,
@@ -35,7 +38,12 @@ export type TransitionShipmentActionResult =
   | { status: "OK"; shipment: Shipment }
   | {
       status: "REJECTED";
-      reason: ShipmentTransitionRejectionReason | "NOT_FOUND" | "FETCH_FAILED" | "PERSIST_FAILED";
+      reason:
+        | ShipmentTransitionRejectionReason
+        | "NOT_FOUND"
+        | "FETCH_FAILED"
+        | "PERSIST_FAILED"
+        | "PERMISSION_DENIED";
     };
 
 const AUDIT_EVENT_TYPE_BY_ACTION: Record<ShipmentTransitionAction, string> =
@@ -57,14 +65,38 @@ const AUDIT_EVENT_TYPE_BY_ACTION: Record<ShipmentTransitionAction, string> =
  * independent backstop (defense in depth), not a substitute for this
  * one: it cannot express "every line must be complete," only "this row
  * isn't already LOCKED/VOID".
+ *
+ * LOCK is ADMIN+ only, per docs/plans/MASTER_PLAN.md §27 screen 12
+ * ("Shipment detail... MEMBER+ (lock ADMIN+)") -- checked here, BEFORE
+ * any database read, mirroring verifyEmissionData's PERMISSION_DENIED
+ * gate in manage-emission-data.ts. MARK_READY/REOPEN/VOID stay
+ * available to any MEMBER: the §14 roles matrix names LOCK specifically
+ * as an ADMIN-tier action ("shipment LOCK/declare (importer)") and
+ * says nothing narrowing the other three, which remain the day-to-day
+ * data entry §14 grants every MEMBER (P10 capability-matrix audit,
+ * found missing -- this transition previously had no role check at
+ * all, so any MEMBER could LOCK a shipment directly from the shipment
+ * detail screen's own "Lock" button, transition-actions.tsx).
  */
 export async function transitionShipmentStatus(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  actorUserId: UserId,
+  context: OrgContext,
   shipmentId: ShipmentId,
   action: ShipmentTransitionAction,
 ): Promise<TransitionShipmentActionResult> {
+  if (action === "LOCK" && !hasAdminAccess(context)) {
+    return {
+      status: "REJECTED",
+      reason: "PERMISSION_DENIED",
+    };
+  }
+
+  const orgId =
+    context.org_id;
+
+  const actorUserId =
+    context.user_id;
+
   const { data: shipmentRow, error: shipmentError } =
     await supabase
       .from("shipments")

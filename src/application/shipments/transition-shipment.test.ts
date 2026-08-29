@@ -8,6 +8,10 @@ import {
   transitionShipmentStatus,
 } from "./transition-shipment";
 
+import type {
+  OrgContext,
+} from "../organizations/org-context";
+
 const orgId =
   "org-1" as never;
 
@@ -16,6 +20,17 @@ const actorUserId =
 
 const shipmentId =
   "ship-1" as never;
+
+function memberContext(
+  role: OrgContext["role"] = "MEMBER",
+): OrgContext {
+  return {
+    org_id: orgId,
+    user_id: actorUserId,
+    role,
+    capabilities: [],
+  };
+}
 
 const draftShipmentRow =
   {
@@ -129,8 +144,7 @@ describe(
             mockSupabase(
               { shipmentResult: { data: null, error: null } },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             "VOID",
           );
@@ -211,8 +225,7 @@ describe(
         const result =
           await transitionShipmentStatus(
             supabase,
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             "VOID",
           );
@@ -242,8 +255,7 @@ describe(
                 linesResult: { data: [completeLineRow], error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             "VOID",
           );
@@ -270,8 +282,7 @@ describe(
                 linesResult: { data: [completeLineRow], error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             "MARK_READY",
           );
@@ -293,8 +304,7 @@ describe(
                 linesResult: { data: [], error: null },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             "MARK_READY",
           );
@@ -318,8 +328,7 @@ describe(
                 },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             "VOID",
           );
@@ -341,14 +350,144 @@ describe(
                 updateError: { message: "db error" },
               },
             ),
-            orgId,
-            actorUserId,
+            memberContext(),
             shipmentId,
             "VOID",
           );
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "PERSIST_FAILED" },
+        );
+      },
+    );
+
+    // LOCK is ADMIN+ only (master plan §27 screen 12: "MEMBER+ (lock
+    // ADMIN+)") -- P10 capability-matrix audit, added because this
+    // transition previously had no role check at all: any MEMBER could
+    // LOCK a shipment via the shipment detail screen's "Lock" button
+    // (transition-actions.tsx) with nothing in the application layer
+    // or RLS stopping them (the shipments UPDATE policy only checks
+    // org membership + status-not-terminal, not role).
+    describe(
+      "LOCK role gate",
+      () => {
+        const readyShipmentRow =
+          { ...draftShipmentRow, status: "READY" };
+
+        it(
+          "rejects LOCK from a plain MEMBER with PERMISSION_DENIED, before touching the database",
+          async () => {
+            let dbTouched =
+              false;
+
+            const supabase =
+              {
+                from: () => {
+                  dbTouched = true;
+
+                  throw new Error(
+                    "transitionShipmentStatus must not read the database before the LOCK role check runs",
+                  );
+                },
+              } as never;
+
+            const result =
+              await transitionShipmentStatus(
+                supabase,
+                memberContext("MEMBER"),
+                shipmentId,
+                "LOCK",
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "PERMISSION_DENIED" },
+            );
+
+            expect(dbTouched).toBe(
+              false,
+            );
+          },
+        );
+
+        it(
+          "allows LOCK from an ADMIN on a READY shipment",
+          async () => {
+            const result =
+              await transitionShipmentStatus(
+                mockSupabase(
+                  { shipmentResult: { data: readyShipmentRow, error: null } },
+                ),
+                memberContext("ADMIN"),
+                shipmentId,
+                "LOCK",
+              );
+
+            expect(result).toEqual(
+              {
+                status: "OK",
+                shipment: expect.objectContaining(
+                  { status: "LOCKED" },
+                ),
+              },
+            );
+          },
+        );
+
+        it(
+          "allows LOCK from an OWNER on a READY shipment",
+          async () => {
+            const result =
+              await transitionShipmentStatus(
+                mockSupabase(
+                  { shipmentResult: { data: readyShipmentRow, error: null } },
+                ),
+                memberContext("OWNER"),
+                shipmentId,
+                "LOCK",
+              );
+
+            expect(result).toEqual(
+              {
+                status: "OK",
+                shipment: expect.objectContaining(
+                  { status: "LOCKED" },
+                ),
+              },
+            );
+          },
+        );
+
+        // Current, deliberate behavior (not this audit's gap): the §14
+        // roles matrix names LOCK specifically as ADMIN+ and says
+        // nothing narrowing MARK_READY/REOPEN/VOID, which stay MEMBER+
+        // day-to-day actions -- a plain MEMBER can still VOID a
+        // shipment (already exercised by "voids a DRAFT shipment
+        // regardless of line completeness", above, via the default
+        // memberContext() MEMBER role). This test makes that contrast
+        // explicit rather than leaving it implicit in a same-role
+        // default.
+        it(
+          "does not require ADMIN+ for VOID -- a plain MEMBER may still void a shipment",
+          async () => {
+            const result =
+              await transitionShipmentStatus(
+                mockSupabase(
+                  { shipmentResult: { data: draftShipmentRow, error: null } },
+                ),
+                memberContext("MEMBER"),
+                shipmentId,
+                "VOID",
+              );
+
+            expect(result).toEqual(
+              {
+                status: "OK",
+                shipment: expect.objectContaining(
+                  { status: "VOID" },
+                ),
+              },
+            );
+          },
         );
       },
     );
