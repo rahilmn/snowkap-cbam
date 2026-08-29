@@ -966,5 +966,83 @@ describe.skipIf(!localSupabaseReachable)(
         );
       },
     );
+
+    it(
+      "rejects deleting an evidence file whose owning emission_data record is VERIFIED (P13 review, finding S6) -- live-reproduced before this policy existed: a plain MEMBER could delete evidence backing an already-VERIFIED (or ACTIVE/SUPERSEDED, both necessarily VERIFIED too) record with nothing at any layer stopping them",
+      async () => {
+        const emissionDataId =
+          await insertDraftEmissionData(
+            { verification_status: "VERIFIED", verifier_user_id: producerAdminId },
+          );
+
+        const evidenceFileId =
+          await insertRealEvidenceFile(
+            emissionDataId,
+            clientProducerMember,
+            producerMemberId,
+          );
+
+        const { error: deleteError, data: deleteData } =
+          await clientProducerMember
+            .from("evidence_files")
+            .delete()
+            .eq(
+              "id",
+              evidenceFileId,
+            )
+            .select("id");
+
+        expect(deleteError).toBeNull();
+        expect(deleteData).toHaveLength(
+          0,
+        );
+
+        const { data: stillThere } =
+          await serviceClient
+            .from("evidence_files")
+            .select("id")
+            .eq(
+              "id",
+              evidenceFileId,
+            )
+            .maybeSingle();
+
+        expect(stillThere?.id).toBe(
+          evidenceFileId,
+        );
+      },
+    );
+
+    it(
+      "allows deleting an evidence file whose owning emission_data record is DRAFT + REJECTED -- a producer fixing evidence before resubmitting must not be blocked",
+      async () => {
+        const emissionDataId =
+          await insertDraftEmissionData(
+            { verification_status: "REJECTED", rejection_reason: "insufficient documentation" },
+          );
+
+        const evidenceFileId =
+          await insertRealEvidenceFile(
+            emissionDataId,
+            clientProducerMember,
+            producerMemberId,
+          );
+
+        const { error: deleteError, data: deleteData } =
+          await clientProducerMember
+            .from("evidence_files")
+            .delete()
+            .eq(
+              "id",
+              evidenceFileId,
+            )
+            .select("id");
+
+        expect(deleteError).toBeNull();
+        expect(deleteData).toHaveLength(
+          1,
+        );
+      },
+    );
   },
 );

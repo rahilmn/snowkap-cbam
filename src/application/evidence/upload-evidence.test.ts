@@ -815,6 +815,81 @@ describe(
       },
     );
 
+    it(
+      "rejects EMISSION_DATA_VERIFIED and touches neither storage nor the metadata row when the owning emission_data record is VERIFIED -- once a verifier has signed off on an evidence set (DRAFT+VERIFIED, ACTIVE, or SUPERSEDED all carry verification_status VERIFIED), it must stay intact so the verifier's decision remains provable and an already-consumable/consumed record's basis can never be silently altered",
+      async () => {
+        const recorder =
+          makeRecorder();
+
+        const result =
+          await removeEvidenceFile(
+            makeMockSupabase(
+              {
+                evidence_files: { data: evidenceFileRow, error: null },
+                emission_data: {
+                  data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1"], verification_status: "VERIFIED" },
+                  error: null,
+                },
+              },
+              {},
+              recorder,
+            ),
+            memberContext(),
+            "evidence-file-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "EMISSION_DATA_VERIFIED" },
+        );
+
+        expect(recorder.storageOps).toEqual(
+          [],
+        );
+
+        expect(
+          recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
+        ).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "allows removal when the owning emission_data record is DRAFT + REJECTED (a producer fixing evidence before resubmitting) -- verification_status other than VERIFIED must never block removal",
+      async () => {
+        const recorder =
+          makeRecorder();
+
+        const result =
+          await removeEvidenceFile(
+            makeMockSupabase(
+              {
+                evidence_files: { data: evidenceFileRow, error: null },
+                emission_data: {
+                  data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1", "other"], verification_status: "REJECTED" },
+                  error: null,
+                },
+                audit_events: { data: null, error: null },
+              },
+              {},
+              recorder,
+            ),
+            memberContext(),
+            "evidence-file-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "OK" },
+        );
+
+        expect(
+          recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
+        ).toBe(
+          true,
+        );
+      },
+    );
+
     describe(
       "capability gate",
       () => {

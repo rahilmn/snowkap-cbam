@@ -57,6 +57,7 @@ const SIGNED_URL_EXPIRES_IN_SECONDS =
 interface EmissionDataOwnershipRow {
   entered_by_org_id: string;
   evidence_file_ids: string[];
+  verification_status: string;
 }
 
 /**
@@ -74,14 +75,14 @@ async function fetchOwnedEmissionDataForEvidence(
   orgId: OrganizationId,
   emissionDataId: EmissionDataId,
 ): Promise<
-  | { status: "OK"; evidenceFileIds: string[] }
+  | { status: "OK"; evidenceFileIds: string[]; verificationStatus: string }
   | { status: "REJECTED"; reason: "EMISSION_DATA_NOT_FOUND" | "PERSIST_FAILED" }
 > {
   const { data, error } =
     await supabase
       .from("emission_data")
       .select(
-        "entered_by_org_id, evidence_file_ids",
+        "entered_by_org_id, evidence_file_ids, verification_status",
       )
       .eq("id", emissionDataId)
       .maybeSingle();
@@ -106,6 +107,7 @@ async function fetchOwnedEmissionDataForEvidence(
   return {
     status: "OK",
     evidenceFileIds: row.evidence_file_ids ?? [],
+    verificationStatus: row.verification_status,
   };
 }
 
@@ -431,7 +433,8 @@ export type RemoveEvidenceFileResult =
         | "FETCH_FAILED"
         | "STORAGE_DELETE_FAILED"
         | "PERSIST_FAILED"
-        | "CAPABILITY_NOT_HELD";
+        | "CAPABILITY_NOT_HELD"
+        | "EMISSION_DATA_VERIFIED";
     };
 
 /**
@@ -439,6 +442,25 @@ export type RemoveEvidenceFileResult =
  * object, the evidence_files metadata row, and this file's id out of
  * its emission_data record's evidence_file_ids array -- audited as
  * evidence.removed.
+ *
+ * Rejects EMISSION_DATA_VERIFIED before touching anything if the owning
+ * emission_data record's verification_status is VERIFIED (P13 review,
+ * finding S6, live-reproduced: nothing previously stopped a plain
+ * PRODUCER_OPERATOR member from deleting evidence out from under a
+ * DRAFT+VERIFIED, ACTIVE, or SUPERSEDED record -- all three carry
+ * verification_status VERIFIED, since ACTIVATE only flips `status` and
+ * superseding never touches verification_status -- silently
+ * invalidating the verifier's own basis for having approved it, for a
+ * record that may already be consumed cross-org via a sharing grant).
+ * Deliberately keyed on verification_status alone, not `status`: a
+ * DRAFT+REJECTED record (verification_status REJECTED) must remain
+ * editable so a producer can fix its evidence and resubmit
+ * (emission-data-lifecycle.ts's own SUBMIT_FOR_VERIFICATION transition
+ * accepts REJECTED as a valid prior state) -- gating on `status`
+ * (DRAFT vs ACTIVE) alone would have also blocked a DRAFT+VERIFIED
+ * record sitting unactivated, which is exactly the moment a producer
+ * could otherwise strip evidence the verifier already signed off on
+ * and then ACTIVATE anyway.
  *
  * Storage delete runs BEFORE the metadata delete, and a storage-delete
  * failure stops here (nothing else is touched): the safer failure mode
@@ -493,6 +515,20 @@ export async function removeEvidenceFile(
     return fetched;
   }
 
+  const ownership =
+    await fetchOwnedEmissionDataForEvidence(
+      supabase,
+      orgId,
+      fetched.file.emission_data_id,
+    );
+
+  if (ownership.status === "OK" && ownership.verificationStatus === "VERIFIED") {
+    return {
+      status: "REJECTED",
+      reason: "EMISSION_DATA_VERIFIED",
+    };
+  }
+
   const { error: storageError } =
     await supabase.storage
       .from(EVIDENCE_STORAGE_BUCKET)
@@ -519,13 +555,6 @@ export async function removeEvidenceFile(
       reason: "PERSIST_FAILED",
     };
   }
-
-  const ownership =
-    await fetchOwnedEmissionDataForEvidence(
-      supabase,
-      orgId,
-      fetched.file.emission_data_id,
-    );
 
   if (ownership.status === "OK") {
     const { error: arrayUpdateError } =
