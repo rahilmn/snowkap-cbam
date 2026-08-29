@@ -12,8 +12,8 @@ import {
 } from "next/navigation";
 
 import {
-  getBrowserSupabaseClient,
-} from "../../../src/infrastructure/supabase/browser-client";
+  establishSessionAction,
+} from "./actions";
 
 import {
   isSafeRedirectPath,
@@ -34,9 +34,12 @@ import {
  * the server, so this must be a client component: a Server Component
  * at this URL would never see the tokens at all.
  *
- * setSession() writes the session into cookies via the browser
- * client's @supabase/ssr cookie adapter, so the subsequent navigation
- * to `next` is a normal authenticated server-rendered request.
+ * The tokens are read here (client-side, since only the browser can
+ * see the hash fragment) but the session itself is established by
+ * establishSessionAction on the SERVER client, not a client-side
+ * setSession() call -- see that action's own doc comment for why
+ * (P13 adversarial audit: a client-side setSession() silently fails to
+ * update an existing httpOnly session cookie).
  */
 export default function AuthCallbackPage() {
   return (
@@ -108,16 +111,13 @@ function AuthCallback() {
         return;
       }
 
-      getBrowserSupabaseClient()
-        .auth.setSession(
-          {
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          },
-        )
+      establishSessionAction(
+        accessToken,
+        refreshToken,
+      )
         .then(
-          ({ error: setSessionError }) => {
-            if (setSessionError) {
+          (result) => {
+            if (result.status === "error") {
               setError(
                 "This link is invalid or has expired.",
               );
