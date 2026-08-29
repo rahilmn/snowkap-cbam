@@ -565,7 +565,96 @@ authorization premise need rethinking? Not decided or changed in this
 session — flagged for the same reason §11's regulatory question is: a
 material security-boundary/config decision, not a routine fix.
 
-## 17. Concurrency controls
+### 16.6 Formal triage — every confirmed finding, one bucket each
+
+Per explicit instruction: **A = RELEASE BLOCKER, B = HIGH (must fix before
+release), C = MEDIUM (fix where safe and clearly in scope), D = LOW (may
+remain documented)**. No finding is silently dropped — every one of the 53
+originally-confirmed findings appears exactly once below. **6 were fixed
+since this table was first needed** (5 in this remediation round, on top of
+the 2 fixed in the immediately preceding round) — marked ✅ **FIXED**, with
+the commit, and kept in their original bucket so the triage itself stays an
+honest record of severity, not retroactively softened once addressed.
+
+**Bucket A — RELEASE BLOCKER (2, unchanged from §37):**
+
+| Finding | Status |
+|---|---|
+| Railway production deployment down (502) | Open — external, cannot fix from this session (§29) |
+| R7/R9 regulatory fallback contradiction | Resolved via decision memo, not a code fix (§11) — owner decision pending |
+
+**Bucket B — HIGH, must fix before release (17 total):**
+
+| Finding | Status |
+|---|---|
+| S1 Auth callback session regression | ✅ **FIXED** (`c34656a`) |
+| S2 / regulatory Emission-unit numerator gap | ✅ **FIXED** (`4eb4ff5`) |
+| S12 / regulatory `shipment_lines.emission_determination` forgery | ✅ **FIXED** (`6b6a5a5`, migration `20260829500000`) |
+| S7 Storage bucket size/MIME limits | ✅ **FIXED** (`d40d143`) |
+| S8 `audit_events.occurred_at` unconstrained | ✅ **FIXED** (`6cd0b4b`) |
+| S9 `removeEvidenceFile` unguarded array update | ✅ **FIXED** (`b908cfb`) |
+| S11 `transitionShipmentStatus` no CAS guard | ✅ **FIXED** (`7aadfa5`) |
+| S15 `ENGINE_VERSION` not bumped (regulatory) | Partially fixed (`4eb4ff5`) — current/future changes now bump correctly; 3 historical unbumped changes cannot be retroactively fixed without violating append-only history |
+| S3 `enable_confirmations = false` vacuous email gate | Open — needs an explicit environment-configuration decision (local/dev-only vs. every environment), not purely a code change; see §16.5's closing paragraph |
+| S4 No password reset flow | Open — a genuine multi-day feature (new screens, GoTrue `resetPasswordForEmail`/`updateUser` flows, a "Forgot password?" entry point), not attempted in this remediation round given its size relative to the narrower fixes above |
+| S5 OWNER danger-zone has no RLS wall | Open — needs a migration tightening `organizations_update_admin_or_owner`'s WITH CHECK to OWNER-only (matching this session's earlier application-layer fix, `694218c`), not yet written |
+| S6 Evidence deletable from ACTIVE/VERIFIED records | Open — needs a lifecycle-status predicate added to `evidence_files_delete_own_org`'s USING clause |
+| S10 Last-active-OWNER invariant has no DB backstop | Open — the race is cross-row (two different membership rows), which no per-row CAS guard can close; needs either a deferred constraint trigger scanning all of an org's memberships, or a `SECURITY DEFINER` RPC serializing role-change/deactivation through one code path. Real, but the most architecturally involved of the open B-bucket items |
+| S13 Regulatory pipeline mutates shared reference rows in place | Open, **inside the protected regulatory zone** (`scripts/regulatory/*.py`) — needs its own narrow TDD-backed commit plus a clean `pnpm regulatory:verify`, deliberately not rushed into this pass per CLAUDE.md's protected-zone discipline |
+| S16 ACTUAL determination doesn't validate `cn_scope` against the line's CN code | Open — needs a check added to `determine-from-actual-data.ts` comparing the fetched record's `cn_scope` against the line's `cn_code` (the domain already has the exact predicate, `cn-scope-covers-code.ts` — it just isn't called on this path) |
+| S17 Rate limiting doesn't cover 17+ mutation actions | Open — mechanical but broad (apply the existing limiter pattern to every remaining create/delete/transition Server Action); sized as a dedicated pass, not a single fix |
+| S14 R7/R9 (regulatory) | Same item as Bucket A's regulatory entry — listed once, in Bucket A |
+
+**Bucket C — MEDIUM, fix where safe and clearly in scope (17, not individually
+fixed this round — each is real but narrower in blast radius than the
+Bucket B items above, per the audit's own severity call):**
+
+`transitionShipmentStatus`'s medium-severity variant (folded into the S11
+fix above) · `recordDeclarationFiled` no active-org check on `declarationId`
+· `getShipmentDetail` no active-org check · a grantee can never resolve the
+grantor org's name ("Unknown organization") · an expired sharing grant
+still discloses the grantee org's full row · sharing-grant lifecycle events
+write to only one org's audit stream · evidence downloads discard the
+original filename (UUID on save) · `activateEmissionData`'s supersede/
+activate writes have no CAS guard · `uploadEvidenceFile`'s array
+read-modify-write has no CAS · organization capability grants/EORI/
+declarant-status changes are entirely unaudited · `APP_URL` unset means
+production invite emails would link to `localhost:3000` · the structured
+logger has one call site in the whole app · regulatory: no staleness
+signal for DEFAULT determinations when a dataset is superseded ·
+`calculation_results.quantity`/`embedded_emissions_tco2e` carry no
+canonical-decimal CHECK · neither picker nor write path matches ACTUAL
+dataset period to the shipment's · `ActualEmissionSnapshot` omits
+`cn_scope`/period/owning org · EU-origin scope gap disclosed nowhere in the
+product UI (the underlying gap is Bucket-A-adjacent by nature — already
+covered in §35 — this is specifically the "say so in the UI" half) ·
+Annex II sector membership hardcoded with HYDROGEN's exclusion unexplained.
+
+**Bucket D — LOW, may remain documented (14):**
+
+`addLine` doesn't verify parent shipment's active org (unlike sibling
+functions) · organization capabilities Wall-1-only (confined to the
+attacker's own tenant) · `evidence_files` DELETE no lifecycle gate (the
+narrower, lower-severity companion to S6 above) · a dual-membership user
+can accept an EXPIRED grant via policy OR-composition · a transient
+name-lookup error hides pending sharing invitations · unhandled TypeError
+in the evidence MIME allowlist for prototype-chain keys (`constructor`,
+`__proto__`) · a malformed evidence id returns 500 instead of 404 ·
+`removeOperator`/`removeInstallation`/`removeSupplier` DELETEs have no
+row-count check (duplicate audit events on a race only, no auth-bypass
+angle) · sign-in rate limiter bypassable via the (intentionally public)
+anon key · regulatory: `checkRegulatoryResolutionSnapshotCompleteness` dead
+code · no DB-level "at most one ACTIVE dataset" constraint (detective
+check only) · CBAM-goods search ignores effective-dating the code-lookup
+path enforces · `resolveGoodSectorForActualLine` takes an unordered
+`candidates[0]` · SOURCE_TEXT status has no terminal branch · terminal
+unresolved-reason scan can report a reason from an unrequested route ·
+`input.production_route` truthiness check (an empty string, unreachable
+today, would disable the route-substitution guard `e52b279` added).
+
+**Refuted findings (11)** are not re-listed here — see §16.4; they received
+no bucket because independent re-verification found them to be false
+positives, already-mitigated, or mischaracterized.
 
 CAS guards (`.eq()` predicates matching the pre-fetched state, rejecting
 `CONCURRENT_MODIFICATION` on zero rows affected) are present on
