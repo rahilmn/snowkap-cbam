@@ -60,8 +60,17 @@ export async function proxy(
         // matching comment for the full reasoning; same fix, applied
         // here too since this is the third of the three create*Client
         // call sites the review named.
+        //
+        // 2026-08-29 (P13 audit finding #2) -- see server-client.ts's
+        // matching comment for the full reasoning. `httpOnly: true` is
+        // safe unconditionally here too: this is the middleware/proxy
+        // client, which reads/writes cookies via the request/response
+        // cookie adapter below (next/server's NextRequest/NextResponse
+        // cookie APIs), never via `document.cookie` -- there is no
+        // browser-side reader in this file for httpOnly to break.
         cookieOptions: {
           secure: process.env.NODE_ENV === "production",
+          httpOnly: true,
         },
 
         cookies: {

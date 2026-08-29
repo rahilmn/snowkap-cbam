@@ -63,8 +63,24 @@ export async function getServerSupabaseClient() {
       // NODE_ENV so local dev (plain http://localhost, no TLS) keeps
       // working exactly as before -- an unconditional `secure: true`
       // would silently break every cookie-dependent flow in `pnpm dev`.
+      //
+      // 2026-08-29 (P13 adversarial security audit, finding #2,
+      // confirmed live): `httpOnly` was left at @supabase/ssr's own
+      // default, which is `false` (confirmed against the installed
+      // package's dist/main/utils/constants.js DEFAULT_COOKIE_OPTIONS)
+      // -- meaning the session's access AND refresh tokens were
+      // readable via `document.cookie` by any script running on this
+      // origin, so a single XSS or compromised front-end dependency
+      // could exfiltrate a full session. `httpOnly: true` here is safe
+      // unconditionally (not NODE_ENV-gated like `secure` above)
+      // because this is a SERVER-side call site: it reads/writes
+      // cookies via next/headers' cookie store (see the `cookies:`
+      // adapter below), which works fine with httpOnly cookies -- only
+      // a *browser*-side reader (`document.cookie`) is blocked by
+      // httpOnly, and nothing in this file is that.
       cookieOptions: {
         secure: process.env.NODE_ENV === "production",
+        httpOnly: true,
       },
 
       cookies: {

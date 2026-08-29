@@ -44,6 +44,35 @@ export function getBrowserSupabaseClient(): SupabaseClient {
           // 2026-08-29 (P11 finding #14) -- see server-client.ts's
           // matching comment for the full reasoning; same fix, same
           // NODE_ENV condition, mirrored here for the browser client.
+          //
+          // 2026-08-29 (P13 adversarial security audit, finding #2):
+          // deliberately NOT adding `httpOnly: true` here, unlike the
+          // two server-side call sites (server-client.ts, proxy.ts),
+          // which now both set it. This is a known, considered
+          // residual gap, not an oversight:
+          //
+          // 1. It would be a no-op at best -- `document.cookie` (what
+          //    this client actually uses to read/write cookies) cannot
+          //    read OR set an httpOnly cookie in the first place, so
+          //    the flag has no effect on cookies this client writes.
+          // 2. The real fix is architectural, not a flag: this app's
+          //    ONE real (non-test) caller of getBrowserSupabaseClient()
+          //    is app/auth/callback/page.tsx, which handles the
+          //    invite/magic-link/password-reset implicit flow by
+          //    reading access_token/refresh_token out of a URL *hash
+          //    fragment* (see that file's own doc comment) and calling
+          //    `.auth.setSession()` client-side -- hash fragments are
+          //    never sent to the server, so only client-side code can
+          //    ever see those tokens, which means this specific flow
+          //    fundamentally needs a client that can write non-httpOnly
+          //    cookies. Moving that establishment server-side (e.g. a
+          //    route handler that reads the fragment via a redirect
+          //    trick, or switching to a server-verifiable ?token_hash=
+          //    flow) is a real behavior change to that flow and
+          //    deserves its own isolated review -- deliberately out of
+          //    scope for this pass. Until that refactor happens, the
+          //    session cookies this specific flow establishes remain
+          //    readable via `document.cookie`, same as before.
           cookieOptions: {
             secure: process.env.NODE_ENV === "production",
           },

@@ -149,5 +149,31 @@ describe(
         ).rejects.toThrow();
       },
     );
+
+    it(
+      // 2026-08-29 (P13 adversarial security audit, finding #2,
+      // confirmed live): this module's cookieOptions previously left
+      // `httpOnly` at @supabase/ssr's own default of `false`, so the
+      // session's access + refresh tokens were readable via
+      // `document.cookie` by any script on the origin -- one XSS or one
+      // compromised front-end dependency could exfiltrate a full
+      // session. Unlike `secure` above, this is NOT NODE_ENV-gated:
+      // this client reads/writes cookies via next/headers' cookie
+      // store (mocked above), never `document.cookie`, so httpOnly is
+      // safe in every environment.
+      "passes cookieOptions.httpOnly = true regardless of environment",
+      async () => {
+        await getServerSupabaseClient();
+
+        const [, , options] =
+          createServerClientMock.mock.calls[0] as [
+            string,
+            string,
+            { cookieOptions?: { httpOnly?: boolean } },
+          ];
+
+        expect(options.cookieOptions?.httpOnly).toBe(true);
+      },
+    );
   },
 );
