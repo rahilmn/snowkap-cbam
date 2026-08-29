@@ -179,6 +179,9 @@ describe.skipIf(!localSupabaseReachable)(
     let recordA: RealRecord;
     let recordB: RealRecord;
     let realEmissionData: RealEmissionData;
+    let installationId: string;
+    let producerOrgId: string;
+    let sharingGrantId: string;
 
     async function signInAnonClient(
       email: string,
@@ -503,6 +506,44 @@ describe.skipIf(!localSupabaseReachable)(
 
       realEmissionData =
         emissionData as RealEmissionData;
+
+      installationId =
+        installation.id;
+
+      producerOrgId =
+        producerOrg.id;
+
+      // An ACTIVE grant authorizing importerOrgId to reference this
+      // installation's emission_data. Required as of 20260829540000
+      // (P13 review iteration 3): the validator function closes a
+      // cross-tenant boolean-oracle disclosure by requiring the calling
+      // org to either own the installation or hold SOME sharing_grants
+      // row for it (any status) before it will even compare values --
+      // without this row, every ACTUAL-method test below would be
+      // rejected regardless of how correct its claimed values are.
+      const { data: grant, error: grantError } =
+        await serviceClient
+          .from("sharing_grants")
+          .insert(
+            {
+              grantor_org_id: producerOrgId,
+              grantee_org_id: importerOrgId,
+              installation_id: installationId,
+              status: "ACTIVE",
+              created_by_user_id: memberId,
+            },
+          )
+          .select("id")
+          .single();
+
+      if (grantError || !grant) {
+        throw new Error(
+          `Failed to create sharing grant: ${grantError?.message}`,
+        );
+      }
+
+      sharingGrantId =
+        grant.id;
     });
 
     afterAll(async () => {
@@ -528,6 +569,46 @@ describe.skipIf(!localSupabaseReachable)(
         .eq(
           "org_id",
           importerOrgId,
+        );
+
+      await serviceClient
+        .from("sharing_grants")
+        .delete()
+        .eq(
+          "grantor_org_id",
+          producerOrgId,
+        );
+
+      await serviceClient
+        .from("emission_data")
+        .delete()
+        .eq(
+          "installation_id",
+          installationId,
+        );
+
+      await serviceClient
+        .from("installations")
+        .delete()
+        .eq(
+          "org_id",
+          producerOrgId,
+        );
+
+      await serviceClient
+        .from("operators")
+        .delete()
+        .eq(
+          "org_id",
+          producerOrgId,
+        );
+
+      await serviceClient
+        .from("organizations")
+        .delete()
+        .eq(
+          "id",
+          producerOrgId,
         );
 
       await serviceClient
@@ -864,7 +945,7 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
-      "accepts a genuine ACTUAL determination whose snapshot byte-matches a real, VERIFIED emission_data row, even from a different org (grant-authorization is the application layer's job; this check only verifies the claimed snapshot is not a forgery)",
+      "accepts a genuine ACTUAL determination whose snapshot byte-matches a real, VERIFIED emission_data row from a different org, because an ACTIVE sharing_grants row authorizes it (20260829540000, P13 review iteration 3)",
       async () => {
         const lineId =
           await insertLine();
@@ -898,6 +979,234 @@ describe.skipIf(!localSupabaseReachable)(
         ).toBe(
           "ACTUAL",
         );
+      },
+    );
+
+    it(
+      "rejects a byte-perfect ACTUAL snapshot from an org with NO grant relationship to the installation -- closes the cross-tenant boolean-oracle disclosure 20260829540000 fixes: a SECURITY DEFINER check with no org-scoping would let any org guess a real row's private values by observing accept/reject outcomes",
+      async () => {
+        const { data: strangerOrg, error: strangerOrgError } =
+          await serviceClient
+            .from("organizations")
+            .insert(
+              {
+                name: `Line Determination Hardening Stranger ${runId}`,
+                slug: `line-determination-hardening-stranger-${runId}`,
+                capabilities: ["IMPORTER_DECLARANT"],
+              },
+            )
+            .select("id")
+            .single();
+
+        if (strangerOrgError || !strangerOrg) {
+          throw new Error(
+            `Failed to create stranger org: ${strangerOrgError?.message}`,
+          );
+        }
+
+        const strangerPassword =
+          `line-determination-hardening-stranger-password-${runId}!`;
+
+        const { data: strangerUser, error: strangerUserError } =
+          await serviceClient.auth.admin.createUser(
+            {
+              email: `line-determination-hardening-stranger-${runId}@example.com`,
+              password: strangerPassword,
+              email_confirm: true,
+            },
+          );
+
+        if (strangerUserError || !strangerUser.user) {
+          throw new Error(
+            `Failed to create stranger user: ${strangerUserError?.message}`,
+          );
+        }
+
+        const { error: strangerMembershipError } =
+          await serviceClient
+            .from("memberships")
+            .insert(
+              { org_id: strangerOrg.id, user_id: strangerUser.user.id, role: "OWNER" },
+            );
+
+        if (strangerMembershipError) {
+          throw new Error(
+            `Failed to create stranger membership: ${strangerMembershipError.message}`,
+          );
+        }
+
+        const { data: strangerShipment, error: strangerShipmentError } =
+          await serviceClient
+            .from("shipments")
+            .insert(
+              {
+                org_id: strangerOrg.id,
+                reference: `LINE-HARDENING-STRANGER-${runId}`,
+                release_date: "2026-03-15",
+                reporting_period_kind: "ANNUAL",
+                reporting_period_year: 2026,
+                status: "DRAFT",
+              },
+            )
+            .select("id")
+            .single();
+
+        if (strangerShipmentError || !strangerShipment) {
+          throw new Error(
+            `Failed to create stranger shipment: ${strangerShipmentError?.message}`,
+          );
+        }
+
+        const { data: strangerLine, error: strangerLineError } =
+          await serviceClient
+            .from("shipment_lines")
+            .insert(
+              {
+                shipment_id: strangerShipment.id,
+                org_id: strangerOrg.id,
+                line_number: 1,
+                cn_code: recordA.source_trade_code.replace(/\s+/g, ""),
+                cn_code_level: "CN8",
+                origin_country: "IN",
+                net_mass_tonnes: "10",
+                emission_determination: null,
+              },
+            )
+            .select("id")
+            .single();
+
+        if (strangerLineError || !strangerLine) {
+          throw new Error(
+            `Failed to create stranger line: ${strangerLineError?.message}`,
+          );
+        }
+
+        const clientStranger =
+          await signInAnonClient(
+            `line-determination-hardening-stranger-${runId}@example.com`,
+            strangerPassword,
+          );
+
+        try {
+          // The exact same byte-perfect snapshot the grant-holding org's
+          // positive control above used successfully -- correct
+          // emission_data_id, correct verifier_user_id, correct unit,
+          // correct direct/indirect values. The ONLY difference is that
+          // this org holds no sharing_grants row at all for the
+          // installation. Must be rejected identically to a wrong-value
+          // guess, so accept/reject never leaks whether the values were
+          // actually correct.
+          const { error } =
+            await clientStranger
+              .from("shipment_lines")
+              .update(
+                { emission_determination: actualDeterminationFrom(realEmissionData) },
+              )
+              .eq(
+                "id",
+                strangerLine.id,
+              );
+
+          expect(error).not.toBeNull();
+          expect(error?.code).toBe(
+            "42501",
+          );
+        } finally {
+          await serviceClient
+            .from("shipment_lines")
+            .delete()
+            .eq(
+              "org_id",
+              strangerOrg.id,
+            );
+
+          await serviceClient
+            .from("shipments")
+            .delete()
+            .eq(
+              "org_id",
+              strangerOrg.id,
+            );
+
+          await serviceClient
+            .from("memberships")
+            .delete()
+            .eq(
+              "org_id",
+              strangerOrg.id,
+            );
+
+          await serviceClient
+            .from("organizations")
+            .delete()
+            .eq(
+              "id",
+              strangerOrg.id,
+            );
+
+          await serviceClient.auth.admin.deleteUser(
+            strangerUser.user.id,
+          );
+        }
+      },
+    );
+
+    it(
+      "keeps a previously-valid ACTUAL determination re-savable after its originating grant is REVOKED -- revocation ends future reads, it must not retroactively make an already-correct line unsavable for an unrelated edit (this codebase's own 'revocation never claws back history' design, master plan section 9)",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const { error: setError } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: actualDeterminationFrom(realEmissionData) },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(setError).toBeNull();
+
+        const { error: revokeError } =
+          await serviceClient
+            .from("sharing_grants")
+            .update(
+              { status: "REVOKED" },
+            )
+            .eq(
+              "id",
+              sharingGrantId,
+            );
+
+        expect(revokeError).toBeNull();
+
+        try {
+          const { error: unrelatedEditError } =
+            await clientMember
+              .from("shipment_lines")
+              .update(
+                { net_mass_tonnes: "11" },
+              )
+              .eq(
+                "id",
+                lineId,
+              );
+
+          expect(unrelatedEditError).toBeNull();
+        } finally {
+          await serviceClient
+            .from("sharing_grants")
+            .update(
+              { status: "ACTIVE" },
+            )
+            .eq(
+              "id",
+              sharingGrantId,
+            );
+        }
       },
     );
 
