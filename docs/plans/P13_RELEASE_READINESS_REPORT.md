@@ -841,6 +841,171 @@ this overall effort was real and is not undone by this — it simply did not
 reach every write path, and this audit is the first pass thorough enough to
 find exactly which ones remain.
 
+### 16.7 Final non-blocked-work audit, second round (2026-08-30)
+
+Per the explicit instruction to continue all non-blocked work while §11
+(R7/R9) and §29 (Railway) remain pending, a second, narrower audit ran
+after the verified 24-commit checkpoint push — six parallel agents
+(documentation accuracy, a *targeted* security review of files newer
+than or not covered by §16's own launch point, test-coverage gaps,
+production-config review, backup/rollback runbook accuracy, plus one
+adversarial verify pass on the security finding), followed by direct
+manual local browser verification (importer/producer sign-up,
+onboarding, both nav trees, theme switching, mobile responsive, keyboard
+focus). This did not repeat §16's own 204-subagent sweep — it targeted
+what §16 couldn't have covered (files/commits that postdate its launch)
+plus categories §16 didn't scope into (documentation, test coverage,
+ops-runbook accuracy).
+
+**Fixed in this round** (TDD where behavioral, typecheck+test re-run
+clean after each, each its own commit):
+
+- **Missing rate limiting, `app/team/actions.ts`** (adversarially
+  confirmed) — `changeRoleAction`, `removeMemberAction`,
+  `deactivateMemberAction`, `reactivateMemberAction`, and
+  `revokeInvitationAction` had zero rate limiting, despite the S17
+  remediation's own commit message citing this file as an example of
+  "the pattern already established" — that was only ever true for
+  `inviteMemberAction`. An authenticated ADMIN/OWNER session (including
+  one from a stolen/leaked cookie) could otherwise script an unbounded
+  loop of role/membership churn, flooding the audit trail on every call.
+  Fixed with the same 30-per-10-minutes shape as the direct sibling,
+  `revokeSharingGrantAction`. Commit `8345a03`.
+- **Misleading hardcoded `snowkap.com/` URL prefix, onboarding form** —
+  found live in the browser: the org-slug field displayed
+  `snowkap.com/{slug}` as if that were the org's real URL. This app is
+  not hosted at snowkap.com (the separate marketing site) and the slug
+  is never used to build a URL under any domain anywhere in the code
+  (grep-confirmed). Relabeled honestly instead. Commit `a47dcc8`.
+- **Fourteen documentation files** with stale counts, drifted
+  file:line citations, an overclaimed test-fixture case, an overclaimed
+  ADR description, and five runbooks that predated Railway's existence
+  and still said so. Full list and reasoning in commit `a46be77`'s own
+  message; summarized: README/DATABASE_SCHEMA/MIGRATION_LOG's
+  44-migration/967-test counts (now 56/1032); ENVIRONMENT.md's five
+  drifted citations plus undercounted `SUPABASE_LOCAL_*` consumers plus
+  a stale `.env.example` cross-check (corrected to 9-of-15, and the one
+  genuinely missing var, `SUPABASE_LOCAL_JWT_SECRET`, added to
+  `.env.example` itself); `CALCULATION_RULE_REGISTER.md`'s overclaimed
+  UNLISTED/fallback fixture case; `ADR-0012`'s overclaimed
+  signed-token-email transport (the real mechanism is a bare
+  `invited_email` text match, no token, no email — README's own
+  "Current state" already said so; the ADR now does too);
+  `docs/runbooks/{DEPLOYMENT,ROLLBACK,INCIDENT_RESPONSE,SECRET_ROTATION,
+  OPERATIONAL_DIAGNOSTICS}.md`'s "no Railway project is connected"
+  claims, now materially wrong given §29's repeatedly-confirmed real
+  (if down) deployment; `AUTHORIZATION_MATRIX.md`'s already-disclosed
+  "~20 stale citations" confirmed *worse* on re-sampling (some now
+  500+ lines off — a staleness disclosure was added, not a full
+  re-grounding, given the scope); `BACKUP_RESTORE.md`'s drill-evidence
+  function/trigger counts, now stale by the same 12 undocumented
+  migrations.
+
+**Found and reported, not fixed this round** (concrete, real, but
+either non-trivial to fix correctly in the time available, or requiring
+owner-level Railway access this session doesn't have):
+
+- **Most concrete Railway 502 root-cause theory yet** (still
+  unconfirmed — no Railway log access): the production-config review
+  found and locally reproduced two independent, code-verified failure
+  paths that would each present exactly as the observed persistent 502.
+  **Path A (build-time)**: running
+  `NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_ANON_KEY= NODE_ENV=production next build`
+  in this repo fails outright while prerendering
+  `/(importer)/declarations/page`, with `getServerSupabaseClient()`
+  throwing because those two build-time variables are unset — and the
+  `Dockerfile` declares them as `ARG`s with no default, relying entirely
+  on Railway auto-forwarding its own project variables as matching-named
+  Docker build args (`railway.json` has no explicit `args:` fallback
+  mapping). If Railway's variables are missing, misnamed, or scoped to
+  the wrong environment, the image build itself fails and no container
+  is ever produced — presenting at the edge exactly as a permanent
+  "Application failed to respond." **Path B (runtime)**:
+  `app/api/health/route.ts` throws (caught, returns 503) if
+  `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` (separate *runtime*
+  variables) are missing; `railway.json`'s healthcheck
+  (`restartPolicyMaxRetries: 3`) would then exhaust its retry budget and
+  leave the deployment permanently failed — again presenting as a
+  persistent edge 502 on every path, matching root and `/api/health`
+  being affected identically. **`docs/runbooks/DEPLOYMENT.md`'s own
+  words already flagged the Railway-auto-forwarding assumption behind
+  Path A as unconfirmed** ("this repo has not yet had a real Railway
+  project to confirm it against") — that project now exists, and this
+  is the most concrete lead yet for what to check first in its
+  dashboard: confirm `NEXT_PUBLIC_SUPABASE_URL`/
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY` are set as project/service variables
+  with those exact names, and that `SUPABASE_URL`/
+  `SUPABASE_SERVICE_ROLE_KEY` are set as separate runtime variables on
+  the service — then check the actual build/runtime logs to see which
+  (if either) actually occurred. Not claimed as the confirmed root
+  cause; this session still cannot reach Railway to confirm either way.
+- **Test-coverage gaps, several files, high severity** — confirmed by
+  reading the actual test files, not assumed: `app/(auth)/actions.ts`'s
+  `signOutAction` has zero coverage anywhere, and `signInAction`/
+  `signUpAction`'s validation, email-confirmation, and success branches
+  are untested (only rate-limiting and one generic error path are);
+  `app/accept-invitation/actions.ts`'s two Server Actions each have
+  exactly one test (rate-limit rejection) — every branch of both
+  outcome-mapping switches is untested; `app/team/actions.ts`'s five
+  newly-rate-limited actions (this round) still have no coverage of
+  their actual mutation outcomes or `messageFor()` mapping, only the
+  new rate-limit-rejection tests added alongside the fix above;
+  `app/(producer)/sharing/actions.ts`'s validation and
+  REJECTED-reason branches; `app/api/reports/export/route.ts`'s own
+  regulated-numeric-precision XLSX-writing logic (the reason that file
+  carries an extensive doc comment about a real historical
+  `Number()`-narrowing bug) has zero regression coverage of its own —
+  a future refactor could reintroduce that exact bug and nothing would
+  catch it; `app/api/evidence/upload/route.ts`'s full
+  rejection-reason-to-HTTP-status mapping is never exercised (the mock
+  always returns `OK`); `server-client.ts`'s cookie adapter wiring,
+  including the documented Server-Component-cannot-set-cookies catch,
+  is never actually invoked by its own test. None of these are
+  regressions from a previously-tested state — they are, and always
+  were, real gaps, now enumerated rather than assumed absent. Not
+  fixed in this round given the volume (writing each properly, per this
+  codebase's own TDD standard, is a substantial undertaking on its own)
+  — flagged here as the next concrete regression-coverage work, ranked
+  roughly by severity as listed.
+- **Route-level capability gate is UI/UX-only for reads, not
+  access-denial** — found live in the browser, distinct from and more
+  specific than §13's already-disclosed "no RLS wall for capability":
+  navigating directly to `/shipments` (an importer-only route) as a
+  producer-only-capability org renders the full page shell (empty list,
+  a working "New shipment" button, a working form) rather than an
+  immediate "you don't have access" state — the sidebar correctly hides
+  the link, but the route itself has no server-side capability guard on
+  the read path. Confirmed the write path itself is *not* a security
+  hole: submitting the form correctly returns "Your organization is not
+  set up as a CBAM importer/declarant" (Wall 1 holds on the actual
+  mutation) — this is a confusing/wasteful UX gap (fill out a whole form
+  before being told no), not a data-integrity or authorization breach.
+- **`BACKUP_RESTORE.md`'s own recommendation to re-run the drill
+  verbatim before P13 sign-off** was not carried out in this round (it
+  was flagged as stale, per the fix list above, but a fresh drill was
+  not re-executed) — noted rather than silently left implied-done by
+  the correction itself.
+
+**Verified, not merely re-asserted**: `pnpm typecheck` and `pnpm test`
+were re-run clean after every fix in this round (final count: 1032
+tests passed, 14 skipped, same skip set as before — the six new tests
+are the rate-limit-rejection coverage added alongside the team/actions
+fix). Local browser verification covered: sign-up → onboarding
+(producer capability) → producer dashboard/nav → Installations →
+Emission data (confirmed live, contrary to one stale background dev-
+server log from earlier in this session that reported a compile error
+at `upload-evidence.ts:559` — a fresh dev-server restart and fresh
+navigation to that exact route confirmed it compiles and renders
+correctly today; that error was not reproducible against current
+source, which contains no duplicate declaration at that location) →
+light/dark theme toggle (both render cleanly, consistent contrast) →
+mobile viewport (375×812, renders correctly, no horizontal overflow) →
+keyboard focus (a real, visible focus outline confirmed via computed
+style, not just visual inspection) → the shipments capability-gate
+finding above. Railway itself was re-confirmed still down as part of
+this same session (§29's own "re-verified 2026-08-30" note), separately
+from this subsection.
+
 ## 18. Upload / storage controls
 
 Evidence upload (`app/api/evidence/upload/route.ts`) enforces MIME/extension
