@@ -57,7 +57,7 @@ const IMPORTER_NAV: NavItem[] = [
   { label: "Calculations", icon: Calculator },
   { label: "Suppliers", icon: Truck, href: "/suppliers" },
   { label: "Installations", icon: Factory },
-  { label: "Audit", icon: ScrollText },
+  { label: "Audit", icon: ScrollText, href: "/audit" },
   { label: "Reports", icon: FileStack },
   { label: "Declarations", icon: FileCheck2 },
 ];
@@ -70,7 +70,7 @@ const PRODUCER_NAV: NavItem[] = [
   { label: "Evidence", icon: ClipboardCheck },
   { label: "Verification", icon: FileCheck2 },
   { label: "Sharing", icon: Share2, href: "/sharing" },
-  { label: "Activity", icon: Activity },
+  { label: "Activity", icon: Activity, href: "/activity" },
 ];
 
 const SETTINGS_NAV: NavItem[] = [

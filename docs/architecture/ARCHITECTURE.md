@@ -202,6 +202,173 @@ architecture described above — its only interface to the rest of the
 system is the Postgres database it writes to and the checksum/version
 metadata it records in `regulatory_datasets`/`regulatory_sources`.
 
+## Auditability
+
+`audit_events` (`supabase/migrations/20260828070000_create_organizations_foundation.sql`)
+is the append-only record every "Why did Snowkap produce this result?"
+chain (master plan §21) is built on, and the source table for the
+"Audit"/"Activity" nav entries in `components/shell/sidebar.tsx` — real
+routes as of P8, backed by the `listAuditEvents` read model
+(`src/application/audit/list-audit-events.ts`) and the two screens at
+`app/(importer)/audit/` and `app/(producer)/activity/`.
+
+**Schema shape.** One row is `{id, org_id, occurred_at, actor_type,
+actor_user_id, event_type, aggregate_type, aggregate_id, payload,
+correlation_id}`, mirrored exactly by the `AuditEvent` domain type
+(`src/domain/audit/types.ts`): `actor` is a discriminated `USER
+{user_id}` / `SYSTEM` union (`actor_user_id` is null only for
+`SYSTEM`, enforced by `audit_events_actor_consistency_ck`); `org_id` is
+null only for a `SYSTEM`-scope event with no owning organization (e.g.
+a future regulatory dataset activation — no such row is written by
+anything in this codebase yet); `event_type` is a namespaced free-text
+string (the catalog below); `aggregate` is `{type, id}`, where `type`
+is a fixed enum (`audit_events_aggregate_type_check`, widened once so
+far to add `EVIDENCE_FILE` — `20260829240000_p7c_evidence_files_schema.sql`).
+
+**Immutability.** Append-only by the absence of any update/delete grant
+or policy — there is no trigger enforcing this and none is needed; a
+table with no UPDATE/DELETE policy under RLS simply cannot be mutated
+or removed by any authenticated-role caller, which is a stronger and
+simpler guarantee than a trigger that could itself be dropped. See the
+table comment in `20260828070000_create_organizations_foundation.sql`.
+
+**RLS scoping.** `audit_events_select_own_org`
+(`20260828070000_create_organizations_foundation.sql`) admits SELECT
+only for rows whose `org_id` is one of the caller's own orgs, via the
+same `app.user_org_ids()` helper every other org-scoped SELECT policy
+in this codebase uses. `audit_events_insert_own_org_as_self`
+(`20260828150000_p4_shipment_intake_schema.sql`) is the one
+authenticated-role INSERT policy, requiring `actor_type = 'USER'`,
+`actor_user_id = auth.uid()`, and `org_id in (select
+app.user_org_ids())` — which is what makes `recordAuditEvent`
+(`src/application/audit/record-audit-event.ts`) safe as a bare
+client-side insert: a caller can only ever record *themselves* as the
+actor, into an org they already belong to. Every read service that
+queries `audit_events` (`listSharedDataStatus`, `listAuditEvents`)
+still applies its own explicit `org_id` filter on top of this policy —
+Wall 1 (application) never depends on Wall 2 (RLS) alone, per
+`docs/plans/MASTER_PLAN.md` §126.
+
+**Event catalog.** Built by grepping every `recordAuditEvent` call site
+under `src/application/` plus every direct `audit_events` insert inside
+a `SECURITY DEFINER` SQL RPC (`supabase/migrations/*.sql`) — the latter
+exist specifically for the cases where the acting user's own RLS
+session cannot legally write the row itself yet (no membership row
+exists at the moment `organization.created`/
+`membership.invitation_accepted` need to be recorded; the importer's
+session is never a member of the grantor org for
+`sharing_grant.data_consumed`, by the entire design of a cross-org
+grant — see that RPC's own header comment in
+`20260829310000_p7d3_shared_data_consumption_audit.sql`). As of this
+writing, every row from every event_type below carries
+`correlation_id: null` **except `calculation.computed`** — the one
+event type, out of the 34 below, whose call site populates it. A
+per-row column repeating "null" thirty-three times and "populated"
+once was dropped from the table in favor of the **Correlation IDs**
+subsection that follows the catalog, which explains that one exception
+and what it does and doesn't mean against master plan §21.
+
+| `event_type` | `aggregate_type` | Fires when | Write path |
+| --- | --- | --- | --- |
+| `organization.created` | ORGANIZATION | An organization is created, in the same transaction as its OWNER membership. | SQL RPC: `create_organization_with_owner()` (`20260828090000`) |
+| `membership.invitation_accepted` | MEMBERSHIP | A pending org invitation is accepted and becomes a membership. | SQL RPC: `accept_organization_invitation()` (`20260828130000`) |
+| `membership.role_changed` | MEMBERSHIP | An ADMIN+ changes another member's role. | `recordAuditEvent` — `manage-membership.ts` |
+| `membership.removed` | MEMBERSHIP | A member is removed from an org. | `recordAuditEvent` — `manage-membership.ts` |
+| `shipment.created` | SHIPMENT | A shipment is created. | `recordAuditEvent` — `create-shipment.ts` |
+| `shipment.marked_ready` | SHIPMENT | A shipment transitions DRAFT → READY. | `recordAuditEvent` — `transition-shipment.ts` (`AUDIT_EVENT_TYPE_BY_ACTION`) |
+| `shipment.reopened` | SHIPMENT | A shipment transitions READY → DRAFT. | `recordAuditEvent` — `transition-shipment.ts` |
+| `shipment.locked` | SHIPMENT | A shipment is locked (declaration-filed guard). | `recordAuditEvent` — `transition-shipment.ts` |
+| `shipment.voided` | SHIPMENT | A shipment is voided. | `recordAuditEvent` — `transition-shipment.ts` |
+| `shipment_line.added` | SHIPMENT_LINE | A line is added to a shipment. | `recordAuditEvent` — `manage-lines.ts` |
+| `shipment_line.updated` | SHIPMENT_LINE | A line's fields are edited. | `recordAuditEvent` — `manage-lines.ts` |
+| `shipment_line.removed` | SHIPMENT_LINE | A line is removed. | `recordAuditEvent` — `manage-lines.ts` |
+| `emission_determination.set` | SHIPMENT_LINE | A line's emission determination is set for the first time (DEFAULT or ACTUAL). | `recordAuditEvent` — `resolve-line-emissions.ts` / `determine-from-actual-data.ts` |
+| `emission_determination.redetermined` | SHIPMENT_LINE | An existing determination is overwritten. | `recordAuditEvent` — `resolve-line-emissions.ts` / `determine-from-actual-data.ts` |
+| `calculation.computed` | SHIPMENT_LINE | A line's CBAM calculation completes. | `recordAuditEvent` — `calculate-line.ts` (the one call site that also populates `correlation_id` — see **Correlation IDs**, below) |
+| `emission_data.recorded` | EMISSION_DATA | A new DRAFT emission_data record is entered. | `recordAuditEvent` — `manage-emission-data.ts` (`recordEmissionData`) |
+| `emission_data.submitted` | EMISSION_DATA | DRAFT → submitted for verification. | `recordAuditEvent` — `manage-emission-data.ts` (`AUDIT_EVENT_TYPE_BY_ACTION`) |
+| `emission_data.verified` | EMISSION_DATA | Submitted → verified. | `recordAuditEvent` — `manage-emission-data.ts` |
+| `emission_data.rejected` | EMISSION_DATA | Submitted → rejected. | `recordAuditEvent` — `manage-emission-data.ts` |
+| `emission_data.discarded` | EMISSION_DATA | A DRAFT record is discarded. | `recordAuditEvent` — `manage-emission-data.ts` |
+| `emission_data.activated` | EMISSION_DATA | A verified DRAFT record becomes ACTIVE. | `recordAuditEvent` — `manage-emission-data.ts` (`activateEmissionData`) |
+| `emission_data.superseded` | EMISSION_DATA | The prior ACTIVE record for that installation/period is retired by a new activation. | `recordAuditEvent` — `manage-emission-data.ts` (`activateEmissionData`, conditional on a prior ACTIVE row existing) |
+| `installation.created` | INSTALLATION | An installation is added. | `recordAuditEvent` — `manage-installations.ts` |
+| `installation.removed` | INSTALLATION | An installation is removed. | `recordAuditEvent` — `manage-installations.ts` |
+| `operator.created` | OPERATOR | An operator is added. | `recordAuditEvent` — `manage-operators.ts` |
+| `operator.removed` | OPERATOR | An operator is removed. | `recordAuditEvent` — `manage-operators.ts` |
+| `supplier.created` | SUPPLIER | A supplier is added. | `recordAuditEvent` — `manage-suppliers.ts` |
+| `supplier.removed` | SUPPLIER | A supplier is removed. | `recordAuditEvent` — `manage-suppliers.ts` |
+| `evidence.uploaded` | EVIDENCE_FILE | An evidence file is uploaded. | `recordAuditEvent` — `upload-evidence.ts` |
+| `evidence.removed` | EVIDENCE_FILE | An evidence file is removed. | `recordAuditEvent` — `upload-evidence.ts` |
+| `sharing_grant.issued` | SHARING_GRANT | A producer issues a sharing grant. | `recordAuditEvent` — `manage-sharing-grants.ts` (`issueSharingGrant`) |
+| `sharing_grant.accepted` | SHARING_GRANT | A grant is accepted — either directly, or via an email-invitation bootstrap; same event_type from both call sites. | `recordAuditEvent` — `manage-sharing-grants.ts` (`acceptSharingGrant`, `acceptSharingGrantInvitation`) |
+| `sharing_grant.revoked` | SHARING_GRANT | A producer revokes a grant. | `recordAuditEvent` — `manage-sharing-grants.ts` (`revokeSharingGrant`) |
+| `sharing_grant.data_consumed` | SHARING_GRANT | An importer determines/redetermines a line from a producer's shared data — recorded on the **grantor's** org_id, not the importer's. | SQL RPC: `record_shared_data_consumption()` (`20260829310000`), called from `determine-from-actual-data.ts` |
+
+### Correlation IDs
+
+Verified for this pass by grepping every `recordAuditEvent` call site
+under `src/application/` for a `correlationId:` argument, every
+`SECURITY DEFINER` SQL RPC under `supabase/migrations/*.sql` that
+inserts into `audit_events` for a `correlation_id` column in its
+INSERT, and every call site of `createRequestId()`
+(`src/infrastructure/observability/logger.ts`). This is a verification
+pass, not an implementation one — `docs/plans/MASTER_PLAN.md` §38's P8
+contract lists "correlation-ID verification" as in-scope and "new data
+capture" as non-scope, so nothing below was changed to make it true; it
+is reported as found.
+
+- **What's actually linked today.** One pair of rows, in two different
+  tables, share a `correlation_id`: `calculateLine`'s
+  `calculation_results` insert and the `calculation.computed` audit
+  event that follows it in the same function
+  (`src/application/calculations/calculate-line.ts`) both get the same
+  `randomUUID()`. That function's own doc comment explains why — so a
+  future reproduction check can flag any `calculation_results` row with
+  no matching audit event as suspect, given that `calculation_results`
+  accepts a direct client-side INSERT rather than routing through a
+  recomputing RPC — and tracks the larger fix (an RPC that recomputes
+  and compares, or removing the direct INSERT) as a named P11
+  hardening item from the mandatory P6 review, deliberately not
+  redesigned here. This is the *only* place in the codebase where two
+  rows in two different tables carry the same `correlation_id` value.
+  Every other `recordAuditEvent` call site — the twelve other files
+  under `src/application/` that call it — and all three
+  `SECURITY DEFINER` RPCs that insert into `audit_events` directly
+  (`create_organization_with_owner()` in `20260828090000`,
+  `accept_organization_invitation()` in `20260828130000`,
+  `record_shared_data_consumption()` in `20260829310000`) write
+  `correlation_id: null`, because none of them is ever handed a value
+  to write.
+- **What generates a correlation/request ID at all.** One thing does,
+  and it isn't wired to anything: `createRequestId()`
+  (`src/infrastructure/observability/logger.ts`) exists and is
+  unit-tested (`logger.test.ts` — non-empty, unique per call) for
+  exactly this purpose, per its own doc comment citing master plan
+  §21/§28 ("Request IDs on every action, threaded into logs and audit
+  events"). But it has no other caller anywhere in this codebase —
+  grep confirms `createRequestId` appears only in its own definition
+  and its own test. The one production caller of `log()` itself
+  (`app/api/health/route.ts`) doesn't call `createRequestId` either.
+  So there is no request-scoped ID generated per action/request today,
+  no propagation of one through logs, and `calculateLine`'s
+  `randomUUID()` is scoped to that one function call, not to the HTTP
+  request or server action invoking it — it is not, and was never
+  designed to be, the request-wide thread §21 describes.
+- **Known gap, not a defect.** Master plan §21 states plainly:
+  "Correlation IDs thread request → logs → audit events → calculation
+  rows." That thread does not exist today, outside the one
+  `calculation_results`/`calculation.computed` pair above — `logger.ts`
+  has the request-ID primitive ready and untouched, `record-audit-event.ts`
+  has the field ready and almost entirely unused, and the two are not
+  connected to each other or to anything upstream. This is disclosed
+  here rather than left for a reader to discover, per this codebase's
+  standing convention against documenting functionality that doesn't
+  exist. Full threading — one request-scoped ID generated per
+  action/request, propagated through `log()` calls, and attached to
+  every `audit_events` row and `calculation_results` row that request
+  produces — remains explicit future scope, not started by this pass.
+
 ## Related documents
 
 - [`DOMAIN_MODEL.md`](./DOMAIN_MODEL.md) — the product domain model
