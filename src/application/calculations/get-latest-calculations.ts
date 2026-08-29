@@ -16,10 +16,18 @@ import type {
 } from "../../domain/shared/reporting-period";
 
 import type {
+  CalculationResultId,
   ShipmentId,
 } from "../../domain/shared/ids";
 
 export interface LatestLineCalculation {
+  // Added for P8's "Verify reproducibility" check
+  // (reproduce-calculation-result.ts): that check operates on one
+  // calculation_results row by id, and this view row is the only place
+  // the UI has that id in hand -- get-latest-calculations.ts previously
+  // never surfaced it because nothing before P8 needed to address an
+  // individual calculation_results row from the client.
+  id: CalculationResultId;
   engine_version: EngineVersion;
   embedded_emissions_tco2e: DecimalString;
   steps: CalculationStep[];
@@ -27,6 +35,7 @@ export interface LatestLineCalculation {
 }
 
 interface CalculationResultRow {
+  id: string;
   line_id: string;
   engine_version: EngineVersion;
   embedded_emissions_tco2e: string;
@@ -63,7 +72,7 @@ export async function getLatestCalculationsByShipment(
     await supabase
       .from("latest_calculation_results")
       .select(
-        "line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at",
+        "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at",
       )
       .eq("shipment_id", shipmentId);
 
@@ -77,6 +86,7 @@ export async function getLatestCalculationsByShipment(
   for (const row of data as CalculationResultRow[]) {
     latestByLine[row.line_id] =
       {
+        id: row.id as CalculationResultId,
         engine_version: row.engine_version,
         embedded_emissions_tco2e: row.embedded_emissions_tco2e as DecimalString,
         steps: row.steps,

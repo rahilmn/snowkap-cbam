@@ -85,7 +85,7 @@ function quantityInput(
  * function's job -- see calculate-line-emissions.ts's own doc comment
  * on why an indeterminate sector does not block calculation).
  */
-async function resolveGoodSectorForActualLine(
+export async function resolveGoodSectorForActualLine(
   supabase: SupabaseClient,
   repository: RegulatoryRepository,
   shipmentId: string,
