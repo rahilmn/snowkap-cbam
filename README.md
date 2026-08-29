@@ -90,7 +90,7 @@ confirm.
   output. Re-verified locally this phase (real `docker build` + `docker
   run` + healthcheck + non-root-user check, after fixing a real
   Dockerfile defect the build-arg wiring had — see
-  `docs/runbooks/DEPLOYMENT.md` §3 and §8). Not yet deployed anywhere
+  `docs/runbooks/DEPLOYMENT.md` §3 and §9). Not yet deployed anywhere
   (no Railway account access in this environment).
 - **Data pipeline** (`scripts/regulatory/*.py`) — parses, validates,
   reconciles, and loads the CBAM regulatory dataset from its source

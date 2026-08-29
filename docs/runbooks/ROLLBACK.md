@@ -95,7 +95,7 @@ Two paths, in order of preference:
    being the deploy target going forward (not just for this one
    rollback), use `git revert` to create a new commit undoing it rather
    than force-pushing or rewriting history — then let the normal
-   staging→production pipeline (`DEPLOYMENT.md` §5–7) redeploy that
+   staging→production pipeline (`DEPLOYMENT.md` §6–8) redeploy that
    revert commit. Never force-push `main` as part of a rollback.
 
 ### Confirm the rollback succeeded

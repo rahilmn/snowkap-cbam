@@ -232,7 +232,46 @@ Supabase outage or dataset misconfiguration (see
 behavior for a transient startup race or a bad container that a fresh
 process might clear.
 
-## 5. Where staging and production diverge
+## 5. Supabase Auth settings — a required, not-yet-actionable production step
+
+**P13 review, finding S3.** `supabase/config.toml`'s `[auth.email]
+enable_confirmations = false` (and `[auth.sms] enable_confirmations =
+false`) governs the **local** `supabase start` dev stack only — this
+file has no effect on a staging or production Supabase project's own
+Auth configuration, which is set per-project via the Supabase dashboard
+(Authentication → Providers → Email) or the Management API, entirely
+outside this repo's version control. Leaving confirmations off locally
+is deliberate and correct (it lets local sign-up/sign-in flows work
+without a real mail server); it is not evidence about, and must not be
+mistaken for, what staging or production actually has configured.
+
+Master plan §14 is explicit that the intended design is "confirmations
+on, hardened password policy (the stock 6-char local default is
+explicitly raised)" — this document cannot verify or set that today,
+for the same reason the rest of this runbook is "designed but
+unexecuted" per its own header: **no staging or production Supabase
+project exists yet in this environment.** This is recorded here as a
+required step for whoever provisions those projects (master plan §41's
+"Production Supabase/Railway/DNS provisioning" owner-input item), not
+as something this codebase change can complete on its own:
+
+- [ ] Staging Supabase project: Authentication → Providers → Email →
+      "Confirm email" **enabled**.
+- [ ] Production Supabase project: same setting, independently (§6
+      below — staging and production are separate projects; this is
+      not inherited from one to the other).
+- [ ] Password policy: raise the minimum length beyond Supabase's stock
+      6-character default, per master plan §14's "hardened password
+      policy" language, on both projects independently.
+- [ ] Re-verify `supabase/config.toml`'s local settings are unchanged by
+      this (they should stay `enable_confirmations = false` for local
+      dev — do not "fix" this file itself, it was never the actual gap).
+
+Do not claim this finding "fixed" until each box above is checked
+against a real project and re-verified by an authenticated sign-up
+attempt actually requiring email confirmation before first sign-in.
+
+## 6. Where staging and production diverge
 
 Per master plan §29: **staging and production are separate Railway
 environments *and* separate Supabase projects** — not one Railway
@@ -265,7 +304,7 @@ deploy) and does not yet exist as a separate written procedure; treat
 with owner sign-off" as the standing rule per §29/§43 until a dedicated
 migration-promotion runbook is written.
 
-## 6. Deployment procedure (staging)
+## 7. Deployment procedure (staging)
 
 1. Confirm the commit on `main` passed CI (§1) — check the GitHub
    Actions run for that commit, not just that CI "usually" passes.
@@ -290,7 +329,7 @@ migration-promotion runbook is written.
    - Skim the first minute of Railway logs for unexpected `"level":"error"`
      lines (see `OPERATIONAL_DIAGNOSTICS.md` for how to read them).
 
-## 7. Deployment procedure (production promotion)
+## 8. Deployment procedure (production promotion)
 
 Production promotion requires owner participation per master plan §29
 ("production promotes via runbook with owner participation") and §34.
@@ -306,12 +345,12 @@ not exist yet in this environment to document precisely.
 
 1. Owner sign-off to proceed (per §29/§34 — this is a human gate, not
    an automatic one).
-2. Apply the same migrations already applied to staging in step 6.2,
+2. Apply the same migrations already applied to staging in step 7.2,
    now to the production Supabase project — staging-first, already
    proven, per §43.
 3. Promote the staging-verified build to the production Railway
    environment.
-4. Repeat step 6.4–6.5's healthcheck and manual verification against
+4. Repeat step 7.4–7.5's healthcheck and manual verification against
    the production URL.
 5. Confirm `GIT_SHA` on `/status` and `/api/health` matches the
    intended release commit in production specifically, not just that
@@ -320,7 +359,7 @@ not exist yet in this environment to document precisely.
 If anything in steps 3–5 goes wrong, stop and go to `ROLLBACK.md`
 rather than attempting to force the deploy through.
 
-## 8. Local verification, honestly
+## 9. Local verification, honestly
 
 `README.md` documents that this repo's Dockerfile/`railway.json`
 combination has previously been "verified to build and serve correctly
