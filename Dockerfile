@@ -26,6 +26,23 @@ COPY . .
 # surfaces it as NEXT_PUBLIC_GIT_SHA, and the /api/health route.
 ARG GIT_SHA=unknown
 ENV GIT_SHA=${GIT_SHA}
+
+# `next build` statically prerenders every app/**/page.tsx by default.
+# Every authenticated page reads process.env.NEXT_PUBLIC_SUPABASE_URL /
+# NEXT_PUBLIC_SUPABASE_ANON_KEY via getServerSupabaseClient()
+# (src/infrastructure/supabase/server-client.ts) *before* it calls
+# cookies() -- so if these are unset, the resulting throw happens too
+# early for Next's automatic dynamic-API bailout to kick in, and the
+# whole build fails instead of the page simply being marked dynamic.
+# These are the anon/publishable key (safe to embed in a client bundle,
+# same as their NEXT_PUBLIC_ prefix implies) -- not the service-role key,
+# which stays a runtime-only env var (see the run stage below / railway.json).
+# Railway auto-populates ARGs whose names match a configured project
+# variable, so this mirrors GIT_SHA's existing pattern.
+ARG NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
 RUN pnpm build
 
 # ---- run: minimal runtime image --------------------------------------------
