@@ -6,7 +6,9 @@ import {
 
 import {
   acceptSharingGrant,
+  acceptSharingGrantInvitation,
   issueSharingGrant,
+  listMyPendingSharingGrantInvitations,
   listSharingGrantsIssued,
   listSharingGrantsReceived,
   revokeSharingGrant,
@@ -86,6 +88,7 @@ interface Recorder {
 function makeMockSupabase(
   tables: Record<string, { data: unknown; error: unknown } | { data: unknown; error: unknown }[]>,
   recorder: Recorder = { fromCalls: [], ops: [] },
+  rpcResult?: { data: unknown; error: unknown },
 ) {
   const cursors: Record<string, number> = {};
 
@@ -136,6 +139,10 @@ function makeMockSupabase(
         filters.push([col, val]);
         return chain;
       },
+      not: (col: string, op: string, val: unknown) => {
+        filters.push([col, `not.${op}:${String(val)}`]);
+        return chain;
+      },
       order: () => chain,
       insert: (payload: unknown) => {
         recorder.ops.push({ table, op: "insert", payload, filters });
@@ -173,6 +180,20 @@ function makeMockSupabase(
     from: (table: string) => {
       recorder.fromCalls.push(table);
       return builder(table);
+    },
+
+    // Only exercised by acceptSharingGrantInvitation -- every other
+    // function in this file talks to sharing_grants via plain
+    // from()/select()/update(), same as acceptSharingGrant/
+    // revokeSharingGrant above.
+    rpc: (fnName: string, args: unknown) => {
+      recorder.ops.push(
+        { table: `rpc:${fnName}`, op: "insert", payload: args, filters: [] },
+      );
+
+      return Promise.resolve(
+        rpcResult ?? { data: null, error: null },
+      );
     },
   } as never;
 }
@@ -435,6 +456,138 @@ describe(
           (auditOp?.payload as { event_type: string }).event_type,
         ).toBe(
           "sharing_grant.issued",
+        );
+      },
+    );
+
+    // Bootstrap path (P7-D2, 20260829300000): the producer doesn't yet
+    // know the importer's org, so granteeOrgId is omitted and
+    // invitedEmail carries the address instead.
+    it(
+      "creates an INVITED grant with invited_email (bootstrap path) when granteeOrgId is omitted",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const bootstrapRow =
+          {
+            ...baseRow,
+            grantee_org_id: null,
+            invited_email: "buyer@example.com",
+          };
+
+        const result =
+          await issueSharingGrant(
+            makeMockSupabase(
+              {
+                installations: { data: { org_id: "org-1" }, error: null },
+                sharing_grants: { data: bootstrapRow, error: null },
+              },
+              recorder,
+            ),
+            adminContext,
+            {
+              installationId: "installation-1" as never,
+              invitedEmail: "  Buyer@Example.com  ",
+            },
+          );
+
+        expect(result).toEqual(
+          {
+            status: "OK",
+            grant: expect.objectContaining(
+              { status: "INVITED", grantee_org_id: null, invited_email: "buyer@example.com" },
+            ),
+          },
+        );
+
+        const insertOp =
+          recorder.ops.find(
+            (op) => op.table === "sharing_grants" && op.op === "insert",
+          );
+
+        expect(
+          insertOp?.payload,
+        ).toMatchObject(
+          { invited_email: "buyer@example.com", grantee_org_id: null },
+        );
+      },
+    );
+
+    it(
+      "rejects INVALID_INPUT when neither granteeOrgId nor invitedEmail is provided, without touching the database",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await issueSharingGrant(
+            makeMockSupabase(
+              {},
+              recorder,
+            ),
+            adminContext,
+            { installationId: "installation-1" as never },
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "INVALID_INPUT" },
+        );
+
+        expect(recorder.fromCalls).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "rejects INVALID_INPUT when both granteeOrgId and invitedEmail are provided, without touching the database",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await issueSharingGrant(
+            makeMockSupabase(
+              {},
+              recorder,
+            ),
+            adminContext,
+            { ...validInput, invitedEmail: "buyer@example.com" },
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "INVALID_INPUT" },
+        );
+
+        expect(recorder.fromCalls).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "rejects INVALID_INPUT when invitedEmail is not a valid email shape, without touching the database",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await issueSharingGrant(
+            makeMockSupabase(
+              {},
+              recorder,
+            ),
+            adminContext,
+            { installationId: "installation-1" as never, invitedEmail: "not-an-email" },
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "INVALID_INPUT" },
+        );
+
+        expect(recorder.fromCalls).toEqual(
+          [],
         );
       },
     );
@@ -776,6 +929,345 @@ describe(
           (auditOp?.payload as { event_type: string }).event_type,
         ).toBe(
           "sharing_grant.revoked",
+        );
+      },
+    );
+  },
+);
+
+// Bootstrap accept path (P7-D2, 20260829300000) -- unlike acceptSharingGrant
+// above (a bare CAS UPDATE), this is RPC-backed
+// (accept_sharing_grant_invitation(), 20260829300000) because no bare RLS
+// UPDATE policy can cover "grantee_org_id resolves from null for the first
+// time" -- same reasoning acceptInvitation's own RPC-mapping tests
+// (src/application/organizations/invitations.test.ts) already establish
+// for accept_organization_invitation.
+describe(
+  "acceptSharingGrantInvitation",
+  () => {
+    it(
+      "maps OK and records a sharing_grant.accepted audit event",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await acceptSharingGrantInvitation(
+            makeMockSupabase(
+              {
+                audit_events: { data: null, error: null },
+              },
+              recorder,
+              {
+                data: [{ result_status: "OK", result_org_id: "org-2" }],
+                error: null,
+              },
+            ),
+            granteeMemberContext,
+            "grant-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "OK", orgId: "org-2" },
+        );
+
+        const auditOp =
+          recorder.ops.find(
+            (op) => op.table === "audit_events" && op.op === "insert",
+          );
+
+        expect(auditOp).toBeDefined();
+
+        expect(
+          (auditOp?.payload as { event_type: string }).event_type,
+        ).toBe(
+          "sharing_grant.accepted",
+        );
+      },
+    );
+
+    it(
+      "maps EXPIRED and does not record an audit event",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await acceptSharingGrantInvitation(
+            makeMockSupabase(
+              {},
+              recorder,
+              {
+                data: [{ result_status: "EXPIRED", result_org_id: null }],
+                error: null,
+              },
+            ),
+            granteeMemberContext,
+            "grant-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "EXPIRED" },
+        );
+
+        expect(
+          recorder.ops.some((op) => op.table === "audit_events"),
+        ).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "maps EMAIL_MISMATCH -- a stranger whose authenticated email doesn't match invited_email cannot accept",
+      async () => {
+        const result =
+          await acceptSharingGrantInvitation(
+            makeMockSupabase(
+              {},
+              { fromCalls: [], ops: [] },
+              {
+                data: [{ result_status: "EMAIL_MISMATCH", result_org_id: null }],
+                error: null,
+              },
+            ),
+            granteeMemberContext,
+            "grant-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "EMAIL_MISMATCH" },
+        );
+      },
+    );
+
+    it(
+      "maps NOT_PENDING (also covers the RPC's ALREADY_ACTIVE case -- an already-ACTIVE or REVOKED grant cannot be re-accepted)",
+      async () => {
+        const alreadyActive =
+          await acceptSharingGrantInvitation(
+            makeMockSupabase(
+              {},
+              { fromCalls: [], ops: [] },
+              {
+                data: [{ result_status: "ALREADY_ACTIVE", result_org_id: "org-2" }],
+                error: null,
+              },
+            ),
+            granteeMemberContext,
+            "grant-1" as never,
+          );
+
+        expect(alreadyActive).toEqual(
+          { status: "NOT_PENDING" },
+        );
+
+        const notPending =
+          await acceptSharingGrantInvitation(
+            makeMockSupabase(
+              {},
+              { fromCalls: [], ops: [] },
+              {
+                data: [{ result_status: "NOT_PENDING", result_org_id: null }],
+                error: null,
+              },
+            ),
+            granteeMemberContext,
+            "grant-1" as never,
+          );
+
+        expect(notPending).toEqual(
+          { status: "NOT_PENDING" },
+        );
+      },
+    );
+
+    it(
+      "maps SELF_GRANT_NOT_ALLOWED",
+      async () => {
+        const result =
+          await acceptSharingGrantInvitation(
+            makeMockSupabase(
+              {},
+              { fromCalls: [], ops: [] },
+              {
+                data: [{ result_status: "SELF_GRANT_NOT_ALLOWED", result_org_id: null }],
+                error: null,
+              },
+            ),
+            adminContext,
+            "grant-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "SELF_GRANT_NOT_ALLOWED" },
+        );
+      },
+    );
+
+    it(
+      "maps NOT_A_MEMBER -- defense-in-depth against a caller-supplied org id the caller doesn't actually belong to",
+      async () => {
+        const result =
+          await acceptSharingGrantInvitation(
+            makeMockSupabase(
+              {},
+              { fromCalls: [], ops: [] },
+              {
+                data: [{ result_status: "NOT_A_MEMBER", result_org_id: null }],
+                error: null,
+              },
+            ),
+            granteeMemberContext,
+            "grant-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "NOT_A_MEMBER" },
+        );
+      },
+    );
+
+    it(
+      "maps NOT_FOUND when the RPC errors",
+      async () => {
+        const result =
+          await acceptSharingGrantInvitation(
+            makeMockSupabase(
+              {},
+              { fromCalls: [], ops: [] },
+              { data: null, error: { message: "boom" } },
+            ),
+            granteeMemberContext,
+            "grant-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "NOT_FOUND" },
+        );
+      },
+    );
+  },
+);
+
+describe(
+  "listMyPendingSharingGrantInvitations",
+  () => {
+    it(
+      "maps rows with the resolved grantor organization name and installation name",
+      async () => {
+        const bootstrapRow =
+          {
+            ...baseRow,
+            grantee_org_id: null,
+            invited_email: "buyer@example.com",
+          };
+
+        const result =
+          await listMyPendingSharingGrantInvitations(
+            makeMockSupabase(
+              {
+                sharing_grants: { data: [bootstrapRow], error: null },
+                organizations: { data: [{ id: "org-1", name: "Acme Steel" }], error: null },
+                installations: { data: [{ id: "installation-1", name: "Plant 1" }], error: null },
+              },
+            ),
+            "buyer@example.com",
+          );
+
+        expect(result).toEqual(
+          [
+            {
+              grant: expect.objectContaining(
+                { id: "grant-1", invited_email: "buyer@example.com" },
+              ),
+              grantorOrganizationName: "Acme Steel",
+              installationName: "Plant 1",
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "returns an empty array on a fetch error",
+      async () => {
+        const result =
+          await listMyPendingSharingGrantInvitations(
+            makeMockSupabase(
+              {
+                sharing_grants: { data: null, error: { message: "denied" } },
+              },
+            ),
+            "buyer@example.com",
+          );
+
+        expect(result).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "falls back to placeholder names when the lookup rows are missing",
+      async () => {
+        const bootstrapRow =
+          {
+            ...baseRow,
+            grantee_org_id: null,
+            invited_email: "buyer@example.com",
+          };
+
+        const result =
+          await listMyPendingSharingGrantInvitations(
+            makeMockSupabase(
+              {
+                sharing_grants: { data: [bootstrapRow], error: null },
+                organizations: { data: [], error: null },
+                installations: { data: [], error: null },
+              },
+            ),
+            "buyer@example.com",
+          );
+
+        expect(result).toEqual(
+          [
+            {
+              grant: expect.objectContaining(
+                { id: "grant-1" },
+              ),
+              grantorOrganizationName: "Unknown organization",
+              installationName: "Unknown installation",
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "returns an empty array (never a silent 'Unknown' placeholder) when either follow-up name lookup errors -- distinguishes a genuine lookup failure from a legitimately-empty result (2026-08-29 mandatory review fix)",
+      async () => {
+        const bootstrapRow =
+          {
+            ...baseRow,
+            grantee_org_id: null,
+            invited_email: "buyer@example.com",
+          };
+
+        const result =
+          await listMyPendingSharingGrantInvitations(
+            makeMockSupabase(
+              {
+                sharing_grants: { data: [bootstrapRow], error: null },
+                organizations: { data: null, error: { message: "statement timeout" } },
+                installations: { data: [{ id: "installation-1", name: "Plant 1" }], error: null },
+              },
+            ),
+            "buyer@example.com",
+          );
+
+        expect(result).toEqual(
+          [],
         );
       },
     );

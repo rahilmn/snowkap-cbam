@@ -69,7 +69,7 @@ const PRODUCER_NAV: NavItem[] = [
   { label: "Emissions", icon: BarChart3, href: "/emission-data" },
   { label: "Evidence", icon: ClipboardCheck },
   { label: "Verification", icon: FileCheck2 },
-  { label: "Sharing", icon: Share2 },
+  { label: "Sharing", icon: Share2, href: "/sharing" },
   { label: "Activity", icon: Activity },
 ];
 

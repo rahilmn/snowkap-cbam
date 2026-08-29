@@ -13,12 +13,28 @@ import {
 } from "../../src/infrastructure/supabase/server-client";
 
 import {
+  getCurrentOrgSummary,
+} from "../../src/application/organizations/get-current-org-context";
+
+import {
+  getPreferredOrgId,
+} from "../../components/shell/get-preferred-org-id";
+
+import {
   listMyPendingInvitations,
 } from "../../src/application/organizations/invitations";
 
 import {
+  listMyPendingSharingGrantInvitations,
+} from "../../src/application/sharing/manage-sharing-grants";
+
+import {
   AcceptInvitationList,
 } from "./accept-invitation-list";
+
+import {
+  AcceptSharingGrantList,
+} from "./accept-sharing-grant-list";
 
 /**
  * Not under app/(auth) -- that route group is deliberately for the
@@ -41,10 +57,29 @@ export default async function AcceptInvitationPage() {
     );
   }
 
-  const invitations =
-    await listMyPendingInvitations(
+  const orgSummary =
+    await getCurrentOrgSummary(
       supabase,
+      await getPreferredOrgId(),
     );
+
+  const [invitations, sharingGrantInvitations] =
+    await Promise.all(
+      [
+        listMyPendingInvitations(
+          supabase,
+        ),
+
+        listMyPendingSharingGrantInvitations(
+          supabase,
+          user.email ?? "",
+        ),
+      ],
+    );
+
+  const hasNothingPending =
+    invitations.length === 0 &&
+    sharingGrantInvitations.length === 0;
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-8 bg-[var(--surface-page)] p-6">
@@ -55,29 +90,50 @@ export default async function AcceptInvitationPage() {
           Pending invitations
         </h1>
 
-        {invitations.length === 0 ? (
+        {hasNothingPending ? (
           <p className="text-sm text-[var(--text-secondary)]">
             No pending invitations for {user.email}.
           </p>
         ) : (
-          <>
-            <p className="mb-4 text-sm text-[var(--text-secondary)]">
-              Signed in as {user.email}.
-            </p>
+          <p className="mb-4 text-sm text-[var(--text-secondary)]">
+            Signed in as {user.email}.
+          </p>
+        )}
 
-            <AcceptInvitationList
-              invitations={invitations.map(
+        {invitations.length > 0 ? (
+          <AcceptInvitationList
+            invitations={invitations.map(
+              (item) => (
+                {
+                  invitationId: item.invitation.id,
+                  organizationName: item.organizationName,
+                  role: item.invitation.role,
+                }
+              ),
+            )}
+          />
+        ) : null}
+
+        {sharingGrantInvitations.length > 0 ? (
+          <div className={invitations.length > 0 ? "mt-6 flex flex-col gap-2" : "flex flex-col gap-2"}>
+            <h2 className="text-sm font-medium text-[var(--text-secondary)]">
+              Pending data-sharing invitations
+            </h2>
+
+            <AcceptSharingGrantList
+              invitations={sharingGrantInvitations.map(
                 (item) => (
                   {
-                    invitationId: item.invitation.id,
-                    organizationName: item.organizationName,
-                    role: item.invitation.role,
+                    grantId: item.grant.id,
+                    grantorOrganizationName: item.grantorOrganizationName,
+                    installationName: item.installationName,
                   }
                 ),
               )}
+              activeOrganizationName={orgSummary?.organizationName ?? null}
             />
-          </>
-        )}
+          </div>
+        ) : null}
       </Card>
     </div>
   );

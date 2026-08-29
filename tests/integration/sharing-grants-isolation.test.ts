@@ -87,24 +87,34 @@ describe.skipIf(!localSupabaseReachable)(
     let producerOrgId: string;
     let importerOrgId: string;
     let strangerOrgId: string;
+    let invitedOrgId: string;
 
     let producerOwnerId: string;
     let producerMemberId: string;
     let importerOwnerId: string;
     let importerMemberId: string;
     let strangerOwnerId: string;
+    let invitedOwnerId: string;
 
     let clientProducerOwner: SupabaseClient;
     let clientProducerMember: SupabaseClient;
     let clientImporterOwner: SupabaseClient;
     let clientImporterMember: SupabaseClient;
     let clientStrangerOwner: SupabaseClient;
+    let clientInvitedOwner: SupabaseClient;
 
     let operatorId: string;
     let installationId: string;
     let activeVerifiedEmissionDataId: string;
     let grantId: string;
     let expiredGrantInstallationId: string;
+
+    // P7-D2 (20260829300000) bootstrap-by-email fixtures.
+    let invitedUserEmail: string;
+    let bootstrapInstallationId: string;
+    let bootstrapGrantId: string;
+    let revokedBootstrapGrantId: string;
+    let selfGrantBootstrapGrantId: string;
 
     async function signInAnonClient(
       email: string,
@@ -200,6 +210,32 @@ describe.skipIf(!localSupabaseReachable)(
 
       strangerOrgId = strangerOrg.id;
 
+      // A fourth org for the bootstrap-by-email accept path (P7-D2,
+      // 20260829300000) -- distinct from importerOrg (which already
+      // holds an ACTIVE direct grant used by the tests above) so
+      // accepting a bootstrap invite into this org doesn't interact with
+      // that fixture.
+      const { data: invitedOrg, error: invitedOrgError } =
+        await serviceClient
+          .from("organizations")
+          .insert(
+            {
+              name: `Sharing Isolation Invited ${runId}`,
+              slug: `sharing-isolation-invited-${runId}`,
+              capabilities: ["IMPORTER_DECLARANT"],
+            },
+          )
+          .select("id")
+          .single();
+
+      if (invitedOrgError || !invitedOrg) {
+        throw new Error(
+          `Failed to create invited org: ${invitedOrgError?.message}`,
+        );
+      }
+
+      invitedOrgId = invitedOrg.id;
+
       const password =
         `sharing-isolation-password-${runId}!`;
 
@@ -229,6 +265,10 @@ describe.skipIf(!localSupabaseReachable)(
       importerOwnerId = await createUser("importer-owner");
       importerMemberId = await createUser("importer-member");
       strangerOwnerId = await createUser("stranger-owner");
+      invitedOwnerId = await createUser("invited-owner");
+
+      invitedUserEmail =
+        `sharing-isolation-invited-owner-${runId}@example.com`;
 
       const { error: membershipError } =
         await serviceClient
@@ -240,6 +280,7 @@ describe.skipIf(!localSupabaseReachable)(
               { org_id: importerOrgId, user_id: importerOwnerId, role: "OWNER" },
               { org_id: importerOrgId, user_id: importerMemberId, role: "MEMBER" },
               { org_id: strangerOrgId, user_id: strangerOwnerId, role: "OWNER" },
+              { org_id: invitedOrgId, user_id: invitedOwnerId, role: "OWNER" },
             ],
           );
 
@@ -276,6 +317,12 @@ describe.skipIf(!localSupabaseReachable)(
       clientStrangerOwner =
         await signInAnonClient(
           `sharing-isolation-stranger-owner-${runId}@example.com`,
+          password,
+        );
+
+      clientInvitedOwner =
+        await signInAnonClient(
+          invitedUserEmail,
           password,
         );
 
@@ -503,6 +550,125 @@ describe.skipIf(!localSupabaseReachable)(
           `Failed to accept expiring grant: ${acceptExpiredError.message}`,
         );
       }
+
+      // ------------------------------------------------------------
+      // P7-D2 (20260829300000) bootstrap-by-email fixtures -- a real
+      // INSERT via the producer OWNER's own authenticated client
+      // (exercises sharing_grants_insert_own_org's bootstrap branch
+      // directly, same as the direct-grant INSERT above), grantee_org_id
+      // omitted, invited_email set instead.
+      // ------------------------------------------------------------
+
+      const { data: bootstrapInstallation, error: bootstrapInstallationError } =
+        await clientProducerOwner
+          .from("installations")
+          .insert(
+            {
+              operator_id: operatorId,
+              org_id: producerOrgId,
+              provenance: "OPERATOR_PROVIDED",
+              name: `Sharing Isolation Bootstrap Installation ${runId}`,
+              country: "DE",
+            },
+          )
+          .select("id")
+          .single();
+
+      if (bootstrapInstallationError || !bootstrapInstallation) {
+        throw new Error(
+          `Failed to create bootstrap installation: ${bootstrapInstallationError?.message}`,
+        );
+      }
+
+      bootstrapInstallationId = bootstrapInstallation.id;
+
+      const { data: bootstrapGrant, error: bootstrapGrantError } =
+        await clientProducerOwner
+          .from("sharing_grants")
+          .insert(
+            {
+              grantor_org_id: producerOrgId,
+              invited_email: invitedUserEmail,
+              installation_id: bootstrapInstallationId,
+              created_by_user_id: producerOwnerId,
+            },
+          )
+          .select("id")
+          .single();
+
+      if (bootstrapGrantError || !bootstrapGrant) {
+        throw new Error(
+          `Failed to issue bootstrap grant: ${bootstrapGrantError?.message}`,
+        );
+      }
+
+      bootstrapGrantId = bootstrapGrant.id;
+
+      // A second bootstrap invite, revoked before acceptance -- for the
+      // "a REVOKED invite cannot be accepted" case.
+      const { data: revokedBootstrapGrant, error: revokedBootstrapGrantError } =
+        await clientProducerOwner
+          .from("sharing_grants")
+          .insert(
+            {
+              grantor_org_id: producerOrgId,
+              invited_email: invitedUserEmail,
+              installation_id: bootstrapInstallationId,
+              created_by_user_id: producerOwnerId,
+            },
+          )
+          .select("id")
+          .single();
+
+      if (revokedBootstrapGrantError || !revokedBootstrapGrant) {
+        throw new Error(
+          `Failed to issue revoked bootstrap grant: ${revokedBootstrapGrantError?.message}`,
+        );
+      }
+
+      revokedBootstrapGrantId = revokedBootstrapGrant.id;
+
+      const { error: revokeBootstrapError } =
+        await clientProducerOwner
+          .from("sharing_grants")
+          .update(
+            { status: "REVOKED" },
+          )
+          .eq(
+            "id",
+            revokedBootstrapGrantId,
+          );
+
+      if (revokeBootstrapError) {
+        throw new Error(
+          `Failed to revoke bootstrap grant: ${revokeBootstrapError.message}`,
+        );
+      }
+
+      // A third bootstrap invite, addressed to the PRODUCER owner's own
+      // email -- for the SELF_GRANT_NOT_ALLOWED case (accepting into the
+      // grantor's own org).
+      const { data: selfGrantBootstrapGrant, error: selfGrantBootstrapGrantError } =
+        await clientProducerOwner
+          .from("sharing_grants")
+          .insert(
+            {
+              grantor_org_id: producerOrgId,
+              invited_email: `sharing-isolation-producer-owner-${runId}@example.com`,
+              installation_id: bootstrapInstallationId,
+              created_by_user_id: producerOwnerId,
+            },
+          )
+          .select("id")
+          .single();
+
+      if (selfGrantBootstrapGrantError || !selfGrantBootstrapGrant) {
+        throw new Error(
+          `Failed to issue self-grant bootstrap grant: ${selfGrantBootstrapGrantError?.message}`,
+        );
+      }
+
+      selfGrantBootstrapGrantId = selfGrantBootstrapGrant.id;
     });
 
     afterAll(async () => {
@@ -543,7 +709,7 @@ describe.skipIf(!localSupabaseReachable)(
         .delete()
         .in(
           "org_id",
-          [producerOrgId, importerOrgId, strangerOrgId],
+          [producerOrgId, importerOrgId, strangerOrgId, invitedOrgId],
         );
 
       await serviceClient
@@ -551,7 +717,7 @@ describe.skipIf(!localSupabaseReachable)(
         .delete()
         .in(
           "org_id",
-          [producerOrgId, importerOrgId, strangerOrgId],
+          [producerOrgId, importerOrgId, strangerOrgId, invitedOrgId],
         );
 
       await serviceClient
@@ -559,7 +725,7 @@ describe.skipIf(!localSupabaseReachable)(
         .delete()
         .in(
           "id",
-          [producerOrgId, importerOrgId, strangerOrgId],
+          [producerOrgId, importerOrgId, strangerOrgId, invitedOrgId],
         );
 
       for (
@@ -569,6 +735,7 @@ describe.skipIf(!localSupabaseReachable)(
           importerOwnerId,
           importerMemberId,
           strangerOwnerId,
+          invitedOwnerId,
         ]
       ) {
         await serviceClient.auth.admin.deleteUser(
@@ -829,6 +996,413 @@ describe.skipIf(!localSupabaseReachable)(
         ).toBe(
           7,
         );
+      },
+    );
+
+    // ------------------------------------------------------------
+    // P7-D2 (20260829300000): bootstrap-by-email accept path --
+    // accept_sharing_grant_invitation() and its three new pending-
+    // invitation SELECT policies.
+    // ------------------------------------------------------------
+
+    it(
+      "the invited user (matching email) sees the pending bootstrap grant, the grantor org's name, and the installation's name; a stranger sees none of it",
+      async () => {
+        const { data: invitedSeesGrant } =
+          await clientInvitedOwner
+            .from("sharing_grants")
+            .select("id, status, invited_email")
+            .eq(
+              "id",
+              bootstrapGrantId,
+            );
+
+        expect(invitedSeesGrant).toEqual(
+          [
+            { id: bootstrapGrantId, status: "INVITED", invited_email: invitedUserEmail },
+          ],
+        );
+
+        const { data: invitedSeesOrg } =
+          await clientInvitedOwner
+            .from("organizations")
+            .select("id")
+            .eq(
+              "id",
+              producerOrgId,
+            );
+
+        expect(invitedSeesOrg).toEqual(
+          [
+            { id: producerOrgId },
+          ],
+        );
+
+        const { data: invitedSeesInstallation } =
+          await clientInvitedOwner
+            .from("installations")
+            .select("id")
+            .eq(
+              "id",
+              bootstrapInstallationId,
+            );
+
+        expect(invitedSeesInstallation).toEqual(
+          [
+            { id: bootstrapInstallationId },
+          ],
+        );
+
+        const { data: strangerSeesGrant } =
+          await clientStrangerOwner
+            .from("sharing_grants")
+            .select("id")
+            .eq(
+              "id",
+              bootstrapGrantId,
+            );
+
+        expect(strangerSeesGrant).toEqual(
+          [],
+        );
+
+        const { data: strangerSeesOrg } =
+          await clientStrangerOwner
+            .from("organizations")
+            .select("id")
+            .eq(
+              "id",
+              producerOrgId,
+            );
+
+        expect(strangerSeesOrg).toEqual(
+          [],
+        );
+
+        const { data: strangerSeesInstallation } =
+          await clientStrangerOwner
+            .from("installations")
+            .select("id")
+            .eq(
+              "id",
+              bootstrapInstallationId,
+            );
+
+        expect(strangerSeesInstallation).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "a stranger whose authenticated email does not match invited_email cannot accept, regardless of which org id they pass",
+      async () => {
+        const { data } =
+          await clientStrangerOwner.rpc(
+            "accept_sharing_grant_invitation",
+            {
+              p_grant_id: bootstrapGrantId,
+              p_org_id: strangerOrgId,
+            },
+          );
+
+        const row =
+          (data as { result_status: string; result_org_id: string | null }[] | null)?.[0];
+
+        expect(row?.result_status).toBe(
+          "EMAIL_MISMATCH",
+        );
+
+        const { data: stillInvited } =
+          await serviceClient
+            .from("sharing_grants")
+            .select("status, grantee_org_id")
+            .eq(
+              "id",
+              bootstrapGrantId,
+            )
+            .single();
+
+        expect(stillInvited).toEqual(
+          { status: "INVITED", grantee_org_id: null },
+        );
+      },
+    );
+
+    it(
+      "the invited user cannot accept into an org they are not a member of, even though their email matches",
+      async () => {
+        const { data } =
+          await clientInvitedOwner.rpc(
+            "accept_sharing_grant_invitation",
+            {
+              p_grant_id: bootstrapGrantId,
+              p_org_id: strangerOrgId,
+            },
+          );
+
+        const row =
+          (data as { result_status: string; result_org_id: string | null }[] | null)?.[0];
+
+        expect(row?.result_status).toBe(
+          "NOT_A_MEMBER",
+        );
+
+        const { data: stillInvited } =
+          await serviceClient
+            .from("sharing_grants")
+            .select("status, grantee_org_id")
+            .eq(
+              "id",
+              bootstrapGrantId,
+            )
+            .single();
+
+        expect(stillInvited).toEqual(
+          { status: "INVITED", grantee_org_id: null },
+        );
+      },
+    );
+
+    it(
+      "the grantor cannot accept their own invitation into their own org",
+      async () => {
+        const { data } =
+          await clientProducerOwner.rpc(
+            "accept_sharing_grant_invitation",
+            {
+              p_grant_id: selfGrantBootstrapGrantId,
+              p_org_id: producerOrgId,
+            },
+          );
+
+        const row =
+          (data as { result_status: string; result_org_id: string | null }[] | null)?.[0];
+
+        expect(row?.result_status).toBe(
+          "SELF_GRANT_NOT_ALLOWED",
+        );
+      },
+    );
+
+    it(
+      "a REVOKED bootstrap invite cannot be accepted",
+      async () => {
+        const { data } =
+          await clientInvitedOwner.rpc(
+            "accept_sharing_grant_invitation",
+            {
+              p_grant_id: revokedBootstrapGrantId,
+              p_org_id: invitedOrgId,
+            },
+          );
+
+        const row =
+          (data as { result_status: string; result_org_id: string | null }[] | null)?.[0];
+
+        expect(row?.result_status).toBe(
+          "NOT_PENDING",
+        );
+      },
+    );
+
+    it(
+      "the correctly invited user accepts into their own active org, resolving grantee_org_id and granting the same read access a direct grant would", async () => {
+        const { data: acceptData } =
+          await clientInvitedOwner.rpc(
+            "accept_sharing_grant_invitation",
+            {
+              p_grant_id: bootstrapGrantId,
+              p_org_id: invitedOrgId,
+            },
+          );
+
+        const acceptRow =
+          (acceptData as { result_status: string; result_org_id: string | null }[] | null)?.[0];
+
+        expect(acceptRow).toEqual(
+          { result_status: "OK", result_org_id: invitedOrgId },
+        );
+
+        const { data: resolvedGrant } =
+          await serviceClient
+            .from("sharing_grants")
+            .select("status, grantee_org_id, invited_email")
+            .eq(
+              "id",
+              bootstrapGrantId,
+            )
+            .single();
+
+        expect(resolvedGrant).toEqual(
+          { status: "ACTIVE", grantee_org_id: invitedOrgId, invited_email: invitedUserEmail },
+        );
+
+        // The now-resolved grantee org reads the shared installation the
+        // same way the direct-grant tests above already prove for
+        // importerOrgId -- app.user_shared_installation_ids() does not
+        // distinguish how grantee_org_id was resolved.
+        const { data: installationsAfterAccept } =
+          await clientInvitedOwner
+            .from("installations")
+            .select("id")
+            .eq(
+              "id",
+              bootstrapInstallationId,
+            );
+
+        expect(installationsAfterAccept).toEqual(
+          [
+            { id: bootstrapInstallationId },
+          ],
+        );
+
+        // Re-accepting the now-ACTIVE grant is rejected, not a silent OK
+        // (same CAS discipline as acceptSharingGrant's own
+        // GRANT_NOT_INVITED case in manage-sharing-grants.ts).
+        const { data: reacceptData } =
+          await clientInvitedOwner.rpc(
+            "accept_sharing_grant_invitation",
+            {
+              p_grant_id: bootstrapGrantId,
+              p_org_id: invitedOrgId,
+            },
+          );
+
+        const reacceptRow =
+          (reacceptData as { result_status: string; result_org_id: string | null }[] | null)?.[0];
+
+        expect(reacceptRow?.result_status).toBe(
+          "ALREADY_ACTIVE",
+        );
+      },
+    );
+
+    it(
+      "rejects a bare client UPDATE that tries to resolve a bootstrap grant's grantee_org_id without going through accept_sharing_grant_invitation() -- the exact bypass the mandatory review found (BLOCKING) and this migration was fixed to close",
+      async () => {
+        // Make the producer owner ALSO a plain member of an unrelated
+        // org (strangerOrgId) -- the exploit's precondition ("an
+        // ordinary consultant-in-two-orgs setup", per the review). A
+        // direct service-role insert is the fixture-setup shape this
+        // whole file already uses; it is not itself part of what's
+        // being tested.
+        const { error: extraMembershipError } =
+          await serviceClient
+            .from("memberships")
+            .insert(
+              { org_id: strangerOrgId, user_id: producerOwnerId, role: "MEMBER" },
+            );
+
+        if (extraMembershipError) {
+          throw new Error(
+            `Failed to seed producer owner's second membership: ${extraMembershipError.message}`,
+          );
+        }
+
+        // A fresh bootstrap grant to attack -- reusing bootstrapGrantId
+        // would conflate this test with the already-accepted state
+        // asserted above.
+        const { data: targetGrant, error: targetGrantError } =
+          await clientProducerOwner
+            .from("sharing_grants")
+            .insert(
+              {
+                grantor_org_id: producerOrgId,
+                invited_email: `sharing-isolation-bypass-victim-${runId}@example.com`,
+                installation_id: bootstrapInstallationId,
+                created_by_user_id: producerOwnerId,
+              },
+            )
+            .select("id")
+            .single();
+
+        if (targetGrantError || !targetGrant) {
+          throw new Error(
+            `Failed to issue the target bootstrap grant: ${targetGrantError?.message}`,
+          );
+        }
+
+        // Variant 1 (forged acceptance): the producer owner, using the
+        // revoke policy's own USING clause (admin of the grantor org,
+        // row not yet terminal) to reach the row, tries to smuggle an
+        // accept-shaped UPDATE past the OR-combined WITH CHECK by
+        // choosing a grantee_org_id they belong to.
+        const { error: forgedAcceptError } =
+          await clientProducerOwner
+            .from("sharing_grants")
+            .update(
+              { status: "ACTIVE", grantee_org_id: strangerOrgId },
+            )
+            .eq(
+              "id",
+              targetGrant.id,
+            );
+
+        expect(forgedAcceptError).not.toBeNull();
+
+        // Variant 2 (arbitrary-org row injection): same actor, same
+        // row, but landing on REVOKED -- the revoke policy's own WITH
+        // CHECK never constrained grantee_org_id at all.
+        const { error: injectionError } =
+          await clientProducerOwner
+            .from("sharing_grants")
+            .update(
+              { status: "REVOKED", grantee_org_id: strangerOrgId },
+            )
+            .eq(
+              "id",
+              targetGrant.id,
+            );
+
+        expect(injectionError).not.toBeNull();
+
+        // Prove it via the service-role client too, not just "an error
+        // was returned" -- the row must be completely untouched: still
+        // INVITED, still no grantee, no accept ever recorded.
+        const { data: untouchedRow } =
+          await serviceClient
+            .from("sharing_grants")
+            .select("status, grantee_org_id")
+            .eq("id", targetGrant.id)
+            .single();
+
+        expect(untouchedRow).toEqual(
+          { status: "INVITED", grantee_org_id: null },
+        );
+
+        // Column-tampering the SAME row via the trigger's other guards
+        // (unrelated to this bug, but this is the only test that builds
+        // a disposable bootstrap row -- cheap to also lock in here)
+        // still raises, confirming the security fix didn't loosen
+        // anything else on this path.
+        const { error: tamperError } =
+          await clientProducerOwner
+            .from("sharing_grants")
+            .update(
+              { invited_email: "someone-else@example.com" },
+            )
+            .eq(
+              "id",
+              targetGrant.id,
+            );
+
+        expect(tamperError).not.toBeNull();
+
+        await serviceClient
+          .from("memberships")
+          .delete()
+          .match(
+            { org_id: strangerOrgId, user_id: producerOwnerId },
+          );
+
+        await serviceClient
+          .from("sharing_grants")
+          .delete()
+          .eq(
+            "id",
+            targetGrant.id,
+          );
       },
     );
   },
