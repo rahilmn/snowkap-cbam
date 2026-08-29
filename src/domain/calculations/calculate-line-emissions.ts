@@ -109,6 +109,21 @@ function unitMatchesQuantityBasis(
   const normalized =
     emissionUnit.toUpperCase().replace(/\s+/g, "");
 
+  // The NUMERATOR must be tonnes-of-CO2e ("TCO2E" or "TCO2") -- this
+  // function previously checked only the denominator, so a genuinely
+  // standard industrial intensity unit like "kgCO2e/t" passed the "/T"
+  // denominator check and was silently treated as if it were "tCO2e/t",
+  // overstating embedded emissions 1000x (P13 adversarial audit,
+  // live-reproduced). Anchored on this codebase's own two established
+  // separator conventions -- a slash ("TCO2E/T") or "_PER_"
+  // ("TCO2E_PER_TONNE", the regulatory dataset's own spelling) -- rather
+  // than a bare substring check, so "KGCO2E/T"/"KTCO2E/T"/"GCO2E/T"/
+  // "LBCO2E/T" are rejected outright instead of only failing the
+  // denominator half.
+  if (!/^TCO2E?(?:\/|_PER_|$)/.test(normalized)) {
+    return false;
+  }
+
   return netMassTonnes !== null
     ? normalized.includes("TONNE") || /\/T(?![A-Z0-9])/.test(normalized)
     : normalized.includes("MWH");

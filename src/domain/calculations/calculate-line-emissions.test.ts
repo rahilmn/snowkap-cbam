@@ -520,6 +520,58 @@ describe(
     );
 
     it(
+      "rejects a mass-denominated unit whose NUMERATOR isn't tonnes-of-CO2e -- 'kgCO2e/t' must not be accepted as if it were 'tCO2e/t' (P13 adversarial audit: the denominator-only check let a genuinely standard industrial intensity unit silently overstate embedded emissions 1000x)",
+      () => {
+        const numeratorMismatches =
+          [
+            "kgCO2e/t",
+            "gCO2e/t",
+            "ktCO2e/t",
+            "lbCO2e/t",
+            "kgCO2e/MWh",
+          ];
+
+        for (const unit of numeratorMismatches) {
+          const result =
+            calculateLineEmissions(
+              {
+                net_mass_tonnes: "10" as never,
+                quantity_mwh: unit.endsWith("/MWh") ? "10" as never : null,
+                emission_determination: actualDetermination(
+                  { direct_specific: "3.0" as never, indirect_specific: "0.5" as never },
+                  unit,
+                ),
+              },
+            );
+
+          expect(result).toEqual(
+            { status: "UNIT_UNSUPPORTED", engine_version: ENGINE_VERSION },
+          );
+        }
+
+        // Control: the genuine tCO2e numerator, same denominators, still
+        // computes -- this test must fail for a numerator reason, not by
+        // accidentally breaking the denominator check the sibling test
+        // above already covers.
+        const genuine =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10" as never,
+              quantity_mwh: null,
+              emission_determination: actualDetermination(
+                { direct_specific: "3.0" as never, indirect_specific: "0.5" as never },
+                "tCO2e/t",
+              ),
+            },
+          );
+
+        expect(genuine.status).toBe(
+          "COMPUTED",
+        );
+      },
+    );
+
+    it(
       "returns VALUE_UNAVAILABLE (never a computed value) for an ACTUAL snapshot whose verification.status is not VERIFIED -- defense in depth: the type-level Extract<VerificationStatus, 'VERIFIED'> guarantee does not survive a JSONB round-trip at runtime (found in the mandatory RULE-EE-009 engine review), the same reasoning RULE-EE-001 already applies to a non-AVAILABLE resolved total",
       () => {
         const determination =

@@ -29,8 +29,23 @@ import type {
 export type EngineVersion =
   string;
 
+// 2026-08-29 (P13 adversarial audit): bumped 1.1.0 -> 1.2.0 for the
+// unitMatchesQuantityBasis numerator-validation fix
+// (calculate-line-emissions.ts) -- a genuine behavioral change (a unit
+// string this engine previously accepted, e.g. "kgCO2e/t", now
+// correctly returns UNIT_UNSUPPORTED instead of a 1000x-overstated
+// COMPUTED value). Also closes a separately-found gap the same audit
+// named: three prior behavioral changes (the original UNIT_UNSUPPORTED
+// guard, the "/T" substring-trap fix, and the ANNEX_II_SECTORS gate)
+// all shipped without a version bump, so "same inputs + engine_version
+// => byte-identical output" was not actually true of every
+// calculation_results row carrying "1.1.0" -- see the P13 release
+// readiness report for the historical rows this cannot retroactively
+// fix (rewriting engine_version on already-persisted, append-only rows
+// would itself violate the append-only/never-mutate-history invariant
+// this column exists to protect).
 export const ENGINE_VERSION: EngineVersion =
-  "1.1.0";
+  "1.2.0";
 
 /**
  * Identifies one ACTIVE regulatory dataset the calculation engine read
