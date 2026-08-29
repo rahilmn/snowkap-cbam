@@ -58,8 +58,8 @@ const IMPORTER_NAV: NavItem[] = [
   { label: "Suppliers", icon: Truck, href: "/suppliers" },
   { label: "Installations", icon: Factory },
   { label: "Audit", icon: ScrollText, href: "/audit" },
-  { label: "Reports", icon: FileStack },
-  { label: "Declarations", icon: FileCheck2 },
+  { label: "Reports", icon: FileStack, href: "/reports" },
+  { label: "Declarations", icon: FileCheck2, href: "/declarations" },
 ];
 
 const PRODUCER_NAV: NavItem[] = [
