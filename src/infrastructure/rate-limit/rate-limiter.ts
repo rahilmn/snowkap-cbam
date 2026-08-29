@@ -32,6 +32,29 @@
  * src/application/organizations/manage-membership.ts) -- this module
  * itself never touches the real clock.
  *
+ * E2E-HARNESS ESCAPE HATCH (2026-08-30, P13 final non-blocked-work
+ * round): running the Playwright suite as one batch self-trips these
+ * same limiters (documented at length in
+ * docs/plans/P13_RELEASE_READINESS_REPORT.md §16.8/§26) -- the suite's
+ * own natural sign-up/mutation volume exceeds several limiters'
+ * budgets within a single 10-minute run, regardless of worker count,
+ * since every local Playwright request shares one client IP against
+ * one dev-server process. `DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS`
+ * (checked once per `createInMemoryRateLimiter` call, exact string
+ * `"true"` only -- no other truthy-looking value activates it) makes
+ * every limiter unconditionally allow every attempt, restoring
+ * deterministic E2E runs without touching a single limit/window value
+ * real traffic is ever measured against. This does NOT weaken
+ * production: the flag is set only in playwright.config.ts's own
+ * `webServer.env` (the process Playwright itself starts for CI and for
+ * a fresh local run), is not among the documented Railway runtime
+ * variables (docs/architecture/ENVIRONMENT.md, .env.example), and a
+ * developer's own `pnpm dev` never sets it unless they explicitly
+ * export it themselves. The name is deliberately loud (matching this
+ * codebase's own `dangerouslyDisableSandbox`-style convention for an
+ * intentional safety bypass) so it can never be mistaken for an
+ * ordinary config value if it ever turned up somewhere it shouldn't.
+ *
  * BOUNDED KEY COUNT (2026-08-29, P11 mandatory security review,
  * SHOULD-FIX finding #3/N1, independently confirmed live): `hitsByKey`
  * previously grew by one entry per distinct KEY forever, with no
@@ -112,6 +135,11 @@ export interface RateLimiter {
 export function createInMemoryRateLimiter(
   config: RateLimitConfig,
 ): RateLimiter {
+  // See this file's header comment ("E2E-HARNESS ESCAPE HATCH") --
+  // read once per limiter instance, exact string "true" only.
+  const bypassForE2eTests =
+    process.env.DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS === "true";
+
   const hitsByKey =
     new Map<string, number[]>();
 
@@ -146,6 +174,13 @@ export function createInMemoryRateLimiter(
       key: string,
       nowMs: number,
     ): RateLimitCheckResult {
+      if (bypassForE2eTests) {
+        return {
+          allowed: true,
+          retryAfterMs: 0,
+        };
+      }
+
       const windowStart =
         nowMs - config.windowMs;
 

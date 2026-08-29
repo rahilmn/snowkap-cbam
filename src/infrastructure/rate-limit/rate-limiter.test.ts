@@ -1,12 +1,18 @@
 import {
+  afterEach,
   describe,
   expect,
   it,
+  vi,
 } from "vitest";
 
 import {
   createInMemoryRateLimiter,
 } from "./rate-limiter";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe(
   "createInMemoryRateLimiter",
@@ -192,6 +198,61 @@ describe(
         }
 
         expect(limiter.check("ip-fresh", 0).allowed).toBe(true);
+      },
+    );
+
+    it(
+      "bypasses the limit entirely when DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS='true' -- the E2E-harness escape hatch, off by default",
+      () => {
+        vi.stubEnv(
+          "DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS",
+          "true",
+        );
+
+        const limiter =
+          createInMemoryRateLimiter(
+            { limit: 1, windowMs: 1000 },
+          );
+
+        // limit=1: a real limiter would reject every attempt after the
+        // first. Every one of these still reports allowed:true,
+        // proving the bypass short-circuits before the sliding-window
+        // logic ever runs, not that this particular scenario happens
+        // to fit under a real limit.
+        for (let i = 0; i < 10; i += 1) {
+          expect(limiter.check("ip-1", i).allowed).toBe(true);
+        }
+      },
+    );
+
+    it(
+      "ignores the bypass flag unless its value is exactly the string 'true' -- no truthy-but-unintended value activates it",
+      () => {
+        vi.stubEnv(
+          "DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS",
+          "1",
+        );
+
+        const limiter =
+          createInMemoryRateLimiter(
+            { limit: 1, windowMs: 1000 },
+          );
+
+        expect(limiter.check("ip-1", 0).allowed).toBe(true);
+        expect(limiter.check("ip-1", 1).allowed).toBe(false);
+      },
+    );
+
+    it(
+      "enforces the real limit when the bypass flag is unset (the default -- covers every production/normal-dev process)",
+      () => {
+        const limiter =
+          createInMemoryRateLimiter(
+            { limit: 1, windowMs: 1000 },
+          );
+
+        expect(limiter.check("ip-1", 0).allowed).toBe(true);
+        expect(limiter.check("ip-1", 1).allowed).toBe(false);
       },
     );
 

@@ -46,6 +46,18 @@ export default defineConfig(
       url: "http://localhost:3000",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
+
+      // 2026-08-30 (P13 §16.8/§26): the suite's own natural sign-up/
+      // mutation volume self-trips the app's real rate limiters within
+      // one run -- see src/infrastructure/rate-limit/rate-limiter.ts's
+      // "E2E-HARNESS ESCAPE HATCH" header comment for the full
+      // reasoning and why this is safe. Only reaches the server
+      // process Playwright itself starts here; reusing an already-
+      // running `pnpm dev` locally does NOT get this env var unless a
+      // developer exports it themselves before starting that server.
+      env: {
+        DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS: "true",
+      },
     },
   },
 );

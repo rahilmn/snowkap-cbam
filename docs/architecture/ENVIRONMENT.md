@@ -66,9 +66,10 @@ against `.env.example`" below for what qualifies).
 | `SUPABASE_LOCAL_SERVICE_ROLE_KEY` | Runtime, test-only | Server-only | 12 files: all 10 test files above, plus `scripts/perf/{seed-p11-perf-setup,cleanup-p11-perf}.ts` (writes/teardown need it; `measure-p11-perf.ts` doesn't) | fixed public Supabase CLI demo JWT | N/A |
 | `SUPABASE_LOCAL_JWT_SECRET` | Runtime, test-only | Server-only | 1 file: `tests/integration/organizations-isolation.test.ts:61` (mints a raw session token directly, bypassing GoTrue's grant flow, for one email-confirmation test) | the fixed public Supabase CLI local `JWT_SECRET` (`supabase status` prints it verbatim for a fresh local project) | N/A — local/CI dev tooling only, never staging/production |
 | `CI` | Runtime, test-only | Server-only | `playwright.config.ts:18,19,47` | unset locally | N/A — set automatically by GitHub Actions, never configured by hand |
+| `DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS` | Runtime, test-only | Server-only | `src/infrastructure/rate-limit/rate-limiter.ts` (every limiter instance checks it once at creation) | unset (real rate limiting always applies) | N/A — set only by `playwright.config.ts`'s own `webServer.env`; **never set this anywhere near production** |
 
-That's **15** environment variables actually read by this codebase.
-`NEXT_PUBLIC_GIT_SHA` is a fifteenth name that appears in the code but
+That's **16** environment variables actually read by this codebase.
+`NEXT_PUBLIC_GIT_SHA` is a seventeenth name that appears in the code but
 is **produced**, not read — see "Declared but not independently read"
 below for why it's documented separately rather than counted here.
 
@@ -326,11 +327,31 @@ Read in `playwright.config.ts:18,19,47` to toggle
 GitHub Actions (and most CI platforms) set automatically to `true` on
 every run; nothing in this repo sets it by hand, locally or otherwise.
 
+### `DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS`
+
+Checked once per `createInMemoryRateLimiter(...)` call
+(`src/infrastructure/rate-limit/rate-limiter.ts`) — when it is exactly
+the string `"true"`, every limiter that instance backs unconditionally
+allows every attempt, bypassing the sliding-window logic entirely. This
+exists because the Playwright suite's own natural sign-up/mutation
+volume self-trips several real limiters (`SIGN_UP_RATE_LIMIT` = 5 per
+10 minutes, most tightly) within a single batch run — see
+`docs/plans/P13_RELEASE_READINESS_REPORT.md` §16.8/§26 for the full,
+root-caused account, and the rate limiter file's own header comment
+("E2E-HARNESS ESCAPE HATCH") for why this is safe: the flag is set
+*only* in `playwright.config.ts`'s `webServer.env`, is not among the
+Railway runtime variables this document or `.env.example` document
+anywhere, and is never set by a plain `pnpm dev`. **This variable must
+never be set in any real deployment** — its loud, "dangerously"-prefixed
+name (matching this codebase's own convention for an intentional safety
+bypass) exists specifically so it can never be mistaken for an ordinary
+config value if it turned up somewhere it shouldn't.
+
 ## 5. Declared but not independently read
 
 ### `NEXT_PUBLIC_GIT_SHA`
 
-Defined in `next.config.ts:15` (`env: { NEXT_PUBLIC_GIT_SHA:
+Defined in `next.config.ts:202` (`env: { NEXT_PUBLIC_GIT_SHA:
 process.env.GIT_SHA ?? "dev" }`) — this makes it a real, build-time
 client-exposed variable in principle, per the Dockerfile's own comment
 ("surfaces it as `NEXT_PUBLIC_GIT_SHA`"). In practice, no component or
@@ -340,7 +361,7 @@ version (`app/status/page.tsx:147`, `app/api/health/route.ts:63`) read
 the server-only `GIT_SHA` directly instead, since both are server-side
 code with no need for a client-inlined copy. It's documented here for
 completeness (it does exist as a real env var Next.js produces) but
-intentionally excluded from the "14 variables" count above and from
+intentionally excluded from the "16 variables" count above and from
 `.env.example`, since neither is about a variable *this codebase reads*
 — it's one this codebase *writes*, currently to no reader. If a future
 client component needs the version string, it already has this value
@@ -348,7 +369,7 @@ available with no further plumbing.
 
 ## Cross-check against `.env.example`
 
-[`.env.example`](../../.env.example) documents 9 of the 15 variables
+[`.env.example`](../../.env.example) documents 9 of the 16 variables
 above: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
 `SUPABASE_DB_PASSWORD`, `NEXT_PUBLIC_SUPABASE_URL`,
 `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the Supabase data-plane group above),
@@ -376,6 +397,12 @@ gap in that family).
   (`README.md`), not read from `.env`.
 - `CI` — set automatically by the CI platform; there is nothing to
   "fill in."
+- `DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS` — deliberately, not
+  an oversight: this one is set exactly once, in
+  `playwright.config.ts`'s own `webServer.env`, and nowhere else.
+  Listing it in `.env.example` would normalize putting it in a real
+  `.env` "just in case," which is exactly the outcome its own
+  loud, "dangerously"-prefixed name exists to prevent.
 
 No variable in this document was found to be read by the codebase but
 absent from both `.env.example` and this cross-check's reasoning above
