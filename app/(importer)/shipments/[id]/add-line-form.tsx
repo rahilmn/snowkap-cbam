@@ -148,6 +148,8 @@ export function AddLineForm(
             maxLength={2}
             placeholder="ISO code, e.g. CN"
             disabled={pending}
+            invalid={state.status === "error"}
+            errorId="add-line-form-error"
             className="uppercase"
           />
         </div>
@@ -185,6 +187,8 @@ export function AddLineForm(
             required
             placeholder="e.g. 10.5"
             disabled={pending}
+            invalid={state.status === "error"}
+            errorId="add-line-form-error"
           />
         </div>
       </div>
@@ -219,7 +223,7 @@ export function AddLineForm(
         </div>
       </div>
 
-      <FieldError>
+      <FieldError id="add-line-form-error">
         {state.status === "error" ? state.message : null}
       </FieldError>
 

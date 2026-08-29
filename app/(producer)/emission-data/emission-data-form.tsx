@@ -109,6 +109,8 @@ export function EmissionDataForm(
             required
             placeholder="e.g. 72081000, 72082500"
             disabled={pending}
+            invalid={state.status === "error"}
+            errorId="emission-data-form-error"
           />
         </div>
 
@@ -145,6 +147,8 @@ export function EmissionDataForm(
             required
             placeholder="e.g. 2026"
             disabled={pending}
+            invalid={state.status === "error"}
+            errorId="emission-data-form-error"
           />
         </div>
 
@@ -219,6 +223,8 @@ export function EmissionDataForm(
             required
             placeholder="e.g. 1.85"
             disabled={pending}
+            invalid={state.status === "error"}
+            errorId="emission-data-form-error"
           />
         </div>
 
@@ -233,6 +239,8 @@ export function EmissionDataForm(
             required
             placeholder="e.g. 0.32"
             disabled={pending}
+            invalid={state.status === "error"}
+            errorId="emission-data-form-error"
           />
         </div>
 
@@ -247,11 +255,13 @@ export function EmissionDataForm(
             required
             placeholder="e.g. tCO2e/t"
             disabled={pending}
+            invalid={state.status === "error"}
+            errorId="emission-data-form-error"
           />
         </div>
       </div>
 
-      <FieldError>
+      <FieldError id="emission-data-form-error">
         {state.status === "error" ? state.message : null}
       </FieldError>
 

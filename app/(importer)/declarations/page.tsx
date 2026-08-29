@@ -38,6 +38,10 @@ import {
   formatReportingPeriod,
 } from "../../../src/domain/shared/reporting-period";
 
+import {
+  formatTimestamp,
+} from "../../../lib/utils";
+
 import type {
   DeclarationStatus,
 } from "../../../src/domain/declarations/types";
@@ -195,7 +199,7 @@ export default async function DeclarationsPage() {
                       </td>
 
                       <td className="px-4 py-2.5 tabular-nums text-[var(--text-secondary)]">
-                        {declaration.filed_at ?? "—"}
+                        {declaration.filed_at ? formatTimestamp(declaration.filed_at) : "—"}
                       </td>
                     </tr>
                   ),

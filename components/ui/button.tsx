@@ -15,7 +15,12 @@ import {
   cn,
 } from "../../lib/utils";
 
-const buttonVariants =
+// Exported so a non-<button> element that must still look and focus
+// like this design system's button (e.g. a <label> triggering a
+// visually-hidden native file input -- see evidence-section.tsx) can
+// reuse the exact same visual language instead of hand-rolling a
+// second copy of these classes.
+export const buttonVariants =
   cva(
     "inline-flex items-center justify-center gap-2 rounded-[var(--radius-md)] " +
       "text-sm font-medium transition-colors duration-150 " +

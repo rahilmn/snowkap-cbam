@@ -49,3 +49,27 @@ export function formatDate(
     },
   );
 }
+
+/**
+ * Date-and-time formatting for read-only timestamps that DO need a time
+ * component (an audit event, a "last used" moment, a declaration's
+ * filed-at instant) -- same fixed-locale reasoning as formatDate above.
+ * This mirrors the identical `formatTimestamp` helper already
+ * duplicated locally in components/audit/audit-event-table.tsx,
+ * app/(producer)/sharing/status/shared-data-status-list.tsx, and
+ * app/status/page.tsx; new call sites should import this one rather
+ * than adding a fourth copy.
+ */
+export function formatTimestamp(
+  iso: string,
+): string {
+  return new Date(
+    iso,
+  ).toLocaleString(
+    "en-GB",
+    {
+      dateStyle: "medium",
+      timeStyle: "short",
+    },
+  );
+}

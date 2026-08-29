@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import {
   Badge,
 } from "../../../../components/ui/badge";
@@ -90,7 +92,16 @@ export function CompletenessReportCard(
                 (blocker, index) => (
                   <tr key={`${blocker.reason}-${blocker.shipment_id ?? "period"}-${blocker.line_id ?? index}`}>
                     <td className="px-4 py-2 text-[var(--text-primary)]">
-                      {blocker.shipment_reference ?? "This period"}
+                      {blocker.shipment_id ? (
+                        <Link
+                          href={`/shipments/${blocker.shipment_id}`}
+                          className="font-medium hover:underline"
+                        >
+                          {blocker.shipment_reference ?? "View shipment"}
+                        </Link>
+                      ) : (
+                        blocker.shipment_reference ?? "This period"
+                      )}
                     </td>
 
                     <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">

@@ -9,12 +9,23 @@ import {
 export interface InputProps
   extends InputHTMLAttributes<HTMLInputElement> {
   invalid?: boolean;
+
+  // The id of this field's own <FieldError> (components/ui/field-error.tsx)
+  // -- kept as a distinct, purpose-built prop rather than asking every
+  // caller to remember to type out a raw `aria-describedby` by hand,
+  // so a field only ever gets programmatically associated with its own
+  // error message when it is genuinely `invalid`, never left dangling
+  // when the field is currently valid (a caller-supplied
+  // `aria-describedby` still passes through untouched via `...props`
+  // for any other, non-error use).
+  errorId?: string;
 }
 
 export function Input(
   {
     className,
     invalid,
+    errorId,
     ...props
   }: InputProps,
 ) {
@@ -33,6 +44,7 @@ export function Input(
         className,
       )}
       aria-invalid={invalid}
+      aria-describedby={invalid ? errorId : undefined}
       {...props}
     />
   );

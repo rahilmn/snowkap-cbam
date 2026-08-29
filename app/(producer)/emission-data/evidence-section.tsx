@@ -12,7 +12,12 @@ import {
 
 import {
   Button,
+  buttonVariants,
 } from "../../../components/ui/button";
+
+import {
+  cn,
+} from "../../../lib/utils";
 
 import {
   removeEvidenceFileAction,
@@ -116,6 +121,12 @@ export function EvidenceSection(
   const [uploadError, setUploadError] =
     useState<string | null>(null);
 
+  const [selectedFileName, setSelectedFileName] =
+    useState<string | null>(null);
+
+  const fileInputId =
+    `evidence-file-${emissionDataId}`;
+
   async function handleUpload() {
     const file =
       fileInputRef.current?.files?.[0];
@@ -175,6 +186,10 @@ export function EvidenceSection(
           "";
       }
 
+      setSelectedFileName(
+        null,
+      );
+
       router.refresh();
     } catch {
       setUploadError(
@@ -211,13 +226,51 @@ export function EvidenceSection(
       )}
 
       <div className="flex flex-wrap items-center gap-2">
+        {/*
+          Kept as a real native file input for OS file-picker behavior
+          and screen-reader semantics -- only visually hidden (`peer
+          sr-only`, not `hidden`/`display:none`), so it stays in the
+          tab order and fully keyboard-operable (Tab reaches it,
+          Space/Enter opens the OS picker) exactly as an unstyled
+          <input type="file"> would. The <label> below is the visible,
+          design-system-styled trigger; clicking or activating it opens
+          the same native picker via the standard htmlFor association,
+          no JavaScript involved. `peer-focus-visible:*` mirrors this
+          input's own focus ring (app/globals.css's global
+          :focus-visible rule) onto the visible label, since the input
+          itself is clipped off-screen when focused.
+        */}
         <input
           ref={fileInputRef}
+          id={fileInputId}
           type="file"
           accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx"
           disabled={uploading}
-          className="text-xs text-[var(--text-secondary)]"
+          onChange={(event) => {
+            setSelectedFileName(
+              event.target.files?.[0]?.name ?? null,
+            );
+          }}
+          className="peer sr-only"
         />
+
+        <label
+          htmlFor={fileInputId}
+          className={cn(
+            buttonVariants({ variant: "secondary", size: "sm" }),
+            "peer-focus-visible:outline peer-focus-visible:outline-2 " +
+              "peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--focus-ring)]",
+            uploading
+              ? "pointer-events-none opacity-50"
+              : "cursor-pointer",
+          )}
+        >
+          Choose file
+        </label>
+
+        <span className="text-xs text-[var(--text-secondary)]">
+          {selectedFileName ?? "No file chosen"}
+        </span>
 
         <Button
           type="button"

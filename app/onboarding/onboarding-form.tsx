@@ -124,6 +124,8 @@ export function OnboardingForm() {
           id="name"
           name="name"
           required
+          invalid={state.status === "error"}
+          errorId="onboarding-form-error"
           value={name}
           onChange={(event) => {
             const nextName =
@@ -158,6 +160,8 @@ export function OnboardingForm() {
             id="slug"
             name="slug"
             required
+            invalid={state.status === "error"}
+            errorId="onboarding-form-error"
             value={slug}
             onChange={(event) => {
               setSlugEditedManually(
@@ -243,7 +247,7 @@ export function OnboardingForm() {
         )}
       </fieldset>
 
-      <FieldError>
+      <FieldError id="onboarding-form-error">
         {state.status === "error" ? state.message : null}
       </FieldError>
 

@@ -6,6 +6,10 @@ import {
   Card,
 } from "../../../../components/ui/card";
 
+import {
+  formatTimestamp,
+} from "../../../../lib/utils";
+
 interface FiledSnapshotTotals {
   shipment_count: number;
   line_count: number;
@@ -171,7 +175,7 @@ export function FiledSnapshotCard(
           Frozen at filing time, from a fresh aggregation of the member
           shipments&apos; calculation results -- never DRAFT-time cached
           numbers.{" "}
-          {filedAt ? `Filed ${filedAt}.` : null}
+          {filedAt ? `Filed ${formatTimestamp(filedAt)}.` : null}
           {filedReference ? ` Reference: "${filedReference}" (verbatim, as recorded by the declarant).` : null}
         </p>
       </div>

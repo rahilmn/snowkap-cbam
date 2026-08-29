@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type KeyboardEvent,
 } from "react";
 
 import {
@@ -285,6 +286,29 @@ export function CnCodePicker(
   const showPanel =
     open && query.trim().length >= 2;
 
+  /**
+   * WAI-ARIA combobox pattern: Escape, while the popup is open, closes
+   * the popup and stops there -- it must never fall through to a form
+   * submit or any other ancestor's own Escape handling (this component
+   * lives inside a <form>, add-line-form.tsx). preventDefault/
+   * stopPropagation are both safe against cmdk's own root keydown
+   * handler (node_modules/cmdk/dist/index.mjs's Command root): that
+   * handler has no "Escape" case, so it never runs any conflicting
+   * behavior for this key either way.
+   */
+  function handleInputKeyDown(
+    event: KeyboardEvent<HTMLInputElement>,
+  ) {
+    if (event.key === "Escape" && open) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      setOpen(
+        false,
+      );
+    }
+  }
+
   return (
     <div
       ref={containerRef}
@@ -307,6 +331,7 @@ export function CnCodePicker(
             value={query}
             onValueChange={setQuery}
             onFocus={() => setOpen(true)}
+            onKeyDown={handleInputKeyDown}
             autoComplete="off"
             placeholder="Search by code or description, e.g. 25232100 or cement"
             aria-expanded={showPanel}

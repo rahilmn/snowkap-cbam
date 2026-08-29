@@ -516,7 +516,10 @@ export function WhyThisNumberPanel(
         )}
 
         {resolveState.status === "unresolved" ? (
-          <div className="mt-2 rounded-[var(--radius-sm)] bg-[var(--color-danger-100)] px-3 py-2">
+          <div
+            role="alert"
+            className="mt-2 rounded-[var(--radius-sm)] bg-[var(--color-danger-100)] px-3 py-2"
+          >
             <p className="text-xs font-medium text-[var(--color-danger-700)]">
               {resolveState.message}
             </p>
