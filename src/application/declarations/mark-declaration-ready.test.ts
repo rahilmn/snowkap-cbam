@@ -143,6 +143,7 @@ function makeMockSupabase(
       in: () => chain,
       is: () => chain,
       order: () => chain,
+      range: () => chain,
       insert: () => chain,
       update: () => chain,
       maybeSingle: () =>

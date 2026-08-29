@@ -116,6 +116,7 @@ function makeMockSupabase(
       in: () => chain,
       is: () => chain,
       order: () => chain,
+      range: () => chain,
       then: (
         resolve: (value: TableResult) => unknown,
         reject: (reason: unknown) => unknown,

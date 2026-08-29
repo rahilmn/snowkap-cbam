@@ -114,6 +114,7 @@ function makeMockSupabase(
         return chain;
       },
       order: () => chain,
+      range: () => chain,
       then: (
         resolve: (value: { data: unknown; error: unknown }) => unknown,
         reject: (reason: unknown) => unknown,
@@ -401,6 +402,204 @@ describe(
 
         expect(shipmentsSelect?.filters).toContainEqual(
           ["status", "VOID"],
+        );
+      },
+    );
+
+    // 2026-08-29 (P13 performance-verification finding): live-reproduced
+    // against real seeded local Postgres at docs/plans/MASTER_PLAN.md
+    // §33's own 50k-shipment budget scale -- a period with more than
+    // one PostgREST page of shipments (supabase/config.toml's
+    // max_rows = 1000) silently truncated to the first page (no
+    // `.range()` was used), and even for however many shipment ids DID
+    // get collected, batching them all into one `.in()` call on the
+    // follow-up shipment_lines/latest_calculation_results queries
+    // produced a real "URI too long" gateway error once past a few
+    // hundred ids -- which this function's own "fail the whole result
+    // to empty on any query error" posture then silently turned into
+    // {shipment_count: 0, lines: []}, a period report showing "no
+    // shipments" instead of the real total. These two tests prove the
+    // fix's actual paging/batching mechanics, not just that the
+    // (small, single-page) happy-path tests above still pass.
+
+    it(
+      "pages through every SHIPMENTS_PAGE_SIZE-sized page of shipments, not just the first",
+      async () => {
+        const PAGE_SIZE =
+          1000;
+
+        const totalShipments =
+          PAGE_SIZE * 2 + 250;
+
+        const allRows =
+          Array.from(
+            { length: totalShipments },
+            (_, i) =>
+              shipmentRow(
+                {
+                  id: `ship-${i}`,
+                  reference: `REF-${i}`,
+                },
+              ),
+          );
+
+        const rangeCalls: [number, number][] =
+          [];
+
+        function builder() {
+          let lastRange: [number, number] =
+            [0, PAGE_SIZE - 1];
+
+          const chain: Record<string, unknown> = {
+            select: () => chain,
+            eq: () => chain,
+            neq: () => chain,
+            in: () => chain,
+            is: () => chain,
+            order: () => chain,
+            range: (from: number, to: number) => {
+              lastRange = [from, to];
+              rangeCalls.push(
+                [from, to],
+              );
+              return chain;
+            },
+            then: (
+              resolve: (value: { data: unknown; error: unknown }) => unknown,
+            ) =>
+              Promise.resolve(
+                {
+                  data: allRows.slice(
+                    lastRange[0],
+                    lastRange[1] + 1,
+                  ),
+                  error: null,
+                },
+              ).then(
+                resolve,
+              ),
+          };
+
+          return chain;
+        }
+
+        function emptyChain(): Record<string, unknown> {
+          const chain: Record<string, unknown> = {
+            select: () => chain,
+            eq: () => chain,
+            in: () => chain,
+            order: () => chain,
+            then: (
+              resolve: (value: { data: unknown; error: unknown }) => unknown,
+            ) =>
+              Promise.resolve(
+                { data: [], error: null },
+              ).then(
+                resolve,
+              ),
+          };
+
+          return chain;
+        }
+
+        const supabase = {
+          from: (table: string) =>
+            table === "shipments"
+              ? builder()
+              : emptyChain(),
+        } as never;
+
+        const result =
+          await listPeriodShipmentLines(
+            supabase,
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result.shipment_count).toBe(
+          totalShipments,
+        );
+
+        // Three pages: [0,999], [1000,1999], [2000,2999] (the third
+        // returns only 250 rows, which is what ends the loop).
+        expect(rangeCalls).toEqual(
+          [
+            [0, 999],
+            [1000, 1999],
+            [2000, 2999],
+          ],
+        );
+      },
+    );
+
+    it(
+      "batches shipment_id .in() filters into groups of SHIPMENT_ID_BATCH_SIZE, so a large period doesn't send one oversized query",
+      async () => {
+        const BATCH_SIZE =
+          200;
+
+        const shipmentCount =
+          BATCH_SIZE * 2 + 40;
+
+        const shipmentRows =
+          Array.from(
+            { length: shipmentCount },
+            (_, i) => shipmentRow({ id: `ship-${i}` }),
+          );
+
+        const inCallSizes: number[] =
+          [];
+
+        function builder(
+          table: string,
+        ) {
+          const chain: Record<string, unknown> = {
+            select: () => chain,
+            eq: () => chain,
+            neq: () => chain,
+            is: () => chain,
+            order: () => chain,
+            range: () => chain,
+            in: (
+              _col: string,
+              vals: unknown[],
+            ) => {
+              if (table !== "shipments") {
+                inCallSizes.push(
+                  vals.length,
+                );
+              }
+              return chain;
+            },
+            then: (
+              resolve: (value: { data: unknown; error: unknown }) => unknown,
+            ) =>
+              Promise.resolve(
+                table === "shipments"
+                  ? { data: shipmentRows, error: null }
+                  : { data: [], error: null },
+              ).then(
+                resolve,
+              ),
+          };
+
+          return chain;
+        }
+
+        const supabase = {
+          from: (table: string) => builder(table),
+        } as never;
+
+        await listPeriodShipmentLines(
+          supabase,
+          orgId,
+          annualPeriod,
+        );
+
+        // Two tables (shipment_lines, latest_calculation_results) each
+        // batched into three .in() calls (200 + 200 + 40) -- six total.
+        expect(inCallSizes).toEqual(
+          [200, 200, 40, 200, 200, 40],
         );
       },
     );

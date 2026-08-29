@@ -172,6 +172,51 @@ function periodFilterColumns(
  * transport failure -- see build-period-summary.ts's empty-state
  * handling).
  */
+// PostgREST's own configured page cap (supabase/config.toml's
+// `max_rows`) -- a query with no `.range()` silently truncates to this
+// many rows rather than erroring, so the shipments fetch below must
+// page through it explicitly or a period with more shipments than this
+// silently reports a wrong (partial) total instead of the real one.
+const SHIPMENTS_PAGE_SIZE =
+  1000;
+
+// Safe batch size for a Postgrest `.in("shipment_id", [...])` filter.
+// Found live against real seeded data (P13 performance-verification
+// pass, 50k shipments per docs/plans/MASTER_PLAN.md §33's own budget
+// scale): passing all ~1000 ids from one SHIPMENTS_PAGE_SIZE page in a
+// single `.in()` call produces a real "URI too long" error from the
+// gateway (the resulting query string is tens of thousands of
+// characters), which this function's own "fail the whole result to
+// empty on any query error" posture then silently turned into
+// {shipment_count: 0, lines: []} -- a period report showing "no
+// shipments" instead of the real total, exactly the kind of
+// silently-wrong-not-visibly-broken failure this codebase's numeric
+// discipline exists to rule out. 200 ids/batch (~40 chars each with
+// the comma separator) keeps every request comfortably under typical
+// gateway URL-length limits with real margin, not just past the one
+// observed failure.
+const SHIPMENT_ID_BATCH_SIZE =
+  200;
+
+function chunk<T>(
+  items: T[],
+  size: number,
+): T[][] {
+  const batches: T[][] =
+    [];
+
+  for (let i = 0; i < items.length; i += size) {
+    batches.push(
+      items.slice(
+        i,
+        i + size,
+      ),
+    );
+  }
+
+  return batches;
+}
+
 export async function listPeriodShipmentLines(
   supabase: SupabaseClient,
   orgId: OrganizationId,
@@ -185,47 +230,65 @@ export async function listPeriodShipmentLines(
       period,
     );
 
-  let shipmentsQuery =
-    supabase
-      .from("shipments")
-      .select(
-        SHIPMENT_COLUMNS,
-      )
-      .eq("org_id", orgId)
-      .eq("reporting_period_kind", periodColumns.reporting_period_kind)
-      .eq("reporting_period_year", periodColumns.reporting_period_year)
-      // A VOID shipment is retired (the sanctioned retirement path --
-      // shipments has no DELETE policy at all, 20260828150000), not
-      // "still in the period at zero relevance": before this filter
-      // existed, a cancelled shipment's lines and calculation results
-      // still flowed into every consumer of this fetch --
-      // build-period-summary.ts's KPI total and all four breakdowns,
-      // and both build-period-export-rows.ts exports (CSV/XLSX) -- with
-      // no column anywhere in PeriodExportRow to show a reader the
-      // figure included a cancelled shipment. Found live against local
-      // Postgres: one VOIDed 999 tCO2e shipment alongside one READY 10
-      // tCO2e shipment overstated the period total by ~100x. Excluding
-      // VOID here, at the one shared fetch build-period-summary.ts and
-      // build-period-export-rows.ts both read (see this function's own
-      // doc comment on why it is shared rather than duplicated), fixes
-      // both consumers at once rather than requiring each to filter
-      // Shipment.status itself.
-      .neq("status", "VOID");
+  const shipmentRows: ShipmentRow[] =
+    [];
 
-  shipmentsQuery =
-    periodColumns.reporting_period_quarter === null
-      ? shipmentsQuery.is("reporting_period_quarter", null)
-      : shipmentsQuery.eq("reporting_period_quarter", periodColumns.reporting_period_quarter);
+  for (let offset = 0; ; offset += SHIPMENTS_PAGE_SIZE) {
+    let pageQuery =
+      supabase
+        .from("shipments")
+        .select(
+          SHIPMENT_COLUMNS,
+        )
+        .eq("org_id", orgId)
+        .eq("reporting_period_kind", periodColumns.reporting_period_kind)
+        .eq("reporting_period_year", periodColumns.reporting_period_year)
+        // A VOID shipment is retired (the sanctioned retirement path --
+        // shipments has no DELETE policy at all, 20260828150000), not
+        // "still in the period at zero relevance": before this filter
+        // existed, a cancelled shipment's lines and calculation results
+        // still flowed into every consumer of this fetch --
+        // build-period-summary.ts's KPI total and all four breakdowns,
+        // and both build-period-export-rows.ts exports (CSV/XLSX) -- with
+        // no column anywhere in PeriodExportRow to show a reader the
+        // figure included a cancelled shipment. Found live against local
+        // Postgres: one VOIDed 999 tCO2e shipment alongside one READY 10
+        // tCO2e shipment overstated the period total by ~100x. Excluding
+        // VOID here, at the one shared fetch build-period-summary.ts and
+        // build-period-export-rows.ts both read (see this function's own
+        // doc comment on why it is shared rather than duplicated), fixes
+        // both consumers at once rather than requiring each to filter
+        // Shipment.status itself.
+        .neq("status", "VOID")
+        .order("id", { ascending: true })
+        .range(
+          offset,
+          offset + SHIPMENTS_PAGE_SIZE - 1,
+        );
 
-  const { data: shipmentRows, error: shipmentError } =
-    await shipmentsQuery;
+    pageQuery =
+      periodColumns.reporting_period_quarter === null
+        ? pageQuery.is("reporting_period_quarter", null)
+        : pageQuery.eq("reporting_period_quarter", periodColumns.reporting_period_quarter);
 
-  if (shipmentError || !shipmentRows) {
-    return empty;
+    const { data: pageRows, error: pageError } =
+      await pageQuery;
+
+    if (pageError || !pageRows) {
+      return empty;
+    }
+
+    shipmentRows.push(
+      ...(pageRows as ShipmentRow[]),
+    );
+
+    if (pageRows.length < SHIPMENTS_PAGE_SIZE) {
+      break;
+    }
   }
 
   const shipments =
-    (shipmentRows as ShipmentRow[]).map(
+    shipmentRows.map(
       (row) => toShipment(row),
     );
 
@@ -238,31 +301,55 @@ export async function listPeriodShipmentLines(
       (shipment) => shipment.id,
     );
 
-  const { data: lineRows, error: lineError } =
-    await supabase
-      .from("shipment_lines")
-      .select(
-        SHIPMENT_LINE_COLUMNS,
-      )
-      .eq("org_id", orgId)
-      .in("shipment_id", shipmentIds)
-      .order("shipment_id", { ascending: true })
-      .order("line_number", { ascending: true });
+  const shipmentIdBatches =
+    chunk(
+      shipmentIds,
+      SHIPMENT_ID_BATCH_SIZE,
+    );
 
-  if (lineError || !lineRows) {
-    return empty;
+  const lineRows: ShipmentLineRow[] =
+    [];
+
+  for (const batch of shipmentIdBatches) {
+    const { data: batchRows, error: lineError } =
+      await supabase
+        .from("shipment_lines")
+        .select(
+          SHIPMENT_LINE_COLUMNS,
+        )
+        .eq("org_id", orgId)
+        .in("shipment_id", batch)
+        .order("shipment_id", { ascending: true })
+        .order("line_number", { ascending: true });
+
+    if (lineError || !batchRows) {
+      return empty;
+    }
+
+    lineRows.push(
+      ...(batchRows as ShipmentLineRow[]),
+    );
   }
 
-  const { data: calculationRows, error: calculationError } =
-    await supabase
-      .from("latest_calculation_results")
-      .select(
-        "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at",
-      )
-      .in("shipment_id", shipmentIds);
+  const calculationRows: CalculationResultRow[] =
+    [];
 
-  if (calculationError) {
-    return empty;
+  for (const batch of shipmentIdBatches) {
+    const { data: batchRows, error: calculationError } =
+      await supabase
+        .from("latest_calculation_results")
+        .select(
+          "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at",
+        )
+        .in("shipment_id", batch);
+
+    if (calculationError) {
+      return empty;
+    }
+
+    calculationRows.push(
+      ...((batchRows ?? []) as CalculationResultRow[]),
+    );
   }
 
   const shipmentById =
@@ -275,7 +362,7 @@ export async function listPeriodShipmentLines(
   const calculationByLineId =
     new Map<string, PeriodLineCalculation>();
 
-  for (const row of (calculationRows ?? []) as CalculationResultRow[]) {
+  for (const row of calculationRows) {
     calculationByLineId.set(
       row.line_id,
       {
@@ -291,7 +378,7 @@ export async function listPeriodShipmentLines(
   const lines: PeriodShipmentLine[] =
     [];
 
-  for (const row of lineRows as ShipmentLineRow[]) {
+  for (const row of lineRows) {
     const line =
       toShipmentLine(
         row,
