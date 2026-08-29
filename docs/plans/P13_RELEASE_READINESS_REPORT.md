@@ -1291,6 +1291,14 @@ Run immediately after this session's one protected-zone code change
 12,540/12,540 canonical records reconciled, source checksum match, zero
 duplicate identities, all invariant/coverage checks passing.
 
+**Re-run 2026-08-30** as final-audit preparation for this round (no
+regulatory-zone code was touched this round — this is a standing-gate
+reconfirmation, not evidence of a new fix): identical `RESULT: VALID`,
+same 12,540/12,540 reconciliation, same checksum, all checks passing.
+Confirms the protected regulatory subsystem remains untouched and valid
+independent of everything else this round changed (capability-gate
+routes, rate limiting, test backfill, documentation).
+
 ## 28. Docker build
 
 **Fresh, independent, this session** (not merely re-citing an earlier
