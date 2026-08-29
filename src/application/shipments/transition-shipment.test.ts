@@ -362,12 +362,16 @@ describe(
     );
 
     // LOCK is ADMIN+ only (master plan §27 screen 12: "MEMBER+ (lock
-    // ADMIN+)") -- P10 capability-matrix audit, added because this
+    // ADMIN+)") -- capability-matrix audit, added because this
     // transition previously had no role check at all: any MEMBER could
     // LOCK a shipment via the shipment detail screen's "Lock" button
-    // (transition-actions.tsx) with nothing in the application layer
-    // or RLS stopping them (the shipments UPDATE policy only checks
-    // org membership + status-not-terminal, not role).
+    // (transition-actions.tsx). Both walls now enforce this: the
+    // application-layer check tested below (Wall 1), and RLS's
+    // `shipments_update_own_org_not_terminal` WITH CHECK
+    // (20260829090000: `status <> 'LOCKED' or
+    // app.user_is_admin_or_owner_of(org_id)`, Wall 2 -- see
+    // docs/architecture/AUTHORIZATION_MATRIX.md's "LOCK role gate"
+    // entry for the live-reproduced RLS-level probe).
     describe(
       "LOCK role gate",
       () => {
