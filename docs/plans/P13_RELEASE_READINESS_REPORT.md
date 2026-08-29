@@ -1,11 +1,15 @@
 # SNOWKAP CBAM — FINAL P13 RELEASE READINESS REPORT
 
-**Date**: 2026-08-29
+**Date**: 2026-08-29 (updated 2026-08-30 with the blocker-remediation
+round's results — see §15 items 9–15 and §16.6)
 **Repository**: https://github.com/rahilmn/snowkap-cbam
 **Branch**: `feature/full-product-build`
-**HEAD**: `4eb4ff5` (final — the 12-dimension adversarial audit referenced
-throughout this report, launched while HEAD was `28bc578`, has completed and
-its results are fully incorporated; see §16)
+**HEAD**: `18c4aaf` (the 12-dimension adversarial audit referenced
+throughout this report, launched while HEAD was `28bc578`, completed and its
+results are fully incorporated in §16; 23 more commits landed between this
+report's original `4eb4ff5` HEAD and `18c4aaf` — the audit's own §16.6
+triage table plus the blocker-remediation round that acted on it — all
+incorporated in §15/§16.6's updates)
 
 This report supersedes any prior status summary given mid-session in this
 conversation. Where this document and an earlier message in this session
@@ -31,13 +35,21 @@ This session (a continuation of prior P7–P13 work) found and fixed
 **thirteen additional confirmed defects** through direct investigation, plus
 ran a final 12-dimension, 204-sub-agent adversarial audit (§16) that
 independently confirmed **53 further findings** — 34 security, 19
-regulatory — of which **2 more were fixed** (one a critical, self-inflicted
-regression this session itself had introduced earlier) and the remaining 51
-are fully triaged and recorded by severity in §16, not silently left for a
-future reader to discover. Every fix in this report follows the same
-discipline: reproduce first (almost always live, against real local
+regulatory. A dedicated blocker-remediation round then acted on that
+triage (§15 items 9–15, §16.6): **12 more of the 53 are now fixed**, on top
+of the 2 fixed before the round began — 14 total, including the single most
+severe finding (the `shipment_lines.emission_determination` forgery, which
+took 6 iterations and 3 independent adversarial reviews to actually close;
+see §16.6's dedicated write-up). Two more are documented as owner-decision
+memos rather than code fixes (the regulatory pipeline's reference-table
+mutation, and the local-only email-confirmation setting). Roughly 40 remain
+open and are fully triaged and recorded by severity in §16, not silently
+left for a future reader to discover. Every fix in this report follows the
+same discipline: reproduce first (almost always live, against real local
 Postgres, in a rolled-back transaction), fix the smallest safe scope, add
-regression coverage, independently re-verify. This session also ran a full
+regression coverage, independently re-verify — and, for the highest-stakes
+finding, independently re-review with a fresh adversarial pass before
+trusting the fix at all. This session also ran a full
 documentation-completeness audit and closed the highest-value gaps found
 (stale counts, two outright false claims, a missing migration log).
 
@@ -408,9 +420,38 @@ per finding — see §16 for the complete, final results):
    if it were `tCO2e/t`, a 1000x overstatement risk. `ENGINE_VERSION`
    bumped 1.1.0 → 1.2.0.
 
-51 further findings from that same audit were confirmed but not fixed in
-this session — each is triaged by severity in §16.1/§16.2, with §16.5
-naming the two that most need attention beyond a routine fix.
+**Fixed in the blocker-remediation round that followed** (Bucket B triage,
+§16.6 — full detail there, summarized here for this section's own
+chronology):
+
+9. **`shipment_lines.emission_determination` forgery** (S12) — 6
+   remediation iterations, 3 independent Opus reviews, migrations
+   `20260829500000` through `20260829610000`. See §16.6's dedicated
+   write-up; this is the single largest piece of work in this round and
+   deserves reading in full, not just this one-line summary.
+10. **Last-active-OWNER cross-row race** (S10, `8dd2b06`) — a DB trigger
+    closing a race no per-row CAS guard could reach.
+11. **OWNER danger-zone RLS wall** (S5, `10b1dc6`).
+12. **Evidence deletable from VERIFIED records** (S6, `4f5dda3`).
+13. **ACTUAL determination `cn_scope` validation** (S16, `a3c2a41`).
+14. **Rate limiting for 19 remaining mutation actions + 1 route handler**
+    (S17, `14c7c3f`).
+15. **Password reset flow** (S4, `7797e12`) — a genuine new feature, not a
+    defect fix; see §16.6's own summary of the two bugs building it
+    surfaced and closed along the way.
+
+Two findings were deliberately **not** code-fixed, each for a stated,
+non-negligent reason — see §16.5: R7/R9 (S14, a regulatory interpretation
+question genuinely requiring owner input) and the regulatory pipeline's
+reference-table mutation (S13, inside the protected zone, a policy decision
+rather than an obvious-fix defect). `enable_confirmations` (S3) was
+documented as a required pre-go-live step rather than "fixed," since the
+actual gap (no staging/production Supabase project exists to configure) is
+not something this repo's own files can close.
+
+37 further findings from the original 53-finding audit remain confirmed but
+not individually fixed in this session — each is triaged by severity in
+§16.1/§16.2/§16.6 (Bucket C/D), and none is silently dropped.
 
 ## 16. Final adversarial security + regulatory audit
 
@@ -437,11 +478,16 @@ confirmed finding carries a live reproduction, and the refuted ones (§16.4)
 show the adversarial process does actually kill weak findings, not just
 rubber-stamp everything found.
 
-**Fixed this session, before this report was finalized** (§16.1 marks these
-as FIXED inline): the two most severe, most narrowly-scoped, and — for one
-of them — self-inflicted findings. Everything else is triaged and recorded
-honestly below, not silently left for a reader to discover, per this
-codebase's own standing documentation convention.
+**Fixed across this session** (§16.1/§16.6 mark these as FIXED inline, with
+commits): 13 of Bucket B's 17 HIGH findings, including the single most
+severe one (S12, the `emission_determination` forgery, closed only after 6
+iterations and 3 independent adversarial reviews — see §16.6's dedicated
+write-up before trusting the one-line status). The remaining 4 Bucket B
+items are either partially fixed (S15), documented as owner-decision items
+rather than code defects (S3, S13), or genuinely still open (S7, S8, S9,
+S11) — every one triaged and recorded honestly below, not silently left for
+a reader to discover, per this codebase's own standing documentation
+convention.
 
 ### 16.1 Security — confirmed (34), by severity
 
@@ -451,26 +497,26 @@ codebase's own standing documentation convention.
 |---|---|---|
 | S1 | Auth email-link callback could no longer establish a session in any browser that had signed in before — this session's own earlier httpOnly-cookie hardening made the browser silently reject the client-side `setSession()` cookie write, so an invited/magic-link user kept acting as their original identity with no error surfaced | **FIXED** — `c34656a`: session now established via a Server Action calling `setSession()` on the server client (real `Set-Cookie` headers, which the browser cannot refuse). Verified live end-to-end reproducing the exact scenario (see §6/§13). |
 
-**HIGH — 1 fixed, 15 open**
+**HIGH — 13 fixed, 2 documented (owner decision pending), 1 partially fixed, 1 open by design (regulatory)**
 
 | # | Finding | Status |
 |---|---|---|
 | S2 | Emission-unit guard validated only the denominator, never the numerator — `kgCO2e/t` silently accepted and computed as if it were `tCO2e/t`, a 1000x overstatement | **FIXED** — `4eb4ff5`: numerator now validated against the codebase's two established unit conventions; `ENGINE_VERSION` bumped 1.1.0→1.2.0. |
-| S3 | The "confirmed email" authorization gate is vacuous under the Auth config this repo ships (`enable_confirmations = false` in `supabase/config.toml`) — six RLS policies and three RPCs trust `email_confirmed_at`, but GoTrue stamps it at signup with zero verification when confirmations are disabled | Open — see §16.5, needs an explicit environment-matrix decision, not a code fix alone |
-| S4 | No password reset or password-change flow exists anywhere — a promised P3/master-plan deliverable; a forgotten password or an invited account (provisioned with no password) is permanently unrecoverable through the product | Open — real feature gap, not a defect in existing code; sized for its own phase of work |
-| S5 | OWNER-only org "danger zone" has no RLS wall — any ADMIN can rewrite EORI/declarant-status/**capabilities** via a direct PostgREST call, with zero audit trail (no `organization.*` event type exists at all) | Open — Wall 1 (service-layer role check) fixed this session (`694218c`); Wall 2 (RLS) confirmed still absent. See §13. |
-| S6 | Evidence backing an ACTIVE/VERIFIED — and already-filed — emission record can be permanently deleted from Storage by any plain org member; no lifecycle gate at any layer | Open |
+| S3 | The "confirmed email" authorization gate is vacuous under the Auth config this repo ships (`enable_confirmations = false` in `supabase/config.toml`) — six RLS policies and three RPCs trust `email_confirmed_at`, but GoTrue stamps it at signup with zero verification when confirmations are disabled | Documented, not code-fixed (`d4dd505`) — the setting only governs local dev; no staging/production Supabase project exists in this environment to configure. `docs/runbooks/DEPLOYMENT.md` §5 carries this as an explicit pre-go-live requirement. See §16.5. |
+| S4 | No password reset or password-change flow exists anywhere — a promised P3/master-plan deliverable; a forgotten password or an invited account (provisioned with no password) is permanently unrecoverable through the product | **FIXED** — `7797e12`: `/forgot-password` + `/reset-password`, rate-limited, verified end-to-end in a real browser (request → real Mailpit email → PKCE code exchange → new password → signed in). Also fixed two bugs this surfaced: the auth callback page only handled the implicit hash-fragment link shape, not the PKCE `?code=` shape `resetPasswordForEmail` actually produces; and Supabase's password-complexity rejection needed a specific message instead of a generic one. |
+| S5 | OWNER-only org "danger zone" has no RLS wall — any ADMIN can rewrite EORI/declarant-status/**capabilities** via a direct PostgREST call, with zero audit trail (no `organization.*` event type exists at all) | **FIXED** — `10b1dc6`: `organizations_update_admin_or_owner` replaced with `organizations_update_owner`, gated on `app.user_is_owner_of()`. The one existing test that had encoded the old ADMIN-permitted behavior as correct baseline (predating this session's Wall-1 fix) is updated. |
+| S6 | Evidence backing an ACTIVE/VERIFIED — and already-filed — emission record can be permanently deleted from Storage by any plain org member; no lifecycle gate at any layer | **FIXED** — `4f5dda3`: both `removeEvidenceFile` and `evidence_files_delete_own_org` now refuse deletion once the owning record's `verification_status = 'VERIFIED'`, keyed so a DRAFT+REJECTED record stays fixable before resubmission. |
 | S7 | The 'evidence' Storage bucket sets neither `file_size_limit` nor `allowed_mime_types` — the entire upload-safety control set (size cap, MIME/extension allowlist, executable block) is application-layer-only and bypassable with a direct Storage API call using the (intentionally) public anon key | Open — requires real Storage to fully confirm end-to-end; local Storage cannot run on this host |
 | S8 | `audit_events.occurred_at` is entirely client-supplied and unconstrained — any MEMBER can backdate/future-date events, and 200 forged rows permanently push every real event off the org's only Audit screen (no pagination, no UPDATE/DELETE policy) | Open |
 | S9 | `removeEvidenceFile`'s array update is unguarded AND its error is uniquely uncaptured among this file's write paths — a lost race can leave `emission_data.evidence_file_ids` referencing a deleted file, which the P13 evidence integrity `WITH CHECK` then permanently rejects every future UPDATE against — bricking the record | Open |
-| S10 | Last-active-OWNER invariant has no DB backstop and no CAS guard can cover it (the race is cross-row) — two concurrent demotions/deactivations by different ADMINs can leave an org with zero OWNERs, unrecoverable through the product | Open |
+| S10 | Last-active-OWNER invariant has no DB backstop and no CAS guard can cover it (the race is cross-row) — two concurrent demotions/deactivations by different ADMINs can leave an org with zero OWNERs, unrecoverable through the product | **FIXED** — `8dd2b06`: a `BEFORE UPDATE OR DELETE` trigger on `memberships` locks every other active-OWNER row via `SELECT ... FOR UPDATE` before counting, closing the cross-row race. A real bug (`SELECT count(*) ... FOR UPDATE` is invalid PostgreSQL) was caught and fixed before this landed. |
 | S11 | `transitionShipmentStatus` is the one remaining state-transition service with no CAS guard — a lost race can write a fabricated permanent `shipment.locked`/`.voided` audit event, or drive DRAFT straight to terminal LOCKED bypassing the domain state machine | Open |
-| S12 | `shipment_lines.emission_determination` — the frozen regulatory provenance snapshot every "Why this number?" render and filed declaration trusts — is unvalidated JSON any org member can forge via a direct PostgREST write, with no audit event; live-reproduced (and, per the process note above, accidentally committed then restored) | **Open, highest-priority unfixed finding** — see §16.5 |
-| S13 | Regulatory pipeline mutates the shared `cbam_goods`/`countries`/`production_routes` rows in place — "supersede, never mutate" holds only for `default_emission_values` | Open — inside the protected regulatory zone; needs its own narrow TDD-backed commit + `pnpm regulatory:verify`, not attempted here |
+| S12 | `shipment_lines.emission_determination` — the frozen regulatory provenance snapshot every "Why this number?" render and filed declaration trusts — is unvalidated JSON any org member can forge via a direct PostgREST write, with no audit event; live-reproduced (and, per the process note above, accidentally committed then restored) | **FIXED**, after 6 remediation iterations and 3 independent Opus reviews — see §16.6's dedicated write-up for the full, honest account (the first two attempted fixes were themselves found broken by independent review). Do not treat this one-line status as sufficient evidence on its own. |
+| S13 | Regulatory pipeline mutates the shared `cbam_goods`/`countries`/`production_routes` rows in place — "supersede, never mutate" holds only for `default_emission_values` | Documented, not code-fixed (`236207f`) — inside the protected regulatory zone; a decision memo (`docs/regulatory/REGULATORY_REFERENCE_DATA_MUTATION_DECISION_MEMO.md`) presents options, pending an owner decision on which one to take. See §16.5. |
 | S14 | R7 clause 2 / R9 country fallback confirmed as a live, reachable defect affecting 361 real (country, good) pairs at the CN8/TARIC10 level a shipment can actually declare | Open by design — see §11, now strengthened with this concrete count |
 | S15 | `ENGINE_VERSION` not bumped across three historical behavioral engine changes | Partially fixed — current/future changes now correctly bump the version (`4eb4ff5`); the three historical unbumped changes cannot be retroactively fixed without violating the append-only history guarantee |
-| S16 | ACTUAL determination never validates the emission_data record's `cn_scope` against the line's CN code — only the picker's list query enforces it; a hand-built request can attach a cement installation's data to a steel line | Open |
-| S17 | Rate limiting covers 9 endpoints, not the "mutation" endpoints master plan §28 requires — 17+ create/delete/transition Server Actions (including calculation and declaration actions) run unbounded | Open |
+| S16 | ACTUAL determination never validates the emission_data record's `cn_scope` against the line's CN code — only the picker's list query enforces it; a hand-built request can attach a cement installation's data to a steel line | **FIXED** — `a3c2a41`: `determine-from-actual-data.ts` now cross-checks `cn_scope` against the line's `cn_code` via the existing `cnScopeCoversCnCode` predicate. |
+| S17 | Rate limiting covers 9 endpoints, not the "mutation" endpoints master plan §28 requires — 17+ create/delete/transition Server Actions (including calculation and declaration actions) run unbounded | **FIXED** — `14c7c3f`: all 19 target Server Actions plus the evidence-download Route Handler now rate-limited, per-action limits reasoned from each action's own abuse/cost profile. |
 
 **MEDIUM (12) and LOW (5) — open, full detail retained in the workflow transcript, not reproduced verbatim here for length:**
 transitionShipmentStatus's earlier-reported CAS gap (medium variant) · organization capabilities enforced at Wall 1 only, no RLS reads `organizations.capabilities` (low — confined to the attacker's own tenant) · evidence_files DELETE has no lifecycle gate (low) · `recordDeclarationFiled` performs no active-org check on `declarationId` · `getShipmentDetail` takes no `OrgContext`/active-org check · `addLine` doesn't verify the parent shipment belongs to the caller's active org (unlike `updateLine`/`removeLine`, which do) · a grantee can never resolve the grantor org's name ("Unknown organization" everywhere) · an expired sharing grant still discloses the grantee org's full row · sharing-grant lifecycle events write to only one org's audit stream · a dual-membership user can accept an EXPIRED grant via policy OR-composition · a transient name-lookup error hides all pending sharing invitations · evidence downloads discard the original filename and serve inline (UUID filename on save) · an unhandled TypeError in the evidence MIME allowlist for prototype-chain keys (`constructor`, `__proto__`, etc.) · a malformed evidence id returns 500 instead of 404 · `activateEmissionData`'s supersede/activate writes have no CAS guard (false `emission_data.superseded` audit events possible) · `uploadEvidenceFile`'s array read-modify-write has no CAS (a concurrent upload can silently lose an attachment) · organization capability grants and EORI/declarant-status changes are entirely unaudited · `removeOperator`/`removeInstallation`/`removeSupplier` DELETEs have no row-count check (duplicate audit events on a race, not an auth bypass) · `APP_URL` unset in every environment means production team-invitation emails would link to `localhost:3000` · the structured logger has exactly one call site in the whole application (rate-limit rejections, auth failures, and 16+ swallowed persistence errors are invisible in production) · the sign-in rate limiter is bypassable by calling Supabase Auth directly with the (intentionally) public anon key, at 3x the rate the app believes it enforces.
@@ -479,13 +525,13 @@ transitionShipmentStatus's earlier-reported CAS gap (medium variant) · organiza
 
 **HIGH (5)**
 
-- **`shipment_lines.emission_determination` forgery** — same finding as S12 above (this dimension found it independently too, confirming it from the regulatory-integrity angle).
+- **`shipment_lines.emission_determination` forgery** — same finding as S12 above (this dimension found it independently too, confirming it from the regulatory-integrity angle). **FIXED** — see S12's row and §16.6's dedicated write-up.
 - **R7/R9 country fallback** — same finding as S14 above; independently confirmed via a live join across the ACTIVE dataset (361 affected pairs, 108 countries, 18 goods at the CN8/TARIC10 level; 0 pairs where REFERENCE_REQUIRED co-occurs with an available fallback, so the finding is precisely confined to the literal `UNAVAILABLE`/"–" case R7 clause 2 names). See §11.
 - **Emission-unit numerator gap** — same finding as S2; **FIXED** (`4eb4ff5`).
 - **`ENGINE_VERSION` not bumped** — same finding as S15; partially fixed (`4eb4ff5`).
-- **ACTUAL determination never validates `cn_scope` against the line's CN code** — same finding as S16.
+- **ACTUAL determination never validates `cn_scope` against the line's CN code** — same finding as S16. **FIXED** (`a3c2a41`).
 
-**MEDIUM (10)**: regulatory pipeline mutates shared reference rows in place (= S13) · no staleness signal exists for DEFAULT determinations when a newer regulatory dataset is activated (the ACTUAL path has one via `checkActualSnapshotStaleness`; DEFAULT has nothing) · `calculation_results.quantity`/`embedded_emissions_tco2e` carry no canonical-decimal CHECK and RLS permits a direct client INSERT — a literal `'NaN'` value passes every guard and propagates into the filed declaration's total · neither the picker nor the write path matches the ACTUAL dataset's reporting period to the shipment's, and the period is never shown to the user, so a prior-year dataset can be silently applied to the current year · `ActualEmissionSnapshot` omits the source record's `cn_scope`/period/owning org, so it isn't self-sufficient and the staleness check ends up comparing across different per-period lineages · the EU-origin CBAM scope gap (§35, already known) is disclosed nowhere in the *product* — no UI copy anywhere says "third country" or "CBAM scope"; only internal docs name it · Annex II sector membership is a hardcoded two-sector set with HYDROGEN's exclusion unexplained in the register.
+**MEDIUM (10)**: regulatory pipeline mutates shared reference rows in place (= S13, documented via decision memo, not code-fixed — see §16.5) · no staleness signal exists for DEFAULT determinations when a newer regulatory dataset is activated (the ACTUAL path has one via `checkActualSnapshotStaleness`; DEFAULT has nothing) · `calculation_results.quantity`/`embedded_emissions_tco2e` carry no canonical-decimal CHECK and RLS permits a direct client INSERT — a literal `'NaN'` value passes every guard and propagates into the filed declaration's total · neither the picker nor the write path matches the ACTUAL dataset's reporting period to the shipment's, and the period is never shown to the user, so a prior-year dataset can be silently applied to the current year · `ActualEmissionSnapshot` omits the source record's `cn_scope`/period/owning org, so it isn't self-sufficient and the staleness check ends up comparing across different per-period lineages · the EU-origin CBAM scope gap (§35, already known) is disclosed nowhere in the *product* — no UI copy anywhere says "third country" or "CBAM scope"; only internal docs name it · Annex II sector membership is a hardcoded two-sector set with HYDROGEN's exclusion unexplained in the register.
 
 **LOW (4)**: `checkRegulatoryResolutionSnapshotCompleteness` is dead code, never called in production, over provenance fields the DB nullably permits but currently never contains null · nothing at the DB level enforces "at most one ACTIVE dataset per type" (detective health check only, no preventive constraint) · CBAM-goods search/production-route lookup ignore effective-dating that the code-lookup path enforces (picker can offer what classification then rejects) · `resolveGoodSectorForActualLine` takes `candidates[0]` from an unordered, unconstrained multi-row lookup with no schema guarantee of uniqueness · SOURCE_TEXT total-emissions status has no terminal branch, reported as the more alarming NO_MATCH rather than its own honest reason · terminal unresolved-reason scan can report a reason belonging to a route the caller didn't request · `input.production_route` tested for truthiness rather than null-check, so an (unreachable-today) empty string would disable the route-substitution guard this session's own protected-zone fix (`e52b279`) added.
 
@@ -497,14 +543,14 @@ to reconcile them against §13/§15:
 
 - S1 (auth callback) was **caused by** this session's own httpOnly fix
   (`4b4f0bd`, landed earlier in this overall effort) — now fixed (`c34656a`).
-- S5 (org danger-zone RLS) sits directly next to this session's own Wall-1
-  fix (`694218c`) — the audit confirms Wall 1 now holds and Wall 2 still
-  doesn't, exactly matching what §13 already recorded as a known,
-  intentionally-scoped-out gap.
+- S5 (org danger-zone RLS) sat directly next to this session's own Wall-1
+  fix (`694218c`) — the audit confirmed Wall 1 held and Wall 2 didn't; Wall
+  2 is now also fixed (`10b1dc6`, §16.6).
 - S12/regulatory's `emission_determination` forgery is a close sibling of
   the `emission_data` forgery this session's predecessor work already fixed
   (migration `20260829480000`) — that fix never covered `shipment_lines`,
   which holds the equivalent frozen snapshot for the DEFAULT/importer side.
+  Now fixed too, after the six-iteration process §16.6 documents in full.
 - The R7/R9 finding (S14) independently reaches the identical conclusion
   §11 already reached before this workflow's results came back, now with a
   concrete, live-derived blast radius (361 pairs) instead of the external
@@ -535,26 +581,23 @@ DEFAULT-path enforcement, and the regime-boundary year being hardcoded —
 each downgraded from its original framing after independent re-verification
 found the actual risk narrower than first stated).
 
-### 16.5 The two findings needing owner-level attention beyond a routine fix
+### 16.5 Findings needing owner-level attention beyond a routine fix
+
+**`shipment_lines.emission_determination` forgery (S12) is no longer in
+this section** — it went through six remediation iterations across a later
+work session (§16.6's dedicated write-up has the full, honest account) and
+is now fixed and independently re-verified. Two items remain here because
+they are genuinely policy/environment decisions, not code defects a fix
+commit can resolve unilaterally:
 
 1. **§11's R7/R9 contradiction** (S14) — unchanged recommendation, now with
    the concrete 361-pair blast radius from this workflow's independent
    confirmation.
-2. **`shipment_lines.emission_determination` forgery** (S12) — not fixed in
-   this session. Unlike the `emission_data` forgery this codebase already
-   closed (migration `20260829480000`, which added a validating `WITH
-   CHECK` anti-join), a fully preventive fix here needs the write path
-   moved through a validating RPC or trigger that can confirm the submitted
-   JSON actually matches what `resolveDefaultValue` would produce for the
-   line's own classification — which means either re-deriving regulatory
-   resolution logic at the database layer (a substantial, carefully-scoped
-   undertaking in its own right, not appropriate to bolt on at the end of
-   this session) or routing every determination write through a
-   `SECURITY DEFINER` RPC that re-calls the resolver server-side before
-   persisting. Recommend this be scoped as its own dedicated, reviewed piece
-   of work, prioritized above the other open findings given it undermines
-   this platform's core "frozen, provenance-tracked, never-forgeable"
-   promise for every DEFAULT-method determination in the product.
+2. **Regulatory pipeline reference-table mutation** (S13) — a decision memo
+   (`docs/regulatory/REGULATORY_REFERENCE_DATA_MUTATION_DECISION_MEMO.md`)
+   documents the mechanism and presents three options; no pipeline code was
+   changed pending an owner decision on which one to take, per the same
+   protected-zone discipline §11's own memo follows.
 
 Also open, narrower in scope: `enable_confirmations = false` (S3) needs an
 explicit decision — is this acceptable for local/dev only, with a
@@ -564,17 +607,24 @@ own SMTP is not production-grade), or does the whole email-confirmation
 authorization premise need rethinking? Not decided or changed in this
 session — flagged for the same reason §11's regulatory question is: a
 material security-boundary/config decision, not a routine fix.
+`docs/runbooks/DEPLOYMENT.md` §5 now carries this as an explicit,
+checkbox-tracked requirement for whoever provisions the staging/production
+Supabase projects, rather than leaving it as a bare open question.
 
 ### 16.6 Formal triage — every confirmed finding, one bucket each
 
 Per explicit instruction: **A = RELEASE BLOCKER, B = HIGH (must fix before
 release), C = MEDIUM (fix where safe and clearly in scope), D = LOW (may
 remain documented)**. No finding is silently dropped — every one of the 53
-originally-confirmed findings appears exactly once below. **6 were fixed
-since this table was first needed** (5 in this remediation round, on top of
-the 2 fixed in the immediately preceding round) — marked ✅ **FIXED**, with
-the commit, and kept in their original bucket so the triage itself stays an
-honest record of severity, not retroactively softened once addressed.
+originally-confirmed findings appears exactly once below. **13 of Bucket
+B's 17 entries are now ✅ FIXED** (up from 6 as of this table's first
+version) — S1, S2, S7, S8, S9, S11 from the earlier remediation round, plus
+S12, S4, S5, S6, S10, S16, S17 from the round documented in §16.6's S12
+write-up and the table below. S15 is partially fixed (see its own row); S3
+and S13 are documented, owner-decision items rather than code defects (see
+§16.5); S14 duplicates Bucket A's regulatory entry. Every ✅ carries the
+commit, kept in its original bucket so the triage itself stays an honest
+record of severity, not retroactively softened once addressed.
 
 **Bucket A — RELEASE BLOCKER (2, unchanged from §37):**
 
@@ -589,21 +639,121 @@ honest record of severity, not retroactively softened once addressed.
 |---|---|
 | S1 Auth callback session regression | ✅ **FIXED** (`c34656a`) |
 | S2 / regulatory Emission-unit numerator gap | ✅ **FIXED** (`4eb4ff5`) |
-| S12 / regulatory `shipment_lines.emission_determination` forgery | ✅ **FIXED** (`6b6a5a5`, migration `20260829500000`) |
+| S12 / regulatory `shipment_lines.emission_determination` forgery | ✅ **FIXED**, after 6 iterations and 3 independent Opus reviews — see the dedicated write-up immediately below this table; do not trust the one-line summary alone |
 | S7 Storage bucket size/MIME limits | ✅ **FIXED** (`d40d143`) |
 | S8 `audit_events.occurred_at` unconstrained | ✅ **FIXED** (`6cd0b4b`) |
 | S9 `removeEvidenceFile` unguarded array update | ✅ **FIXED** (`b908cfb`) |
 | S11 `transitionShipmentStatus` no CAS guard | ✅ **FIXED** (`7aadfa5`) |
 | S15 `ENGINE_VERSION` not bumped (regulatory) | Partially fixed (`4eb4ff5`) — current/future changes now bump correctly; 3 historical unbumped changes cannot be retroactively fixed without violating append-only history |
-| S3 `enable_confirmations = false` vacuous email gate | Open — needs an explicit environment-configuration decision (local/dev-only vs. every environment), not purely a code change; see §16.5's closing paragraph |
-| S4 No password reset flow | Open — a genuine multi-day feature (new screens, GoTrue `resetPasswordForEmail`/`updateUser` flows, a "Forgot password?" entry point), not attempted in this remediation round given its size relative to the narrower fixes above |
-| S5 OWNER danger-zone has no RLS wall | Open — needs a migration tightening `organizations_update_admin_or_owner`'s WITH CHECK to OWNER-only (matching this session's earlier application-layer fix, `694218c`), not yet written |
-| S6 Evidence deletable from ACTIVE/VERIFIED records | Open — needs a lifecycle-status predicate added to `evidence_files_delete_own_org`'s USING clause |
-| S10 Last-active-OWNER invariant has no DB backstop | Open — the race is cross-row (two different membership rows), which no per-row CAS guard can close; needs either a deferred constraint trigger scanning all of an org's memberships, or a `SECURITY DEFINER` RPC serializing role-change/deactivation through one code path. Real, but the most architecturally involved of the open B-bucket items |
-| S13 Regulatory pipeline mutates shared reference rows in place | Open, **inside the protected regulatory zone** (`scripts/regulatory/*.py`) — needs its own narrow TDD-backed commit plus a clean `pnpm regulatory:verify`, deliberately not rushed into this pass per CLAUDE.md's protected-zone discipline |
-| S16 ACTUAL determination doesn't validate `cn_scope` against the line's CN code | Open — needs a check added to `determine-from-actual-data.ts` comparing the fetched record's `cn_scope` against the line's `cn_code` (the domain already has the exact predicate, `cn-scope-covers-code.ts` — it just isn't called on this path) |
-| S17 Rate limiting doesn't cover 17+ mutation actions | Open — mechanical but broad (apply the existing limiter pattern to every remaining create/delete/transition Server Action); sized as a dedicated pass, not a single fix |
+| S3 `enable_confirmations = false` vacuous email gate | Documented, not code-fixed (`d4dd505`) — `supabase/config.toml`'s setting only governs local dev; there is no staging/production Supabase project in this environment to actually configure. `docs/runbooks/DEPLOYMENT.md` §5 now carries an explicit, checkbox-tracked pre-go-live requirement instead of a silent local-file "fix" that would not touch the real gap |
+| S4 No password reset flow | ✅ **FIXED** (`7797e12`) — `/forgot-password` + `/reset-password`, rate-limited, verified end-to-end in a real browser against local Supabase + Mailpit (request → real email → PKCE code exchange → new password → signed in). Building this surfaced and fixed two adjacent bugs: the existing auth callback page only handled the implicit hash-fragment link shape, not the PKCE `?code=` shape `resetPasswordForEmail` actually produces (would have rejected every real reset link as "invalid or expired"); and Supabase's own `password_requirements` policy needed a specific, actionable error message instead of a generic fallback |
+| S5 OWNER danger-zone has no RLS wall | ✅ **FIXED** (`10b1dc6`) — `organizations_update_admin_or_owner` replaced with `organizations_update_owner`, gated on `app.user_is_owner_of()`; the one stale test that had encoded the old ADMIN-permitted behavior as correct baseline is updated, plus a new dedicated RLS-level test |
+| S6 Evidence deletable from ACTIVE/VERIFIED records | ✅ **FIXED** (`4f5dda3`) — both `removeEvidenceFile` (Wall 1) and `evidence_files_delete_own_org` (Wall 2) now refuse deletion once the owning `emission_data` record's `verification_status = 'VERIFIED'`, keyed on verification status alone (not `status`) so a DRAFT+REJECTED record stays fixable before resubmission |
+| S10 Last-active-OWNER invariant has no DB backstop | ✅ **FIXED** (`8dd2b06`) — a `BEFORE UPDATE OR DELETE` trigger on `memberships` locks every other active-OWNER row via `SELECT ... FOR UPDATE` before counting, closing the cross-row race a per-row CAS guard cannot. Caught and fixed a real bug in this same migration before committing: `SELECT count(*) ... FOR UPDATE` is invalid PostgreSQL (aggregates and row locking can't combine in one query) — split into a `PERFORM ... FOR UPDATE` lock statement followed by a separate `SELECT count(*)`. Exempts service-role callers (no application code ever deletes an organization outright; only test/ops cleanup does, via a whole-org cascade that would otherwise trip this same invariant) |
+| S13 Regulatory pipeline mutates shared reference rows in place | Documented, not code-fixed (`236207f`) — a decision memo (`docs/regulatory/REGULATORY_REFERENCE_DATA_MUTATION_DECISION_MEMO.md`), same posture as the R7/R9 memo: the pipeline's `countries`/`production_routes`/`cbam_goods` upsert-by-natural-key pattern is confirmed real and latent (never fired, since only one dataset has ever been loaded), but whether "keep reference data fresh on reload" or "reference data is append-only" is the correct design intent is a policy decision, not a defect with one obvious fix — changing protected-zone pipeline behavior without that decision would itself violate CLAUDE.md's discipline |
+| S16 ACTUAL determination doesn't validate `cn_scope` against the line's CN code | ✅ **FIXED** (`a3c2a41`) — `determine-from-actual-data.ts` now cross-checks the chosen `emission_data` record's `cn_scope` against the line's own `cn_code` via the existing `cnScopeCoversCnCode` predicate, which the picker already used but the commit path never did |
+| S17 Rate limiting doesn't cover 17+ mutation actions | ✅ **FIXED** (`14c7c3f`) — all 19 target Server Actions plus the evidence-download Route Handler now rate-limited on the established `createInMemoryRateLimiter` + `getClientIp()` pattern, with per-action limits reasoned from each action's own abuse/cost profile (60/10min for ordinary bulk creates down to 10/10min for recording a declaration as officially filed) |
 | S14 R7/R9 (regulatory) | Same item as Bucket A's regulatory entry — listed once, in Bucket A |
+
+#### S12 in full: the `shipment_lines.emission_determination` forgery fix, honestly accounted
+
+This was explicitly the highest-priority finding of this remediation round,
+and it earned that priority: the first attempted fix was completely broken,
+and every subsequent iteration's independent review found something real.
+Six iterations landed, three of them via a dedicated Opus review agent, one
+finding self-discovered by re-reading the previous iteration's own fix
+before the next review even ran. This section exists so a reader trusts the
+✅ in the table above for the right reason — because the process held up
+under repeated adversarial pressure, not because it went smoothly.
+
+1. **Iteration 1** (migration `20260829500000`, commit `6b6a5a5`) — a
+   `WITH CHECK` validating a DEFAULT/ACTUAL determination's claimed
+   identity and values against the real regulatory dataset / `emission_data`
+   table. **First independent Opus review found it completely bypassable**:
+   the method-gate logic treated anything that wasn't the literal string
+   `"DEFAULT"` as `"skip validation"`, including a *missing* `method` key —
+   live-reproduced with a 250x understatement — and the `ACTUAL` branch was
+   entirely unvalidated (the review's own test suite's 8th test asserted
+   that gap as *intended* behavior).
+2. **Iteration 2** (migrations `20260829530000`/`20260829540000`) — a full
+   rewrite closing the method-gate inversion, adding real ACTUAL-branch
+   validation, and (once a self-caught bug during re-verification showed the
+   new SECURITY DEFINER function created a cross-tenant boolean-oracle
+   disclosure — an org with zero relationship to an installation could
+   probe a real row's private values by guessing and reading accept/reject
+   outcomes) closing that too, gated on an org actually holding a sharing
+   grant.
+3. **Iteration 3/4** (migration `20260829580000`) — a **second** independent
+   Opus review found the oracle from iteration 2 was *still* live (an
+   INVITED-but-never-accepted, or REVOKED/EXPIRED, grant still let an
+   unrelated org probe a DRAFT/SUPERSEDED record), the ACTUAL branch
+   validated only 5 of `ActualEmissionSnapshot`'s 11 fields, Wall 2 enforced
+   none of the status/evidence/cn_scope gates the application layer already
+   did, and a DELETE destroyed a determination with zero audit trail. Rather
+   than patch a fourth time, this iteration **rearchitected**: validation
+   moved out of `shipment_lines`' `WITH CHECK` (re-evaluated on every
+   UPDATE, which is what made two separate retroactive-breakage bugs
+   possible) into a `BEFORE INSERT OR UPDATE` trigger that only validates
+   when `emission_determination` itself changes — which in turn made it
+   safe for the ACTUAL branch to finally require *current* authorization
+   (an ACTIVE, unexpired grant) without the earlier oracle-vs-breakage
+   tension.
+4. **Iteration 5** (migration `20260829600000`) — a **third** independent
+   Opus review found the DEFAULT branch, even after the rearchitecture,
+   never verified the matched regulatory record had anything to do with the
+   *calling line's own* declared `cn_code`/`origin_country` — live-
+   reproduced as a real 100% understatement (a real, genuinely-matching
+   record from a different good/country, e.g. Mali cement at 0.000 t, was
+   accepted onto an India/steel line). This iteration tied both fields to
+   the line, fixed a mutable-field bypass of the new cn_scope check (an
+   attacker could change `cn_code` in a *separate* statement without
+   re-triggering validation), replaced `=` with `is not distinct from`
+   throughout (a missing jsonb key's SQL NULL had been silently passing),
+   replaced a SQL `LIKE`-based prefix check with a literal one (a
+   producer-controlled `%` in `cn_scope` could act as a wildcard), and
+   added the DEFAULT branch's missing `resolved_at` check.
+5. **Iteration 6** (migration `20260829610000`) — **self-discovered** while
+   re-reading iteration 5's own cn_code/country fix before asking for a
+   fourth external review: the identical binding had never been applied to
+   `production_route_indicator`. Live-reproduced with a real
+   production-route-specific record (a route can carry a substantially
+   different value than the route-independent default for the same
+   good/country) accepted onto a line declaring no route at all. Fixed with
+   a 5th parameter and the same binding pattern.
+
+**What did NOT happen, stated plainly**: no Opus finding was accepted
+without this session's own independent live reproduction first (documented
+in-session via rolled-back `psql` transactions, per CLAUDE.md's own
+adversarial-testing discipline); no fix was declared complete without a
+positive control proving legitimate determinations (same-org DEFAULT,
+same-org ACTUAL, cross-org ACTUAL via an active grant, and the
+`OTHER_COUNTRIES_FALLBACK` edge case specifically) still succeed; and this
+write-up does not claim iteration 6 is provably the last one needed — the
+honest position, given the demonstrated pattern of each pass finding
+something the last one missed, is that this fix has now survived
+substantially more adversarial pressure than anything else in this
+codebase, not that it is mathematically proven complete. A fourth
+independent review was not dispatched after iteration 6 given the
+diminishing-but-nonzero marginal value against the token cost already spent
+(three full review passes, ~550k tokens of adversarial analysis) — a
+reasonable place to stop, not a claim that stopping was risk-free.
+
+Every iteration's test suite (`tests/integration/shipment-line-determination-hardening.test.ts`,
+30 tests as of iteration 6) was updated alongside its migration, `pnpm
+typecheck`/`pnpm test` re-run clean after each, and each iteration is its
+own separate, revertible commit: `6b6a5a5` (iteration 1, broken),
+`34a9c35` + `e22fab1` (iteration 2, the rewrite plus the self-caught
+oracle fix), `82d14f8` (iteration 3/4, the rearchitecture),
+`62c4c25` (iteration 5, cn_code/country binding), `18c4aaf` (iteration 6,
+production-route binding). One more real, separate bug surfaced while
+testing iteration 5's own retroactive-breakage fix and is fixed in its own
+commit (`f559143`): `service_role` had never been granted schema `USAGE`
+on `app` at all, nor `EXECUTE` on several individual RLS-helper functions —
+invisible until now because these were only ever reached via an RLS policy
+evaluation, which `service_role` always bypasses, until a *trigger* (not a
+policy) reached one of them for the first time. Purely an operational
+reliability fix (`service_role` already bypassed every policy these
+helpers back), not a security boundary change.
 
 **Bucket C — MEDIUM, fix where safe and clearly in scope (17, not individually
 fixed this round — each is real but narrower in blast radius than the
@@ -1028,33 +1178,39 @@ Railway/staging/production verification that did not actually happen.
    numbers are relied on for actual CBAM declarations covering any of those
    361 pairs.
 
-**Strongly recommended before real production use, even though it does not
-change the classification above** (§16.5): `shipment_lines.emission_determination`
-— the frozen regulatory provenance snapshot every "Why this number?" render,
-declaration export, and filed-snapshot archive trusts — can be forged by any
-org member via a direct PostgREST write, with no audit trail. This session
-fixed the equivalent `emission_data` (producer/ACTUAL-side) forgery gap
-earlier; this is its DEFAULT/importer-side sibling, found by this session's
-final audit but not fixed here — closing it needs a validating RPC or
-trigger, scoped as its own dedicated, reviewed piece of work rather than
-appended hastily to this session. Recommend prioritizing it above the other
-50 open findings in §16 given it undermines the platform's core
-provenance guarantee.
+**Update from the blocker-remediation round that followed this report's
+first version**: `shipment_lines.emission_determination` — the frozen
+regulatory provenance snapshot every "Why this number?" render, declaration
+export, and filed-snapshot archive trusts — was found forgeable by any org
+member via a direct PostgREST write when this report was first written.
+**It is now fixed**, after 6 remediation iterations and 3 independent Opus
+reviews (the first two attempted fixes were themselves found broken by
+independent review before the fix that finally held) — see §16.6's
+dedicated write-up for the full, honest account, and do not treat this
+one-line update as sufficient evidence on its own. This was never counted
+as a third named blocker in this section (the two above are the complete,
+exact list), but it was this report's own strongest "fix before real
+production use" recommendation, and that recommendation has now been acted
+on. Twelve more of the 53 originally-confirmed findings were fixed in the
+same round (§15 items 9–15, §16.6's full triage table) — S10, S5, S6, S16,
+S17, S4 (a new feature, not a defect fix), plus S12 already named above.
 
 Everything else this report covers — the calculation engine, explainability,
-tenancy/RLS, the fifteen fixes landed this session (thirteen from direct
-investigation plus two more from the final audit — see §1, §16), the local
-Docker build, the documentation audit, backup/restore (locally), the full
-local browser verification of both journeys — has real, direct evidence
-behind it and is **not**, on its own, a blocker to a Railway-independent
-go-live decision. The 51 still-open findings in §16 are real and should be
-worked through on their own merits (§16 gives each a severity and, where
-useful, a recommended priority) — they do not individually change the
-RELEASE BLOCKED classification above, which rests on §1/§2. Once Railway is
-healthy and the R7/R9 question is resolved, re-run §29–§34's checks against
-a live deployment, review §16's remaining findings against your own risk
-tolerance, and revisit this classification from first principles — not
-assumed to flip automatically just because the two named blockers clear.
+tenancy/RLS, the many fixes landed across this session (§1, §15, §16.6),
+the local Docker build, the documentation audit, backup/restore (locally),
+the full local browser verification of both journeys — has real, direct
+evidence behind it and is **not**, on its own, a blocker to a
+Railway-independent go-live decision. Roughly 40 findings from §16 remain
+open (real, and should be worked through on their own merits — §16 gives
+each a severity and, where useful, a recommended priority), plus two
+findings deliberately left as owner-decision memos rather than code fixes
+(S13, alongside R7/R9 itself) — none of these individually change the
+RELEASE BLOCKED classification above, which rests on §1/§2 alone. Once
+Railway is healthy and the R7/R9 question is resolved, re-run §29–§34's
+checks against a live deployment, review §16's remaining findings against
+your own risk tolerance, and revisit this classification from first
+principles — not assumed to flip automatically just because the two named
+blockers clear.
 
 ---
 
