@@ -262,11 +262,21 @@ grant — see that RPC's own header comment in
 `20260829310000_p7d3_shared_data_consumption_audit.sql`). As of this
 writing, every row from every event_type below carries
 `correlation_id: null` **except `calculation.computed`** — the one
-event type, out of the 34 below, whose call site populates it. A
+event type, out of every event type below, whose call site populates
+it. A
 per-row column repeating "null" thirty-three times and "populated"
 once was dropped from the table in favor of the **Correlation IDs**
 subsection that follows the catalog, which explains that one exception
 and what it does and doesn't mean against master plan §21.
+
+**Updated 2026-08-29 (P13 audit finding):** this catalog undercounted
+by 7 event types across a full P9/P10 cycle before this correction —
+the entire declaration lifecycle (added P9: `declaration.amendment_created`,
+`declaration.draft_generated`, `declaration.draft_refreshed`,
+`declaration.marked_ready`, `declaration.filed`) and membership
+deactivation/reactivation (added P10: `membership.deactivated`,
+`membership.reactivated`) were never folded in after landing. All 7
+are now present in the table below.
 
 | `event_type` | `aggregate_type` | Fires when | Write path |
 | --- | --- | --- | --- |
@@ -274,10 +284,12 @@ and what it does and doesn't mean against master plan §21.
 | `membership.invitation_accepted` | MEMBERSHIP | A pending org invitation is accepted and becomes a membership. | SQL RPC: `accept_organization_invitation()` (`20260828130000`) |
 | `membership.role_changed` | MEMBERSHIP | An ADMIN+ changes another member's role. | `recordAuditEvent` — `manage-membership.ts` |
 | `membership.removed` | MEMBERSHIP | A member is removed from an org. | `recordAuditEvent` — `manage-membership.ts` |
+| `membership.deactivated` | MEMBERSHIP | An ADMIN+ deactivates another member (P10). | `recordAuditEvent` — `manage-membership.ts` |
+| `membership.reactivated` | MEMBERSHIP | An ADMIN+ reactivates a deactivated member (P10). | `recordAuditEvent` — `manage-membership.ts` |
 | `shipment.created` | SHIPMENT | A shipment is created. | `recordAuditEvent` — `create-shipment.ts` |
 | `shipment.marked_ready` | SHIPMENT | A shipment transitions DRAFT → READY. | `recordAuditEvent` — `transition-shipment.ts` (`AUDIT_EVENT_TYPE_BY_ACTION`) |
 | `shipment.reopened` | SHIPMENT | A shipment transitions READY → DRAFT. | `recordAuditEvent` — `transition-shipment.ts` |
-| `shipment.locked` | SHIPMENT | A shipment is locked (declaration-filed guard). | `recordAuditEvent` — `transition-shipment.ts` |
+| `shipment.locked` | SHIPMENT | A shipment is locked — either directly (declaration-filed guard) or in bulk as a side effect of filing a declaration. | `recordAuditEvent` — `transition-shipment.ts`; **also** SQL RPC `record_declaration_filed()` (`20260829400000`), one row per member shipment locked |
 | `shipment.voided` | SHIPMENT | A shipment is voided. | `recordAuditEvent` — `transition-shipment.ts` |
 | `shipment_line.added` | SHIPMENT_LINE | A line is added to a shipment. | `recordAuditEvent` — `manage-lines.ts` |
 | `shipment_line.updated` | SHIPMENT_LINE | A line's fields are edited. | `recordAuditEvent` — `manage-lines.ts` |
@@ -304,6 +316,11 @@ and what it does and doesn't mean against master plan §21.
 | `sharing_grant.accepted` | SHARING_GRANT | A grant is accepted — either directly, or via an email-invitation bootstrap; same event_type from both call sites. | `recordAuditEvent` — `manage-sharing-grants.ts` (`acceptSharingGrant`, `acceptSharingGrantInvitation`) |
 | `sharing_grant.revoked` | SHARING_GRANT | A producer revokes a grant. | `recordAuditEvent` — `manage-sharing-grants.ts` (`revokeSharingGrant`) |
 | `sharing_grant.data_consumed` | SHARING_GRANT | An importer determines/redetermines a line from a producer's shared data — recorded on the **grantor's** org_id, not the importer's. | SQL RPC: `record_shared_data_consumption()` (`20260829310000`), called from `determine-from-actual-data.ts` |
+| `declaration.draft_generated` | DECLARATION | A declaration draft is first generated for a period. | `recordAuditEvent` — `generate-or-refresh-declaration-draft.ts` |
+| `declaration.draft_refreshed` | DECLARATION | An existing draft is regenerated (e.g. after underlying data changed). | `recordAuditEvent` — `generate-or-refresh-declaration-draft.ts` |
+| `declaration.marked_ready` | DECLARATION | A declaration transitions DRAFT → READY. | `recordAuditEvent` — `mark-declaration-ready.ts` |
+| `declaration.amendment_created` | DECLARATION | An amendment declaration is created against an already-filed one. | `recordAuditEvent` — `create-declaration-amendment.ts` |
+| `declaration.filed` | DECLARATION | A declaration is filed, atomically LOCKing every member shipment in the same transaction (see `shipment.locked` above). | SQL RPC: `record_declaration_filed()` (`20260829400000`) |
 
 ### Correlation IDs
 
@@ -332,14 +349,31 @@ is reported as found.
   hardening item from the mandatory P6 review, deliberately not
   redesigned here. This is the *only* place in the codebase where two
   rows in two different tables carry the same `correlation_id` value.
-  Every other `recordAuditEvent` call site — the twelve other files
-  under `src/application/` that call it — and all three
-  `SECURITY DEFINER` RPCs that insert into `audit_events` directly
-  (`create_organization_with_owner()` in `20260828090000`,
-  `accept_organization_invitation()` in `20260828130000`,
-  `record_shared_data_consumption()` in `20260829310000`) write
-  `correlation_id: null`, because none of them is ever handed a value
-  to write.
+  Every other `recordAuditEvent` call site under `src/application/` —
+  16 files as of 2026-08-29, up from 12 at P8 exit as the P9
+  declarations module and the P10 membership-deactivation lifecycle
+  added their own — and all four `SECURITY DEFINER` RPCs that insert
+  into `audit_events` directly (`create_organization_with_owner()` in
+  `20260828090000`, `accept_organization_invitation()` in
+  `20260828130000`, `record_shared_data_consumption()` in
+  `20260829310000`, and `record_declaration_filed()` in `20260829400000`,
+  added P9/hardened P11 — missing from this list until this same
+  correction) write `correlation_id: null`, because none of them is
+  ever handed a value to write.
+
+  **P11 finding, closed:** `record_declaration_filed()`'s own audit
+  writes are `SECURITY DEFINER`, so they were never exposed to a client
+  INSERT — but before `20260829430000_p11_review_audit_events_event_type_catalog.sql`,
+  every *other* `audit_events` write path (the plain `recordAuditEvent`
+  call sites above) accepted an arbitrary, unvalidated `event_type`
+  string from the caller via RLS's own INSERT policy, since the table
+  had no `event_type` CHECK constraint. A member could forge any
+  `event_type`/`payload` combination into their own org's audit trail
+  via a bare client INSERT — live-reproduced during the P11 review as a
+  fabricated `declaration.filed` row carrying a forged
+  `filed_reference`. That migration adds a `WITH CHECK` allowlist of
+  every real event type (the 41 client-insertable + RPC-only types this
+  catalog now documents) to close it.
 - **What generates a correlation/request ID at all.** One thing does,
   and it isn't wired to anything: `createRequestId()`
   (`src/infrastructure/observability/logger.ts`) exists and is
