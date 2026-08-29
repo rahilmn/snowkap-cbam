@@ -216,9 +216,34 @@ jobs:
           #    transcript.
           KNOWN_SAFE_LOCAL_PG_URL='postgres:postgres@127.0.0.1'
 
-          MATCHES="$(git grep -InE "$PATTERN" -- . \
+          # 2026-08-30 (P13 production-config review, round 2): the
+          # trailing `|| true` two steps below is required to survive
+          # `git grep`'s own "no matches = exit 1" under `set -e`
+          # (verified locally) -- but `$(...)` only captures stdout, so
+          # under the ORIGINAL single-pipeline form that same `|| true`
+          # also silently absorbed `git grep` exiting 128 on a malformed
+          # PATTERN (confirmed by reproducing both cases): the fatal
+          # error would print to stderr, but $MATCHES would stay empty
+          # and the step would print "no secrets found" and exit 0 --
+          # this security gate quietly becoming a no-op on its own future
+          # edit. Splitting `git grep` out and checking its exit code
+          # explicitly (0 = matches, 1 = no matches, anything else = the
+          # scan itself is broken) closes that without changing what
+          # counts as a real secret finding.
+          if RAW_MATCHES="$(git grep -InE "$PATTERN" -- . \
               ':!pnpm-lock.yaml' \
-              ':!.github/workflows/ci.yml' \
+              ':!.github/workflows/ci.yml')"; then
+            GIT_GREP_EXIT=0
+          else
+            GIT_GREP_EXIT=$?
+          fi
+
+          if [ "$GIT_GREP_EXIT" -gt 1 ]; then
+            echo "::error::git grep exited with status $GIT_GREP_EXIT while scanning for secrets (expected 0 = matches found or 1 = no matches) -- treating this as a broken scan, not \"no secrets found\". Likely a malformed PATTERN regex."
+            exit 1
+          fi
+
+          MATCHES="$(printf '%s\n' "$RAW_MATCHES" \
             | grep -vF "$KNOWN_SAFE_LOCAL_DEMO_JWT" \
             | grep -vF "$KNOWN_SAFE_LOCAL_PG_URL" || true)"
 
