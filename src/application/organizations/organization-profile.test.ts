@@ -8,8 +8,29 @@ import {
   updateOrganizationProfile,
 } from "./organization-profile";
 
-const orgId =
-  "org-1" as never;
+const ownerContext =
+  {
+    org_id: "org-1",
+    user_id: "user-1",
+    role: "OWNER",
+    capabilities: ["IMPORTER_DECLARANT"],
+  } as never;
+
+const adminContext =
+  {
+    org_id: "org-1",
+    user_id: "user-2",
+    role: "ADMIN",
+    capabilities: ["IMPORTER_DECLARANT"],
+  } as never;
+
+const memberContext =
+  {
+    org_id: "org-1",
+    user_id: "user-3",
+    role: "MEMBER",
+    capabilities: ["IMPORTER_DECLARANT"],
+  } as never;
 
 function mockSupabase(
   updateError: unknown = null,
@@ -54,8 +75,7 @@ describe(
 
         await updateOrganizationProfile(
           client,
-          orgId,
-          ["IMPORTER_DECLARANT"],
+          ownerContext,
           {
             name: "Acme",
             eoriNumber: null,
@@ -79,8 +99,7 @@ describe(
 
         await updateOrganizationProfile(
           client,
-          orgId,
-          ["IMPORTER_DECLARANT"],
+          ownerContext,
           {
             name: "Acme",
             eoriNumber: null,
@@ -104,8 +123,12 @@ describe(
 
         await updateOrganizationProfile(
           client,
-          orgId,
-          ["IMPORTER_DECLARANT", "PRODUCER_OPERATOR"],
+          {
+            org_id: "org-1",
+            user_id: "user-1",
+            role: "OWNER",
+            capabilities: ["IMPORTER_DECLARANT", "PRODUCER_OPERATOR"],
+          } as never,
           {
             name: "Acme",
             eoriNumber: null,
@@ -132,8 +155,7 @@ describe(
         const result =
           await updateOrganizationProfile(
             client,
-            orgId,
-            ["IMPORTER_DECLARANT"],
+            ownerContext,
             {
               name: "Acme",
               eoriNumber: null,
@@ -145,6 +167,88 @@ describe(
 
         expect(result).toEqual(
           { status: "PERSIST_FAILED" },
+        );
+      },
+    );
+
+    describe(
+      "role gate",
+      () => {
+        it(
+          "rejects PERMISSION_DENIED for an ADMIN, before touching the database (P13 audit follow-up: this gate previously lived only in the calling Server Action, unproven by any test)",
+          async () => {
+            const { client, getCapturedPayload } =
+              mockSupabase();
+
+            const result =
+              await updateOrganizationProfile(
+                client,
+                adminContext,
+                {
+                  name: "Acme",
+                  eoriNumber: null,
+                  cbamDeclarantStatus: "NOT_REGISTERED",
+                  countryOfEstablishment: null,
+                  addCapability: null,
+                },
+              );
+
+            expect(result).toEqual(
+              { status: "PERMISSION_DENIED" },
+            );
+
+            expect(getCapturedPayload()).toBeUndefined();
+          },
+        );
+
+        it(
+          "rejects PERMISSION_DENIED for a plain MEMBER",
+          async () => {
+            const { client } =
+              mockSupabase();
+
+            const result =
+              await updateOrganizationProfile(
+                client,
+                memberContext,
+                {
+                  name: "Acme",
+                  eoriNumber: null,
+                  cbamDeclarantStatus: "NOT_REGISTERED",
+                  countryOfEstablishment: null,
+                  addCapability: null,
+                },
+              );
+
+            expect(result).toEqual(
+              { status: "PERMISSION_DENIED" },
+            );
+          },
+        );
+
+        it(
+          "allows the OWNER",
+          async () => {
+            const { client } =
+              mockSupabase();
+
+            const result =
+              await updateOrganizationProfile(
+                client,
+                ownerContext,
+                {
+                  name: "Acme",
+                  eoriNumber: null,
+                  cbamDeclarantStatus: "NOT_REGISTERED",
+                  countryOfEstablishment: null,
+                  addCapability: null,
+                },
+              );
+
+            expect(result).toEqual(
+              { status: "OK" },
+            );
+          },
         );
       },
     );

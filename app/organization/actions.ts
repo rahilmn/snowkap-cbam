@@ -86,7 +86,10 @@ export async function updateOrganizationAction(
   // matrix, stricter than the ADMIN-or-OWNER access the underlying
   // organizations_update_admin_or_owner RLS policy technically allows
   // (an earlier-phase decision this screen doesn't relitigate -- see
-  // that policy's own comment).
+  // that policy's own comment). Checked again inside
+  // updateOrganizationProfile itself (P13 audit follow-up) -- this
+  // early return is purely a fast, DB-read-free UX path, not the only
+  // enforcement point anymore.
   if (orgSummary.context.role !== "OWNER") {
     return {
       status: "error",
@@ -107,8 +110,7 @@ export async function updateOrganizationAction(
   const result =
     await updateOrganizationProfile(
       supabase,
-      orgSummary.context.org_id,
-      orgSummary.context.capabilities,
+      orgSummary.context,
       {
         name: parsed.data.name,
         eoriNumber: parsed.data.eoriNumber?.trim() || null,
@@ -117,6 +119,13 @@ export async function updateOrganizationAction(
         addCapability: parsed.data.addCapability ?? null,
       },
     );
+
+  if (result.status === "PERMISSION_DENIED") {
+    return {
+      status: "error",
+      message: "Only the organization's OWNER can change these settings.",
+    };
+  }
 
   if (result.status === "PERSIST_FAILED") {
     return {

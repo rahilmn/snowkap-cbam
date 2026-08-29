@@ -12,6 +12,10 @@ import type {
   OrganizationId,
 } from "../../domain/shared/ids";
 
+import type {
+  OrgContext,
+} from "./org-context";
+
 interface OrganizationRow {
   id: string;
   name: string;
@@ -74,7 +78,18 @@ export async function getOrganizationProfile(
 
 export type UpdateOrganizationResult =
   | { status: "OK" }
-  | { status: "PERSIST_FAILED" };
+  | { status: "PERSIST_FAILED" }
+  // Org profile edits (name, EORI, declarant status, and -- notably --
+  // capabilities, which every hasCapability() gate elsewhere in this
+  // codebase trusts) are OWNER-only, master plan §14/§27 screen 23
+  // "danger zone". Before this check moved here, it lived only in the
+  // one Server Action caller (app/organization/actions.ts) with no
+  // service-layer backstop and no test proving it held -- P13 audit
+  // follow-up, matching every other ADMIN+/OWNER-gated service in this
+  // codebase (verifyEmissionData, transitionShipmentStatus's LOCK,
+  // etc.), which all check role *inside* the service, not only at the
+  // caller.
+  | { status: "PERMISSION_DENIED" };
 
 export interface OrganizationProfileUpdate {
   name: string;
@@ -93,14 +108,19 @@ export interface OrganizationProfileUpdate {
  */
 export async function updateOrganizationProfile(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
-  currentCapabilities: OrganizationCapability[],
+  context: OrgContext,
   update: OrganizationProfileUpdate,
 ): Promise<UpdateOrganizationResult> {
+  if (context.role !== "OWNER") {
+    return {
+      status: "PERMISSION_DENIED",
+    };
+  }
+
   const capabilities =
-    update.addCapability && !currentCapabilities.includes(update.addCapability)
-      ? [...currentCapabilities, update.addCapability]
-      : currentCapabilities;
+    update.addCapability && !context.capabilities.includes(update.addCapability)
+      ? [...context.capabilities, update.addCapability]
+      : context.capabilities;
 
   const { error } =
     await supabase
@@ -116,7 +136,7 @@ export async function updateOrganizationProfile(
       )
       .eq(
         "id",
-        orgId,
+        context.org_id,
       );
 
   if (error) {
