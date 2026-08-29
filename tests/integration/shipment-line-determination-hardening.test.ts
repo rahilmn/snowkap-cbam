@@ -136,16 +136,37 @@ interface RealEmissionData {
   emission_unit: string;
   direct_specific: string;
   indirect_specific: string;
+  installation_id: string;
+  methodology: string;
+  version: number;
+  evidence_file_ids: string[];
 }
 
+// Mirrors src/application/emissions/determine-from-actual-data.ts's own
+// ActualEmissionSnapshot construction field-for-field (P13 review
+// iteration 4, finding #2 / the review's own "test-suite honesty"
+// section): the FIRST version of this helper built only the five
+// fields the DB check happened to validate at the time, which is
+// exactly why a real reviewer-caught bypass (accepting a forged
+// methodology/installation_id/evidence_file_ids/resolved_at/
+// sharing_grant_id alongside genuine numeric values) went unnoticed --
+// the suite's own "genuine" positive control was never a valid
+// snapshot to begin with.
 function actualDeterminationFrom(
   record: RealEmissionData,
+  sharingGrantId: string | null = null,
 ): Record<string, unknown> {
   return {
     method: "ACTUAL",
     snapshot: {
       emission_data_id: record.id,
+      emission_data_version: record.version,
+      installation_id: record.installation_id,
+      resolved_at: "2026-08-30T00:00:00.000Z",
+      methodology: record.methodology,
       verification: { status: record.verification_status, verifier_user_id: record.verifier_user_id },
+      evidence_file_ids: record.evidence_file_ids,
+      sharing_grant_id: sharingGrantId,
       emission_unit: record.emission_unit,
       values: { direct_specific: record.direct_specific, indirect_specific: record.indirect_specific },
     },
@@ -491,10 +512,11 @@ describe.skipIf(!localSupabaseReachable)(
               verification_status: "VERIFIED",
               verifier_user_id: memberId,
               status: "ACTIVE",
+              evidence_file_ids: ["ffffffff-0000-0000-0000-000000000009"],
             },
           )
           .select(
-            "id, verification_status, verifier_user_id, emission_unit, direct_specific, indirect_specific",
+            "id, verification_status, verifier_user_id, emission_unit, direct_specific, indirect_specific, installation_id, methodology, version, evidence_file_ids",
           )
           .single();
 
@@ -954,7 +976,7 @@ describe.skipIf(!localSupabaseReachable)(
           await clientMember
             .from("shipment_lines")
             .update(
-              { emission_determination: actualDeterminationFrom(realEmissionData) },
+              { emission_determination: actualDeterminationFrom(realEmissionData, sharingGrantId) },
             )
             .eq(
               "id",
@@ -1161,7 +1183,7 @@ describe.skipIf(!localSupabaseReachable)(
           await clientMember
             .from("shipment_lines")
             .update(
-              { emission_determination: actualDeterminationFrom(realEmissionData) },
+              { emission_determination: actualDeterminationFrom(realEmissionData, sharingGrantId) },
             )
             .eq(
               "id",
@@ -1219,6 +1241,7 @@ describe.skipIf(!localSupabaseReachable)(
         const forged =
           actualDeterminationFrom(
             realEmissionData,
+            sharingGrantId,
           );
 
         (
@@ -1240,6 +1263,276 @@ describe.skipIf(!localSupabaseReachable)(
         expect(error).not.toBeNull();
         expect(error?.code).toBe(
           "42501",
+        );
+      },
+    );
+
+    it(
+      "rejects a real emission_data row's identity paired with a fabricated methodology (P13 review iteration 4, finding #2) -- a prior version of this fix validated only five of the snapshot's eleven fields",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const forged =
+          actualDeterminationFrom(
+            realEmissionData,
+            sharingGrantId,
+          );
+
+        (forged.snapshot as Record<string, unknown>).methodology =
+          "OTHER";
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "rejects an ACTUAL snapshot whose OWN claimed verification.status is not VERIFIED, even though the real emission_data row is VERIFIED (finding #2)",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const forged =
+          actualDeterminationFrom(
+            realEmissionData,
+            sharingGrantId,
+          );
+
+        (forged.snapshot as Record<string, unknown>).verification =
+          { status: "REJECTED", verifier_user_id: realEmissionData.verifier_user_id };
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "rejects a real emission_data row's identity paired with fabricated evidence_file_ids (finding #2)",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const forged =
+          actualDeterminationFrom(
+            realEmissionData,
+            sharingGrantId,
+          );
+
+        (forged.snapshot as Record<string, unknown>).evidence_file_ids =
+          ["totally", "made", "up"];
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "rejects an ACTUAL determination against a DRAFT (never-activated) emission_data row, even one that is itself VERIFIED and even with an ACTIVE sharing grant in place (P13 review iteration 4, finding #1/#3) -- a producer's unpublished working numbers must never back an importer's compliance calculation",
+      async () => {
+        const { data: draftEmissionData, error: draftError } =
+          await serviceClient
+            .from("emission_data")
+            .insert(
+              {
+                installation_id: installationId,
+                entered_by_org_id: producerOrgId,
+                cn_scope: [recordA.source_trade_code.replace(/\s+/g, "")],
+                reporting_period_kind: "ANNUAL",
+                reporting_period_year: 2099,
+                direct_specific: "9.99",
+                indirect_specific: "2.22",
+                emission_unit: "TCO2E_PER_TONNE",
+                methodology: "EU_METHOD",
+                verification_status: "VERIFIED",
+                verifier_user_id: memberId,
+                status: "DRAFT",
+                evidence_file_ids: ["ffffffff-0000-0000-0000-000000000010"],
+              },
+            )
+            .select(
+              "id, verification_status, verifier_user_id, emission_unit, direct_specific, indirect_specific, installation_id, methodology, version, evidence_file_ids",
+            )
+            .single();
+
+        if (draftError || !draftEmissionData) {
+          throw new Error(
+            `Failed to seed draft emission_data: ${draftError?.message}`,
+          );
+        }
+
+        try {
+          const lineId =
+            await insertLine();
+
+          const { error } =
+            await clientMember
+              .from("shipment_lines")
+              .update(
+                {
+                  emission_determination: actualDeterminationFrom(
+                    draftEmissionData as RealEmissionData,
+                    sharingGrantId,
+                  ),
+                },
+              )
+              .eq(
+                "id",
+                lineId,
+              );
+
+          expect(error).not.toBeNull();
+          expect(error?.code).toBe(
+            "42501",
+          );
+        } finally {
+          await serviceClient
+            .from("emission_data")
+            .delete()
+            .eq(
+              "id",
+              draftEmissionData.id,
+            );
+        }
+      },
+    );
+
+    it(
+      "keeps a previously-valid ACTUAL determination re-savable after the producer flips their OWN emission_data back to UNVERIFIED (P13 review iteration 4, finding #4) -- validating only when emission_determination itself changes means an unrelated cross-org state change can never retroactively brick an existing, unrelated edit",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const { error: setError } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: actualDeterminationFrom(realEmissionData, sharingGrantId) },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(setError).toBeNull();
+
+        const { error: flipError } =
+          await serviceClient
+            .from("emission_data")
+            .update(
+              { verification_status: "UNVERIFIED" },
+            )
+            .eq(
+              "id",
+              realEmissionData.id,
+            );
+
+        expect(flipError).toBeNull();
+
+        try {
+          const { error: unrelatedEditError } =
+            await clientMember
+              .from("shipment_lines")
+              .update(
+                { net_mass_tonnes: "13" },
+              )
+              .eq(
+                "id",
+                lineId,
+              );
+
+          expect(unrelatedEditError).toBeNull();
+        } finally {
+          await serviceClient
+            .from("emission_data")
+            .update(
+              { verification_status: "VERIFIED" },
+            )
+            .eq(
+              "id",
+              realEmissionData.id,
+            );
+        }
+      },
+    );
+
+    it(
+      "audits a DELETE of a line that carries a determination (P13 review iteration 4, finding #5) -- previously silent, the same defect class already closed for clear-to-null",
+      async () => {
+        const lineId =
+          await insertLine(
+            { emission_determination: determinationFrom(recordA) },
+          );
+
+        const { error: deleteError } =
+          await clientMember
+            .from("shipment_lines")
+            .delete()
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(deleteError).toBeNull();
+
+        const { data: events } =
+          await serviceClient
+            .from("audit_events")
+            .select("payload")
+            .eq(
+              "aggregate_id",
+              lineId,
+            )
+            .eq(
+              "event_type",
+              "shipment_line.updated",
+            )
+            .eq(
+              "payload->>change_kind",
+              "deleted",
+            );
+
+        expect(events).toHaveLength(
+          1,
         );
       },
     );
