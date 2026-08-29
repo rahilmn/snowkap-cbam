@@ -36,15 +36,18 @@ This session (a continuation of prior P7–P13 work) found and fixed
 ran a final 12-dimension, 204-sub-agent adversarial audit (§16) that
 independently confirmed **53 further findings** — 34 security, 19
 regulatory. A dedicated blocker-remediation round then acted on that
-triage (§15 items 9–15, §16.6): **12 more of the 53 are now fixed**, on top
-of the 2 fixed before the round began — 14 total, including the single most
-severe finding (the `shipment_lines.emission_determination` forgery, which
-took 6 iterations and 3 independent adversarial reviews to actually close;
-see §16.6's dedicated write-up). Two more are documented as owner-decision
-memos rather than code fixes (the regulatory pipeline's reference-table
-mutation, and the local-only email-confirmation setting). Roughly 40 remain
-open and are fully triaged and recorded by severity in §16, not silently
-left for a future reader to discover. Every fix in this report follows the
+triage (§15 items 9–15, §16.6): **13 of the 53 are now confirmed fixed** —
+6 landed in this round (S10, S5, S6, S16, S17, S4, plus the single most
+severe finding S12, the `shipment_lines.emission_determination` forgery,
+which took 6 iterations and 3 independent adversarial reviews to actually
+close; see §16.6's dedicated write-up), and 4 more (S7, S8, S9, S11) turned
+out to already be fixed from an earlier round of this same session but had
+been left incorrectly marked "Open" until this update corrected them. Two
+more are documented as owner-decision memos rather than code fixes (the
+regulatory pipeline's reference-table mutation, and the local-only
+email-confirmation setting). Roughly 37 remain open and are fully triaged
+and recorded by severity in §16, not silently left for a future reader to
+discover. Every fix in this report follows the
 same discipline: reproduce first (almost always live, against real local
 Postgres, in a rolled-back transaction), fix the smallest safe scope, add
 regression coverage, independently re-verify — and, for the highest-stakes
@@ -479,15 +482,17 @@ show the adversarial process does actually kill weak findings, not just
 rubber-stamp everything found.
 
 **Fixed across this session** (§16.1/§16.6 mark these as FIXED inline, with
-commits): 13 of Bucket B's 17 HIGH findings, including the single most
+commits): 12 of Bucket B's 16 HIGH findings, including the single most
 severe one (S12, the `emission_determination` forgery, closed only after 6
 iterations and 3 independent adversarial reviews — see §16.6's dedicated
-write-up before trusting the one-line status). The remaining 4 Bucket B
-items are either partially fixed (S15), documented as owner-decision items
-rather than code defects (S3, S13), or genuinely still open (S7, S8, S9,
-S11) — every one triaged and recorded honestly below, not silently left for
-a reader to discover, per this codebase's own standing documentation
-convention.
+write-up before trusting the one-line status). Of the remaining 4: S15 is
+partially fixed, S3 and S13 are documented as owner-decision items rather
+than code defects, and S7 is fixed in code but not fully verified end-to-end
+(no real Storage service available on this host) — none of Bucket B's 16
+distinct entries are simply "still open with nothing done," though S7's
+verification gap is real and stated as such, not glossed over. Every one is
+triaged and recorded honestly below, not silently left for a reader to
+discover, per this codebase's own standing documentation convention.
 
 ### 16.1 Security — confirmed (34), by severity
 
@@ -497,7 +502,7 @@ convention.
 |---|---|---|
 | S1 | Auth email-link callback could no longer establish a session in any browser that had signed in before — this session's own earlier httpOnly-cookie hardening made the browser silently reject the client-side `setSession()` cookie write, so an invited/magic-link user kept acting as their original identity with no error surfaced | **FIXED** — `c34656a`: session now established via a Server Action calling `setSession()` on the server client (real `Set-Cookie` headers, which the browser cannot refuse). Verified live end-to-end reproducing the exact scenario (see §6/§13). |
 
-**HIGH — 13 fixed, 2 documented (owner decision pending), 1 partially fixed, 1 open by design (regulatory)**
+**HIGH — 12 fixed (1 of those, S7, fixed in code but not fully verified end-to-end), 2 documented (owner decision pending), 1 partially fixed, 1 open by design (regulatory)**
 
 | # | Finding | Status |
 |---|---|---|
@@ -506,11 +511,11 @@ convention.
 | S4 | No password reset or password-change flow exists anywhere — a promised P3/master-plan deliverable; a forgotten password or an invited account (provisioned with no password) is permanently unrecoverable through the product | **FIXED** — `7797e12`: `/forgot-password` + `/reset-password`, rate-limited, verified end-to-end in a real browser (request → real Mailpit email → PKCE code exchange → new password → signed in). Also fixed two bugs this surfaced: the auth callback page only handled the implicit hash-fragment link shape, not the PKCE `?code=` shape `resetPasswordForEmail` actually produces; and Supabase's password-complexity rejection needed a specific message instead of a generic one. |
 | S5 | OWNER-only org "danger zone" has no RLS wall — any ADMIN can rewrite EORI/declarant-status/**capabilities** via a direct PostgREST call, with zero audit trail (no `organization.*` event type exists at all) | **FIXED** — `10b1dc6`: `organizations_update_admin_or_owner` replaced with `organizations_update_owner`, gated on `app.user_is_owner_of()`. The one existing test that had encoded the old ADMIN-permitted behavior as correct baseline (predating this session's Wall-1 fix) is updated. |
 | S6 | Evidence backing an ACTIVE/VERIFIED — and already-filed — emission record can be permanently deleted from Storage by any plain org member; no lifecycle gate at any layer | **FIXED** — `4f5dda3`: both `removeEvidenceFile` and `evidence_files_delete_own_org` now refuse deletion once the owning record's `verification_status = 'VERIFIED'`, keyed so a DRAFT+REJECTED record stays fixable before resubmission. |
-| S7 | The 'evidence' Storage bucket sets neither `file_size_limit` nor `allowed_mime_types` — the entire upload-safety control set (size cap, MIME/extension allowlist, executable block) is application-layer-only and bypassable with a direct Storage API call using the (intentionally) public anon key | Open — requires real Storage to fully confirm end-to-end; local Storage cannot run on this host |
-| S8 | `audit_events.occurred_at` is entirely client-supplied and unconstrained — any MEMBER can backdate/future-date events, and 200 forged rows permanently push every real event off the org's only Audit screen (no pagination, no UPDATE/DELETE policy) | Open |
-| S9 | `removeEvidenceFile`'s array update is unguarded AND its error is uniquely uncaptured among this file's write paths — a lost race can leave `emission_data.evidence_file_ids` referencing a deleted file, which the P13 evidence integrity `WITH CHECK` then permanently rejects every future UPDATE against — bricking the record | Open |
+| S7 | The 'evidence' Storage bucket sets neither `file_size_limit` nor `allowed_mime_types` — the entire upload-safety control set (size cap, MIME/extension allowlist, executable block) is application-layer-only and bypassable with a direct Storage API call using the (intentionally) public anon key | **FIXED in code** (`d40d143`, migration `20260829510000`) — mirrors `MAX_EVIDENCE_FILE_SIZE_BYTES`/`ALLOWED_MIME_TYPE_EXTENSIONS` exactly. **Cannot apply locally** (`storage.buckets` does not exist on this host — confirmed via `to_regclass`), tracked applied via `supabase migration repair` per this repo's established precedent for storage-touching migrations; genuine end-to-end verification against a real Storage service remains outstanding, not fabricated as done here. |
+| S8 | `audit_events.occurred_at` is entirely client-supplied and unconstrained — any MEMBER can backdate/future-date events, and 200 forged rows permanently push every real event off the org's only Audit screen (no pagination, no UPDATE/DELETE policy) | **FIXED** (`6cd0b4b`, migration `20260829520000`) — a trigger unconditionally overwrites `occurred_at := now()`. This session's own report previously left this row marked "Open" after the fix had already landed; corrected here after re-confirming live (a claimed `2999-01-01` insert is silently overwritten with the real current timestamp). |
+| S9 | `removeEvidenceFile`'s array update is unguarded AND its error is uniquely uncaptured among this file's write paths — a lost race can leave `emission_data.evidence_file_ids` referencing a deleted file, which the P13 evidence integrity `WITH CHECK` then permanently rejects every future UPDATE against — bricking the record | **FIXED** (`b908cfb`) — the write's error is now captured, and on failure it retries once against a fresh read. Same stale-status correction as S8 above; re-confirmed the retry logic is present in the current code. |
 | S10 | Last-active-OWNER invariant has no DB backstop and no CAS guard can cover it (the race is cross-row) — two concurrent demotions/deactivations by different ADMINs can leave an org with zero OWNERs, unrecoverable through the product | **FIXED** — `8dd2b06`: a `BEFORE UPDATE OR DELETE` trigger on `memberships` locks every other active-OWNER row via `SELECT ... FOR UPDATE` before counting, closing the cross-row race. A real bug (`SELECT count(*) ... FOR UPDATE` is invalid PostgreSQL) was caught and fixed before this landed. |
-| S11 | `transitionShipmentStatus` is the one remaining state-transition service with no CAS guard — a lost race can write a fabricated permanent `shipment.locked`/`.voided` audit event, or drive DRAFT straight to terminal LOCKED bypassing the domain state machine | Open |
+| S11 | `transitionShipmentStatus` is the one remaining state-transition service with no CAS guard — a lost race can write a fabricated permanent `shipment.locked`/`.voided` audit event, or drive DRAFT straight to terminal LOCKED bypassing the domain state machine | **FIXED** (`7aadfa5`) — the same `.eq("status", shipment.status)` CAS guard every other state-transition service in this codebase already uses, reporting `CONCURRENT_MODIFICATION` on a lost race. Same stale-status correction as S8/S9. |
 | S12 | `shipment_lines.emission_determination` — the frozen regulatory provenance snapshot every "Why this number?" render and filed declaration trusts — is unvalidated JSON any org member can forge via a direct PostgREST write, with no audit event; live-reproduced (and, per the process note above, accidentally committed then restored) | **FIXED**, after 6 remediation iterations and 3 independent Opus reviews — see §16.6's dedicated write-up for the full, honest account (the first two attempted fixes were themselves found broken by independent review). Do not treat this one-line status as sufficient evidence on its own. |
 | S13 | Regulatory pipeline mutates the shared `cbam_goods`/`countries`/`production_routes` rows in place — "supersede, never mutate" holds only for `default_emission_values` | Documented, not code-fixed (`236207f`) — inside the protected regulatory zone; a decision memo (`docs/regulatory/REGULATORY_REFERENCE_DATA_MUTATION_DECISION_MEMO.md`) presents options, pending an owner decision on which one to take. See §16.5. |
 | S14 | R7 clause 2 / R9 country fallback confirmed as a live, reachable defect affecting 361 real (country, good) pairs at the CN8/TARIC10 level a shipment can actually declare | Open by design — see §11, now strengthened with this concrete count |
@@ -616,13 +621,15 @@ Supabase projects, rather than leaving it as a bare open question.
 Per explicit instruction: **A = RELEASE BLOCKER, B = HIGH (must fix before
 release), C = MEDIUM (fix where safe and clearly in scope), D = LOW (may
 remain documented)**. No finding is silently dropped — every one of the 53
-originally-confirmed findings appears exactly once below. **13 of Bucket
-B's 17 entries are now ✅ FIXED** (up from 6 as of this table's first
-version) — S1, S2, S7, S8, S9, S11 from the earlier remediation round, plus
-S12, S4, S5, S6, S10, S16, S17 from the round documented in §16.6's S12
-write-up and the table below. S15 is partially fixed (see its own row); S3
-and S13 are documented, owner-decision items rather than code defects (see
-§16.5); S14 duplicates Bucket A's regulatory entry. Every ✅ carries the
+originally-confirmed findings appears exactly once below. **12 of Bucket
+B's 16 distinct entries are now ✅ FIXED** (up from 2 as of this table's
+first version) — S2, S7, S8, S9, S11 fixed earlier in this session but not
+correctly reflected as such when this table was first written (corrected
+here after re-confirming each fix live), plus S12, S4, S5, S6, S10, S16,
+S17 from the blocker-remediation round documented in §16.6's S12 write-up
+and the table below. S15 is partially fixed (see its own row); S3 and S13
+are documented, owner-decision items rather than code defects (see §16.5);
+S14 duplicates Bucket A's regulatory entry. Every ✅ carries the
 commit, kept in its original bucket so the triage itself stays an honest
 record of severity, not retroactively softened once addressed.
 
@@ -633,7 +640,7 @@ record of severity, not retroactively softened once addressed.
 | Railway production deployment down (502) | Open — external, cannot fix from this session (§29) |
 | R7/R9 regulatory fallback contradiction | Resolved via decision memo, not a code fix (§11) — owner decision pending |
 
-**Bucket B — HIGH, must fix before release (17 total):**
+**Bucket B — HIGH, must fix before release (16 distinct findings; S14 listed once more below as a cross-reference to Bucket A):**
 
 | Finding | Status |
 |---|---|
@@ -1099,12 +1106,13 @@ access regardless.
 
 ## 35. Remaining limitations (complete list, not selective)
 
-**See §16 first** — the final adversarial audit's 51 open findings (34
-security dimension minus 2 fixed, 19 regulatory) are the single largest
-component of this platform's remaining limitations and are not repeated
-here; §16.1/§16.2 give each one its own severity and description. This
-section covers everything else: items §16's audit didn't scope into, plus
-this report's own directly-observed gaps.
+**See §16 first** — the final adversarial audit's roughly 37 still-open
+findings (of the original 53; see §16.6 for the exact triage and which 13
+are now fixed) are the single largest component of this platform's
+remaining limitations and are not repeated here; §16.1/§16.2 give each one
+its own severity and description. This section covers everything else:
+items §16's audit didn't scope into, plus this report's own
+directly-observed gaps.
 
 - Railway production deployment is down (502) — §29, the primary blocker.
 - R7/R9 regulatory fallback contradiction — §11, owner decision needed.
@@ -1191,16 +1199,19 @@ one-line update as sufficient evidence on its own. This was never counted
 as a third named blocker in this section (the two above are the complete,
 exact list), but it was this report's own strongest "fix before real
 production use" recommendation, and that recommendation has now been acted
-on. Twelve more of the 53 originally-confirmed findings were fixed in the
-same round (§15 items 9–15, §16.6's full triage table) — S10, S5, S6, S16,
-S17, S4 (a new feature, not a defect fix), plus S12 already named above.
+on. Six more of the 53 originally-confirmed findings were fixed in the
+same round (§15 items 10–15, §16.6's full triage table) — S10, S5, S6, S16,
+S17, S4 (a new feature, not a defect fix) — plus four more (S7, S8, S9,
+S11) that turned out to already be fixed from an earlier round of this same
+session but were left incorrectly marked "Open" until this update
+corrected them (§16.6).
 
 Everything else this report covers — the calculation engine, explainability,
 tenancy/RLS, the many fixes landed across this session (§1, §15, §16.6),
 the local Docker build, the documentation audit, backup/restore (locally),
 the full local browser verification of both journeys — has real, direct
 evidence behind it and is **not**, on its own, a blocker to a
-Railway-independent go-live decision. Roughly 40 findings from §16 remain
+Railway-independent go-live decision. Roughly 37 findings from §16 remain
 open (real, and should be worked through on their own merits — §16 gives
 each a severity and, where useful, a recommended priority), plus two
 findings deliberately left as owner-decision memos rather than code fixes
