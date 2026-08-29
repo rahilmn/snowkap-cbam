@@ -94,12 +94,39 @@ vi.mock(
 const inviteMemberMock =
   vi.fn();
 
+const revokeInvitationMock =
+  vi.fn();
+
 vi.mock(
   "../../src/application/organizations/invitations",
   () => (
     {
       inviteMember: (...args: unknown[]) => inviteMemberMock(...args),
-      revokeInvitation: vi.fn(),
+      revokeInvitation: (...args: unknown[]) => revokeInvitationMock(...args),
+    }
+  ),
+);
+
+const changeMemberRoleMock =
+  vi.fn();
+
+const removeMemberMock =
+  vi.fn();
+
+const deactivateMemberMock =
+  vi.fn();
+
+const reactivateMemberMock =
+  vi.fn();
+
+vi.mock(
+  "../../src/application/organizations/manage-membership",
+  () => (
+    {
+      changeMemberRole: (...args: unknown[]) => changeMemberRoleMock(...args),
+      removeMember: (...args: unknown[]) => removeMemberMock(...args),
+      deactivateMember: (...args: unknown[]) => deactivateMemberMock(...args),
+      reactivateMember: (...args: unknown[]) => reactivateMemberMock(...args),
     }
   ),
 );
@@ -133,7 +160,15 @@ vi.mock(
   ),
 );
 
-const { getAppOrigin, inviteMemberAction } =
+const {
+  getAppOrigin,
+  inviteMemberAction,
+  changeRoleAction,
+  removeMemberAction,
+  deactivateMemberAction,
+  reactivateMemberAction,
+  revokeInvitationAction,
+} =
   await import(
     "./actions"
   );
@@ -291,6 +326,185 @@ describe(
         );
 
         expect(inviteMemberMock).toHaveBeenCalledTimes(1);
+      },
+    );
+  },
+);
+
+// 2026-08-30 (P13 final non-blocked-work audit, confirmed via
+// adversarial verify): changeRoleAction, removeMemberAction,
+// deactivateMemberAction, reactivateMemberAction, and
+// revokeInvitationAction had zero rate limiting -- inconsistent with
+// every comparable mutation/revoke action elsewhere in this codebase
+// (inviteMemberAction above, and revokeSharingGrantAction in
+// app/(producer)/sharing/actions.ts, which this file's revoke test
+// deliberately mirrors: same 30/10min shape, same "reject before
+// touching Supabase" assertion style).
+describe(
+  "rate limiting (P13 final audit finding, missing-rate-limit)",
+  () => {
+    it(
+      "changeRoleAction rejects without calling changeMemberRole when the limiter rejects",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: false, retryAfterMs: 30_000 },
+        );
+
+        const result =
+          await changeRoleAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1", role: "ADMIN" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Too many attempts. Try again in 30 seconds.",
+          },
+        );
+
+        expect(getCurrentOrgSummaryMock).not.toHaveBeenCalled();
+        expect(changeMemberRoleMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "removeMemberAction rejects without calling removeMember when the limiter rejects",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: false, retryAfterMs: 30_000 },
+        );
+
+        const result =
+          await removeMemberAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Too many attempts. Try again in 30 seconds.",
+          },
+        );
+
+        expect(getCurrentOrgSummaryMock).not.toHaveBeenCalled();
+        expect(removeMemberMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "deactivateMemberAction rejects without calling deactivateMember when the limiter rejects",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: false, retryAfterMs: 30_000 },
+        );
+
+        const result =
+          await deactivateMemberAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Too many attempts. Try again in 30 seconds.",
+          },
+        );
+
+        expect(getCurrentOrgSummaryMock).not.toHaveBeenCalled();
+        expect(deactivateMemberMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "reactivateMemberAction rejects without calling reactivateMember when the limiter rejects",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: false, retryAfterMs: 30_000 },
+        );
+
+        const result =
+          await reactivateMemberAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Too many attempts. Try again in 30 seconds.",
+          },
+        );
+
+        expect(getCurrentOrgSummaryMock).not.toHaveBeenCalled();
+        expect(reactivateMemberMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "revokeInvitationAction rejects without calling revokeInvitation when the limiter rejects",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: false, retryAfterMs: 30_000 },
+        );
+
+        const result =
+          await revokeInvitationAction(
+            { status: "idle" },
+            formData(
+              { invitationId: "invitation-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Too many attempts. Try again in 30 seconds.",
+          },
+        );
+
+        expect(revokeInvitationMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "still performs the real mutation when the limiter allows (changeRoleAction, as a representative case)",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        changeMemberRoleMock.mockResolvedValueOnce(
+          { status: "OK" },
+        );
+
+        const result =
+          await changeRoleAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1", role: "ADMIN" },
+            ),
+          );
+
+        expect(result).toEqual(
+          { status: "idle" },
+        );
+
+        expect(changeMemberRoleMock).toHaveBeenCalledTimes(1);
       },
     );
   },

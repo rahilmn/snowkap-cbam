@@ -76,6 +76,70 @@ const inviteMemberLimiter =
     INVITE_MEMBER_RATE_LIMIT,
   );
 
+/**
+ * 2026-08-30 (P13 final non-blocked-work audit, missing-rate-limit,
+ * confirmed via adversarial verify): changeRoleAction,
+ * removeMemberAction, deactivateMemberAction, reactivateMemberAction,
+ * and revokeInvitationAction were unbounded despite the S17
+ * remediation (commit 14c7c3f) citing this file as an example of "the
+ * pattern already established" -- that was only ever true for
+ * inviteMemberAction above. An authenticated ADMIN/OWNER session
+ * (including one obtained via a stolen/leaked cookie) could otherwise
+ * script an unbounded tight loop of these calls -- e.g. churning
+ * deactivate/reactivate or role changes on the same membership --
+ * producing unmetered writes and unmetered audit rows on every call
+ * (manage-membership.ts's own audit trail), flooding the audit log.
+ * Same 30/10min shape as the direct sibling in this codebase,
+ * revokeSharingGrantAction (app/(producer)/sharing/actions.ts) --
+ * these five actions are the same "mutate/revoke a relationship,
+ * ADMIN+ only" risk class. Keyed by caller IP, same pattern as every
+ * other limiter in this codebase.
+ */
+const MEMBERSHIP_MUTATION_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const changeRoleLimiter =
+  createInMemoryRateLimiter(
+    MEMBERSHIP_MUTATION_RATE_LIMIT,
+  );
+
+const removeMemberLimiter =
+  createInMemoryRateLimiter(
+    MEMBERSHIP_MUTATION_RATE_LIMIT,
+  );
+
+const deactivateMemberLimiter =
+  createInMemoryRateLimiter(
+    MEMBERSHIP_MUTATION_RATE_LIMIT,
+  );
+
+const reactivateMemberLimiter =
+  createInMemoryRateLimiter(
+    MEMBERSHIP_MUTATION_RATE_LIMIT,
+  );
+
+const revokeInvitationLimiter =
+  createInMemoryRateLimiter(
+    MEMBERSHIP_MUTATION_RATE_LIMIT,
+  );
+
+function tooManyAttemptsResult(
+  retryAfterMs: number,
+): TeamActionState {
+  const retryAfterSeconds =
+    Math.ceil(retryAfterMs / 1000);
+
+  return {
+    status: "error",
+    message:
+      `Too many attempts. Try again in ${retryAfterSeconds} ` +
+      `${retryAfterSeconds === 1 ? "second" : "seconds"}.`,
+  };
+}
+
 function messageFor(
   reason: string,
 ): string {
@@ -192,6 +256,18 @@ export async function changeRoleAction(
   _previousState: TeamActionState,
   formData: FormData,
 ): Promise<TeamActionState> {
+  const rateLimitResult =
+    changeRoleLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return tooManyAttemptsResult(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     changeRoleSchema.safeParse(
       {
@@ -257,6 +333,18 @@ export async function removeMemberAction(
   _previousState: TeamActionState,
   formData: FormData,
 ): Promise<TeamActionState> {
+  const rateLimitResult =
+    removeMemberLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return tooManyAttemptsResult(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     removeMemberSchema.safeParse(
       {
@@ -329,6 +417,18 @@ export async function deactivateMemberAction(
   _previousState: TeamActionState,
   formData: FormData,
 ): Promise<TeamActionState> {
+  const rateLimitResult =
+    deactivateMemberLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return tooManyAttemptsResult(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     deactivateMemberSchema.safeParse(
       {
@@ -400,6 +500,18 @@ export async function reactivateMemberAction(
   _previousState: TeamActionState,
   formData: FormData,
 ): Promise<TeamActionState> {
+  const rateLimitResult =
+    reactivateMemberLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return tooManyAttemptsResult(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     reactivateMemberSchema.safeParse(
       {
@@ -577,6 +689,18 @@ export async function revokeInvitationAction(
   _previousState: TeamActionState,
   formData: FormData,
 ): Promise<TeamActionState> {
+  const rateLimitResult =
+    revokeInvitationLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return tooManyAttemptsResult(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     revokeInvitationSchema.safeParse(
       {
