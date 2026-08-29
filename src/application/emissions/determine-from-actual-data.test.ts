@@ -101,6 +101,7 @@ interface Recorder {
 function makeMockSupabase(
   tables: Record<string, { data: unknown; error: unknown } | { data: unknown; error: unknown }[]>,
   recorder: Recorder = { fromCalls: [], ops: [] },
+  rpcResult?: { data: unknown; error: unknown },
 ) {
   const cursors: Record<string, number> = {};
 
@@ -176,6 +177,22 @@ function makeMockSupabase(
     from: (table: string) => {
       recorder.fromCalls.push(table);
       return builder(table);
+    },
+
+    // Only exercised by the cross-org consumption RPC call
+    // (record_shared_data_consumption, 20260829310000) -- every other
+    // query in this file talks to shipment_lines/emission_data/
+    // sharing_grants/audit_events via plain from()/select()/insert(),
+    // same shape as manage-sharing-grants.test.ts's own makeMockSupabase
+    // (which needed this for accept_sharing_grant_invitation).
+    rpc: (fnName: string, args: unknown) => {
+      recorder.ops.push(
+        { table: `rpc:${fnName}`, op: "insert", payload: args, filters: [] },
+      );
+
+      return Promise.resolve(
+        rpcResult ?? { data: null, error: null },
+      );
     },
   } as never;
 }
@@ -614,6 +631,207 @@ describe(
 );
 
 describe(
+  "determineLineFromActualData -- cross-org consumption RPC (record_shared_data_consumption, 20260829310000)",
+  () => {
+    // S8 (previously-deferred gap, master plan §9): a cross-org
+    // determination must also record a sharing_grant.data_consumed
+    // audit event into the GRANTOR org's own stream, via the
+    // SECURITY DEFINER record_shared_data_consumption RPC -- see
+    // supabase/migrations/20260829310000_p7d3_shared_data_consumption_audit.sql.
+    // An own-org determination (sharing_grant_id null) has nothing to
+    // report and must never call this RPC at all.
+
+    const crossOrgRow =
+      { ...verifiedActiveRow, entered_by_org_id: "org-2" };
+
+    function crossOrgTables() {
+      return {
+        shipment_lines: [
+          { data: lineRow, error: null },
+          { data: updatedLineRow, error: null },
+        ],
+        emission_data: { data: crossOrgRow, error: null },
+        sharing_grants: {
+          data: { id: "grant-1", expires_at: null },
+          error: null,
+        },
+      };
+    }
+
+    const okRpcResult =
+      {
+        data: [{ result_status: "OK", result_audit_event_id: "audit-event-1" }],
+        error: null,
+      };
+
+    it(
+      "calls record_shared_data_consumption with the grant/installation/emission-data/line/kind identifiers, only for a cross-org determination",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        await determineLineFromActualData(
+          makeMockSupabase(
+            crossOrgTables(),
+            recorder,
+            okRpcResult,
+          ),
+          orgId,
+          actorUserId,
+          lineId,
+          emissionDataId,
+        );
+
+        const rpcOp =
+          recorder.ops.find(
+            (op) => op.table === "rpc:record_shared_data_consumption",
+          );
+
+        expect(rpcOp).toBeTruthy();
+
+        expect(rpcOp?.payload).toEqual(
+          {
+            p_sharing_grant_id: "grant-1",
+            p_installation_id: "installation-1",
+            p_emission_data_id: "emission-data-1",
+            p_emission_data_version: 1,
+            p_shipment_line_id: "line-1",
+            p_determination_kind: "DETERMINED",
+          },
+        );
+      },
+    );
+
+    it(
+      "does NOT call record_shared_data_consumption for an own-org determination (sharing_grant_id null), and reports crossOrgConsumptionRecorded: true (nothing to record)",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await determineLineFromActualData(
+            makeMockSupabase(
+              {
+                shipment_lines: [
+                  { data: lineRow, error: null },
+                  { data: updatedLineRow, error: null },
+                ],
+                emission_data: { data: verifiedActiveRow, error: null },
+              },
+              recorder,
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+            emissionDataId,
+          );
+
+        expect(
+          recorder.ops.some(
+            (op) => op.table === "rpc:record_shared_data_consumption",
+          ),
+        ).toBe(
+          false,
+        );
+
+        expect(
+          result.status === "DETERMINED" ? result.crossOrgConsumptionRecorded : null,
+        ).toBe(
+          true,
+        );
+      },
+    );
+
+    it(
+      "reports crossOrgConsumptionRecorded: true when the RPC reports OK",
+      async () => {
+        const result =
+          await determineLineFromActualData(
+            makeMockSupabase(
+              crossOrgTables(),
+              undefined,
+              okRpcResult,
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+            emissionDataId,
+          );
+
+        expect(result.status).toBe(
+          "DETERMINED",
+        );
+
+        expect(
+          result.status === "DETERMINED" ? result.crossOrgConsumptionRecorded : null,
+        ).toBe(
+          true,
+        );
+      },
+    );
+
+    it(
+      "reports crossOrgConsumptionRecorded: false, WITHOUT rejecting the (already-persisted) determination, when the RPC reports a non-OK status",
+      async () => {
+        const result =
+          await determineLineFromActualData(
+            makeMockSupabase(
+              crossOrgTables(),
+              undefined,
+              {
+                data: [{ result_status: "GRANT_NOT_ACTIVE", result_audit_event_id: null }],
+                error: null,
+              },
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+            emissionDataId,
+          );
+
+        expect(result.status).toBe(
+          "DETERMINED",
+        );
+
+        expect(
+          result.status === "DETERMINED" ? result.crossOrgConsumptionRecorded : null,
+        ).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "reports crossOrgConsumptionRecorded: false, WITHOUT rejecting the (already-persisted) determination, when the RPC call itself errors",
+      async () => {
+        const result =
+          await determineLineFromActualData(
+            makeMockSupabase(
+              crossOrgTables(),
+              undefined,
+              { data: null, error: { message: "transport failure" } },
+            ),
+            orgId,
+            actorUserId,
+            lineId,
+            emissionDataId,
+          );
+
+        expect(result.status).toBe(
+          "DETERMINED",
+        );
+
+        expect(
+          result.status === "DETERMINED" ? result.crossOrgConsumptionRecorded : null,
+        ).toBe(
+          false,
+        );
+      },
+    );
+  },
+);
+
+describe(
   "redetermineLineFromActualData",
   () => {
     it(
@@ -813,6 +1031,59 @@ describe(
             reason: "EXACT_CN8_MATCH",
             dataset_version: "2026-definitive-corrected",
           },
+        );
+      },
+    );
+
+    it(
+      "calls record_shared_data_consumption with p_determination_kind: REDETERMINED for a cross-org redetermination",
+      async () => {
+        const crossOrgRow =
+          { ...verifiedActiveRow, entered_by_org_id: "org-2" };
+
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        await redetermineLineFromActualData(
+          makeMockSupabase(
+            {
+              shipment_lines: [
+                {
+                  data: {
+                    ...lineRow,
+                    emission_determination: { method: "DEFAULT", resolution: {} },
+                  },
+                  error: null,
+                },
+                { data: updatedLineRow, error: null },
+              ],
+              emission_data: { data: crossOrgRow, error: null },
+              sharing_grants: {
+                data: { id: "grant-1", expires_at: null },
+                error: null,
+              },
+            },
+            recorder,
+            {
+              data: [{ result_status: "OK", result_audit_event_id: "audit-event-1" }],
+              error: null,
+            },
+          ),
+          orgId,
+          actorUserId,
+          lineId,
+          emissionDataId,
+        );
+
+        const rpcOp =
+          recorder.ops.find(
+            (op) => op.table === "rpc:record_shared_data_consumption",
+          );
+
+        expect(rpcOp?.payload).toEqual(
+          expect.objectContaining(
+            { p_determination_kind: "REDETERMINED" },
+          ),
         );
       },
     );

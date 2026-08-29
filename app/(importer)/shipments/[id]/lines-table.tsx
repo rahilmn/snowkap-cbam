@@ -40,19 +40,25 @@ import type {
   AvailableActualEmissionDataOption,
 } from "../../../../src/application/emissions/list-available-actual-data";
 
+import type {
+  ActualSnapshotStaleness,
+} from "../../../../src/domain/emissions/check-actual-snapshot-staleness";
+
 export function LinesTable(
   {
     shipmentId,
     lines,
     editable,
     latestCalculations,
-    availableActualData,
+    availableActualDataByLineId,
+    actualDeterminationStaleness,
   }: {
     shipmentId: string;
     lines: ShipmentLine[];
     editable: boolean;
     latestCalculations: Record<string, LatestLineCalculation>;
-    availableActualData: AvailableActualEmissionDataOption[];
+    availableActualDataByLineId: Record<string, AvailableActualEmissionDataOption[]>;
+    actualDeterminationStaleness: Record<string, ActualSnapshotStaleness>;
   },
 ) {
   if (lines.length === 0) {
@@ -112,7 +118,8 @@ export function LinesTable(
                 line={line}
                 editable={editable}
                 latestCalculation={latestCalculations[line.id]}
-                availableActualData={availableActualData}
+                availableActualData={availableActualDataByLineId[line.id] ?? []}
+                staleness={actualDeterminationStaleness[line.id]}
               />
             ),
           )}
@@ -129,12 +136,14 @@ function LineRow(
     editable,
     latestCalculation,
     availableActualData,
+    staleness,
   }: {
     shipmentId: string;
     line: ShipmentLine;
     editable: boolean;
     latestCalculation: LatestLineCalculation | undefined;
     availableActualData: AvailableActualEmissionDataOption[];
+    staleness: ActualSnapshotStaleness | undefined;
   },
 ) {
   const [
@@ -188,6 +197,7 @@ function LineRow(
           line={line}
           editable={editable}
           availableActualData={availableActualData}
+          staleness={staleness}
         />
       </td>
 

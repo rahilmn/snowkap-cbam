@@ -25,6 +25,10 @@ import type {
 } from "../../domain/shared/ids";
 
 import {
+  cnScopeCoversCnCode,
+} from "../../domain/emissions/cn-scope-covers-code";
+
+import {
   EMISSION_DATA_COLUMNS,
   toEmissionData,
   type EmissionDataRow,
@@ -33,6 +37,16 @@ import {
 export type ActualDataProvenance =
   | "OWN"
   | "SHARED";
+
+// Exported for reuse by any other caller that resolves a grantor org's
+// name and needs the exact same "lookup worked but didn't cover this row"
+// placeholder text -- see list-actual-determined-lines.ts, which resolves
+// grantor names via a different join path (sharing_grants, not
+// emission_data.entered_by_org_id) but must render the identical fallback
+// so the two "shared-in data" surfaces (the picker here, the emissions
+// overview screen there) never visibly disagree on wording.
+export const UNKNOWN_GRANTOR_ORGANIZATION_NAME =
+  "Unknown organization";
 
 /**
  * One ACTIVE+VERIFIED emission_data row an importer's active org may pick
@@ -51,6 +65,13 @@ export interface AvailableActualEmissionDataOption {
   methodology: EmissionDataMethodology;
   reporting_period: ReportingPeriod;
   provenance: ActualDataProvenance;
+
+  // The grantor org's name for a SHARED row (the row's own
+  // entered_by_org_id -- the producer org, not the caller's org); always
+  // null for an OWN row, where the concept doesn't apply. See this
+  // function's own doc comment for how a lookup failure is distinguished
+  // from a genuinely-unresolvable name.
+  grantor_organization_name: string | null;
 }
 
 interface InstallationLookupRow {
@@ -62,6 +83,11 @@ interface InstallationLookupRow {
 interface SharingGrantLookupRow {
   installation_id: string;
   expires_at: string | null;
+}
+
+interface OrganizationNameLookupRow {
+  id: string;
+  name: string;
 }
 
 /**
@@ -121,26 +147,57 @@ interface SharingGrantLookupRow {
  * full reasoning (no precedent for embedded-resource syntax anywhere in
  * src/application/**, and it keeps this function testable against the
  * established per-table mock-Supabase-client pattern). The sharing_grants
- * lookup is a third such query, same reasoning.
+ * lookup is a third such query, and the organizations (grantor name)
+ * lookup below is a fourth, same reasoning.
  *
- * Deliberate scope boundaries for this increment (see the task that
- * introduced this function, and its caller,
- * app/(importer)/shipments/[id]/page.tsx):
- *   - Does NOT filter by cn_scope against any particular shipment line's
- *     declared CN code -- every visible ACTIVE+VERIFIED option is
- *     returned regardless of cn_scope, and the picker leaves matching
- *     the right one to the user (a compliance professional who
- *     understands their own data). CN-scope-aware filtering is a later
- *     increment.
- *   - Does NOT resolve or display the grantor organization's *name* for
- *     a SHARED row -- that would need an additional cross-org
- *     organizations lookup this increment doesn't build.
- *     `provenance: "SHARED"` alone is enough to tell the user this is
- *     someone else's data; which someone is a later increment.
+ * `cnCode` scopes the result to one shipment line's own declared CN/TARIC
+ * code (ShipmentLine.cn_code, src/domain/shipments/types.ts) -- a row is
+ * only offered when its cn_scope genuinely covers that code, per
+ * cnScopeCoversCnCode's own doc comment (src/domain/emissions/
+ * cn-scope-covers-code.ts), which mirrors the same CN8/TARIC10
+ * specificity relationship the regulatory resolver's own codeLevelPriority
+ * encodes rather than inventing a second convention. A caller building a
+ * whole shipment's picker data calls this once per distinct cn_code among
+ * the shipment's lines, the same way app/(importer)/shipments/[id]/page.tsx
+ * already does for every other per-line lookup on that page.
+ *
+ * `cnCode === null` skips the cn_scope filter entirely and returns every
+ * row the org-visibility/grant scoping above already admits, regardless
+ * of what goods it covers -- the unscoped "browse everything available"
+ * case app/(importer)/emissions/page.tsx (§27 screen 15's "shared-in
+ * producer data" section) needs, which has no single line to scope
+ * against. This was added as an optional third state on the existing
+ * parameter rather than as a second, sibling function: the org-
+ * visibility/grant-scoping logic above (the security-critical half of
+ * this function, per its own extensive doc comment) is exactly the part
+ * a sibling function would have had to duplicate byte-for-byte to stay
+ * correct, and a second independently-maintained copy of that logic is a
+ * live risk of the two drifting apart under a future fix -- one applied
+ * to only one of them -- in a way a passing test suite for the untouched
+ * copy would never catch. Narrowing cnCode to `null` only ever WIDENS
+ * which goods a row is offered for, never who is allowed to see the row
+ * at all -- the org-scoping/grant-visibility filtering above still runs
+ * unconditionally, in the same order, before this optional narrowing --
+ * so this parameter can never become a second, weaker path to the same
+ * data.
+ *
+ * Also resolves the grantor organization's *name* for each SHARED row
+ * (the row's own entered_by_org_id -- the producer org, not the caller's)
+ * via a follow-up `organizations` lookup, using the exact two-follow-up-
+ * queries-after-the-main-query convention listMyPendingSharingGrantInvitations
+ * (src/application/sharing/manage-sharing-grants.ts) already established
+ * for this: if the lookup query itself errors, the WHOLE result is
+ * dropped to [] (a transport failure must never be indistinguishable from
+ * a fabricated "Unknown organization" placeholder shown for every row);
+ * if the query succeeds but a specific grantor org id simply isn't
+ * returned, that one row degrades to the UNKNOWN_GRANTOR_ORGANIZATION_NAME
+ * placeholder rather than being silently dropped, since the lookup itself
+ * is now known to have worked.
  */
 export async function listAvailableActualEmissionData(
   supabase: SupabaseClient,
   orgId: OrganizationId,
+  cnCode: string | null,
 ): Promise<AvailableActualEmissionDataOption[]> {
   const { data, error } =
     await supabase
@@ -201,10 +258,29 @@ export async function listAvailableActualEmissionData(
     return [];
   }
 
+  // CN-scope filter: only offer a record whose declared cn_scope actually
+  // covers this line's own cn_code -- see this function's own doc comment
+  // and cnScopeCoversCnCode's for the matching convention. Applied AFTER
+  // the org-visibility filter above (never before it), so this can never
+  // widen visibility -- it only ever narrows an already-authorized set.
+  // cnCode === null (see this function's own doc comment) skips this
+  // narrowing step entirely rather than calling cnScopeCoversCnCode with
+  // some sentinel -- every org-visible record passes through unfiltered.
+  const cnScopedRecords =
+    cnCode === null
+      ? scopedRecords
+      : scopedRecords.filter(
+          (record) => cnScopeCoversCnCode(record.cn_scope, cnCode),
+        );
+
+  if (cnScopedRecords.length === 0) {
+    return [];
+  }
+
   const installationIds =
     Array.from(
       new Set(
-        scopedRecords.map((record) => record.installation_id),
+        cnScopedRecords.map((record) => record.installation_id),
       ),
     );
 
@@ -227,10 +303,56 @@ export async function listAvailableActualEmissionData(
       ),
     );
 
+  // Grantor org name lookup, SHARED rows only -- an OWN row's provenance
+  // is already self-evident, so its entered_by_org_id (== orgId) never
+  // needs a name resolved for it.
+  const grantorOrgIds =
+    Array.from(
+      new Set(
+        cnScopedRecords
+          .filter((record) => record.entered_by_org_id !== orgId)
+          .map((record) => record.entered_by_org_id),
+      ),
+    );
+
+  const grantorOrgNameById =
+    new Map<string, string>();
+
+  if (grantorOrgIds.length > 0) {
+    const { data: organizationRows, error: organizationError } =
+      await supabase
+        .from("organizations")
+        .select(
+          "id, name",
+        )
+        .in("id", grantorOrgIds);
+
+    // A transport/PostgREST failure on this follow-up lookup must never
+    // be indistinguishable from a fabricated placeholder name shown for
+    // every SHARED row -- same discipline
+    // listMyPendingSharingGrantInvitations applies to its own two
+    // follow-up lookups (manage-sharing-grants.ts). Dropping the whole
+    // result here (rather than only the SHARED rows) also matches this
+    // function's own established posture elsewhere in this same
+    // function: every other follow-up query failure above (sharing_grants,
+    // installations) fails the entire picker closed, not just the rows
+    // that specific query would have enriched.
+    if (organizationError) {
+      return [];
+    }
+
+    for (const row of (organizationRows ?? []) as OrganizationNameLookupRow[]) {
+      grantorOrgNameById.set(
+        row.id,
+        row.name,
+      );
+    }
+  }
+
   const options: AvailableActualEmissionDataOption[] =
     [];
 
-  for (const record of scopedRecords) {
+  for (const record of cnScopedRecords) {
     const installation =
       installationById.get(
         record.installation_id,
@@ -248,6 +370,9 @@ export async function listAvailableActualEmissionData(
       continue;
     }
 
+    const isOwn =
+      record.entered_by_org_id === orgId;
+
     options.push(
       {
         emission_data_id: record.id,
@@ -259,7 +384,11 @@ export async function listAvailableActualEmissionData(
         emission_unit: record.emission_unit,
         methodology: record.methodology,
         reporting_period: record.period,
-        provenance: record.entered_by_org_id === orgId ? "OWN" : "SHARED",
+        provenance: isOwn ? "OWN" : "SHARED",
+        grantor_organization_name:
+          isOwn
+            ? null
+            : grantorOrgNameById.get(record.entered_by_org_id) ?? UNKNOWN_GRANTOR_ORGANIZATION_NAME,
       },
     );
   }

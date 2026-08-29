@@ -53,7 +53,7 @@ interface NavItem {
 const IMPORTER_NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard },
   { label: "Shipments", icon: Ship, href: "/shipments" },
-  { label: "Emissions", icon: BarChart3 },
+  { label: "Emissions", icon: BarChart3, href: "/emissions" },
   { label: "Calculations", icon: Calculator },
   { label: "Suppliers", icon: Truck, href: "/suppliers" },
   { label: "Installations", icon: Factory },

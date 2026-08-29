@@ -705,6 +705,21 @@ export async function determineFromActualDataAction(
     `/shipments/${parsed.data.shipmentId}`,
   );
 
+  // 2026-08-29 (mandatory review, worth-tracking, closed): the
+  // determination itself always succeeds regardless of this -- see
+  // DetermineFromActualDataResult's own doc comment on why a failed
+  // grantor-side audit write must not fail the whole determination --
+  // but crossOrgConsumptionRecorded existed specifically so a caller
+  // could surface a non-silent signal instead of treating it as
+  // indistinguishable from a fully clean success. This is that caller.
+  if (!result.crossOrgConsumptionRecorded) {
+    return {
+      status: "idle",
+      warning:
+        "This line was determined, but recording the cross-organization data-consumption event failed. The producer's own audit trail may not reflect this yet.",
+    };
+  }
+
   return {
     status: "idle",
   };

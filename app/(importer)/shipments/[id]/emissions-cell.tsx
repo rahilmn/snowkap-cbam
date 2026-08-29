@@ -37,6 +37,10 @@ import type {
   AvailableActualEmissionDataOption,
 } from "../../../../src/application/emissions/list-available-actual-data";
 
+import type {
+  ActualSnapshotStaleness,
+} from "../../../../src/domain/emissions/check-actual-snapshot-staleness";
+
 const VALUE_STATUS_TONE = {
   AVAILABLE: "success" as const,
   REFERENCE_REQUIRED: "warning" as const,
@@ -172,11 +176,10 @@ function defaultResolutionButtonLabel(
 }
 
 /**
- * Deliberately does NOT resolve/display the grantor org's name for a
- * SHARED option -- see listAvailableActualEmissionData's own doc
- * comment (list-available-actual-data.ts) for why that's out of scope
- * for this increment; the "(shared)" suffix is all the provenance
- * signal this picker gives today.
+ * A SHARED option's grantor org name (listAvailableActualEmissionData's
+ * grantor_organization_name) is folded into the label itself rather than
+ * a bare "(shared)" suffix, so the picker identifies WHICH other org's
+ * data this is without needing a separate lookup UI.
  */
 function formatActualDataOptionLabel(
   option: AvailableActualEmissionDataOption,
@@ -184,7 +187,9 @@ function formatActualDataOptionLabel(
   const base =
     `${option.installation_name} (${option.installation_country}) — ${option.direct_specific} ${option.emission_unit} direct`;
 
-  return option.provenance === "SHARED" ? `${base} (shared)` : base;
+  return option.provenance === "SHARED"
+    ? `${base} (shared by ${option.grantor_organization_name})`
+    : base;
 }
 
 export function EmissionsCell(
@@ -193,11 +198,13 @@ export function EmissionsCell(
     line,
     editable,
     availableActualData,
+    staleness,
   }: {
     shipmentId: string;
     line: ShipmentLine;
     editable: boolean;
     availableActualData: AvailableActualEmissionDataOption[];
+    staleness: ActualSnapshotStaleness | undefined;
   },
 ) {
   const [
@@ -245,6 +252,12 @@ export function EmissionsCell(
             Not determined
           </Badge>
         )}
+
+        {actualSnapshot && staleness === "STALE" ? (
+          <Badge tone="warning">
+            Stale — newer data available
+          </Badge>
+        ) : null}
 
         {editable ? (
           <form action={formAction}>
@@ -386,6 +399,12 @@ export function EmissionsCell(
       {actualDataState.status === "error" ? (
         <p className="text-xs text-[var(--color-danger-700)]">
           {actualDataState.message}
+        </p>
+      ) : null}
+
+      {actualDataState.status === "idle" && actualDataState.warning ? (
+        <p className="text-xs text-[var(--color-warning-700)]">
+          {actualDataState.warning}
         </p>
       ) : null}
 

@@ -54,6 +54,18 @@ const activeGrantForInstallation2 =
     { installation_id: "installation-2", expires_at: null },
   ];
 
+const grantorOrgRows =
+  [
+    { id: "org-2", name: "Acme Steel Producer" },
+  ];
+
+// Matches ownRow/sharedRow's shared cn_scope (["72081000"]) exactly --
+// the default line code most tests determine against, so existing
+// coverage keeps exercising the OWN/SHARED/grant-visibility behavior
+// without every test also having to think about CN-scope filtering.
+const matchingCnCode =
+  "72081000";
+
 interface Op {
   table: string;
   op: "select";
@@ -131,6 +143,7 @@ describe(
               },
             ),
             orgId,
+            matchingCnCode,
           );
 
         expect(result).toEqual(
@@ -146,6 +159,7 @@ describe(
               methodology: "EU_METHOD",
               reporting_period: { kind: "ANNUAL", year: 2026 },
               provenance: "OWN",
+              grantor_organization_name: null,
             },
           ],
         );
@@ -153,7 +167,7 @@ describe(
     );
 
     it(
-      "labels a row entered by a different org as SHARED, when the caller's active org genuinely holds an ACTIVE grant for it",
+      "labels a row entered by a different org as SHARED, when the caller's active org genuinely holds an ACTIVE grant for it, and resolves the grantor org's name",
       async () => {
         const result =
           await listAvailableActualEmissionData(
@@ -162,15 +176,21 @@ describe(
                 emission_data: { data: [sharedRow], error: null },
                 installations: { data: installationRows, error: null },
                 sharing_grants: { data: activeGrantForInstallation2, error: null },
+                organizations: { data: grantorOrgRows, error: null },
               },
             ),
             orgId,
+            matchingCnCode,
           );
 
         expect(result).toEqual(
           [
             expect.objectContaining(
-              { emission_data_id: "emission-data-2", provenance: "SHARED" },
+              {
+                emission_data_id: "emission-data-2",
+                provenance: "SHARED",
+                grantor_organization_name: "Acme Steel Producer",
+              },
             ),
           ],
         );
@@ -194,6 +214,7 @@ describe(
               recorder,
             ),
             orgId,
+            matchingCnCode,
           );
 
         expect(result).toEqual(
@@ -220,6 +241,7 @@ describe(
               },
             ),
             orgId,
+            matchingCnCode,
           );
 
         expect(result).toEqual(
@@ -238,9 +260,11 @@ describe(
                 emission_data: { data: [ownRow, sharedRow], error: null },
                 installations: { data: installationRows, error: null },
                 sharing_grants: { data: activeGrantForInstallation2, error: null },
+                organizations: { data: grantorOrgRows, error: null },
               },
             ),
             orgId,
+            matchingCnCode,
           );
 
         expect(result.map((option) => option.provenance)).toEqual(
@@ -264,6 +288,7 @@ describe(
             recorder,
           ),
           orgId,
+          matchingCnCode,
         );
 
         const emissionDataSelect =
@@ -292,6 +317,7 @@ describe(
               },
             ),
             orgId,
+            matchingCnCode,
           );
 
         expect(result).toEqual(
@@ -315,6 +341,7 @@ describe(
               recorder,
             ),
             orgId,
+            matchingCnCode,
           );
 
         expect(result).toEqual(
@@ -341,6 +368,7 @@ describe(
               },
             ),
             orgId,
+            matchingCnCode,
           );
 
         expect(result).toEqual(
@@ -361,6 +389,7 @@ describe(
               },
             ),
             orgId,
+            matchingCnCode,
           );
 
         expect(result).toEqual(
@@ -389,10 +418,209 @@ describe(
               },
             ),
             orgId,
+            matchingCnCode,
           );
 
         expect(result[0]?.reporting_period).toEqual(
           { kind: "QUARTERLY", year: 2025, quarter: 3 },
+        );
+      },
+    );
+
+    it(
+      "excludes a visible ACTIVE+VERIFIED row whose cn_scope does not cover the line's declared cn_code",
+      async () => {
+        const result =
+          await listAvailableActualEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: [ownRow], error: null },
+                installations: { data: installationRows, error: null },
+              },
+            ),
+            orgId,
+            "25232100",
+          );
+
+        expect(result).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "includes a row via coarser-covers-finer cn_scope matching -- a CN8 cn_scope entry covers a TARIC10 line code nested under that same heading",
+      async () => {
+        const result =
+          await listAvailableActualEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: [ownRow], error: null },
+                installations: { data: installationRows, error: null },
+              },
+            ),
+            orgId,
+            "7208100099",
+          );
+
+        expect(result).toHaveLength(
+          1,
+        );
+
+        expect(result[0]?.emission_data_id).toBe(
+          "emission-data-1",
+        );
+      },
+    );
+
+    it(
+      "does not query installations at all when every visible row is filtered out by cn_scope",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        await listAvailableActualEmissionData(
+          makeMockSupabase(
+            {
+              emission_data: { data: [ownRow], error: null },
+              installations: { data: installationRows, error: null },
+            },
+            recorder,
+          ),
+          orgId,
+          "25232100",
+        );
+
+        expect(
+          recorder.fromCalls.includes("installations"),
+        ).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "falls back to a placeholder grantor name, rather than silently dropping the row, when the organizations follow-up lookup succeeds but doesn't return a row for that grantor org id",
+      async () => {
+        const result =
+          await listAvailableActualEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: [sharedRow], error: null },
+                installations: { data: installationRows, error: null },
+                sharing_grants: { data: activeGrantForInstallation2, error: null },
+                organizations: { data: [], error: null },
+              },
+            ),
+            orgId,
+            matchingCnCode,
+          );
+
+        expect(result).toEqual(
+          [
+            expect.objectContaining(
+              { grantor_organization_name: "Unknown organization" },
+            ),
+          ],
+        );
+      },
+    );
+
+    it(
+      "returns an empty array -- rather than a false 'Unknown organization' placeholder that could mask a real transport failure -- when the organizations follow-up lookup itself errors",
+      async () => {
+        const result =
+          await listAvailableActualEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: [sharedRow], error: null },
+                installations: { data: installationRows, error: null },
+                sharing_grants: { data: activeGrantForInstallation2, error: null },
+                organizations: { data: null, error: { message: "denied" } },
+              },
+            ),
+            orgId,
+            matchingCnCode,
+          );
+
+        expect(result).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "returns every org-visible row without CN-scope filtering when cnCode is null -- the unscoped 'browse all shared-in data' case app/(importer)/emissions/page.tsx needs",
+      async () => {
+        const nonMatchingCnScopeRow =
+          {
+            ...ownRow,
+            id: "emission-data-3",
+            cn_scope: ["25232100"],
+          };
+
+        const result =
+          await listAvailableActualEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: [ownRow, nonMatchingCnScopeRow], error: null },
+                installations: { data: installationRows, error: null },
+              },
+            ),
+            orgId,
+            null,
+          );
+
+        expect(result.map((option) => option.emission_data_id)).toEqual(
+          ["emission-data-1", "emission-data-3"],
+        );
+      },
+    );
+
+    it(
+      "still applies org-visibility/grant scoping when cnCode is null -- unscoping CN never widens WHO can see a row, only WHICH goods it's offered for",
+      async () => {
+        const result =
+          await listAvailableActualEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: [sharedRow], error: null },
+                installations: { data: installationRows, error: null },
+                sharing_grants: { data: [], error: null },
+              },
+            ),
+            orgId,
+            null,
+          );
+
+        expect(result).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "does not query organizations at all when every visible row is OWN (no grantor name ever needed)",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        await listAvailableActualEmissionData(
+          makeMockSupabase(
+            {
+              emission_data: { data: [ownRow], error: null },
+              installations: { data: installationRows, error: null },
+            },
+            recorder,
+          ),
+          orgId,
+          matchingCnCode,
+        );
+
+        expect(
+          recorder.fromCalls.includes("organizations"),
+        ).toBe(
+          false,
         );
       },
     );

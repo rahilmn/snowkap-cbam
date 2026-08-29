@@ -34,7 +34,12 @@ import {
 
 import {
   listAvailableActualEmissionData,
+  type AvailableActualEmissionDataOption,
 } from "../../../../src/application/emissions/list-available-actual-data";
+
+import {
+  checkActualDeterminationStalenessByShipment,
+} from "../../../../src/application/emissions/check-actual-determination-staleness";
 
 import {
   formatReportingPeriod,
@@ -102,14 +107,53 @@ export default async function ShipmentDetailPage(
       shipment.id,
     );
 
-  // Org-wide, not per-line -- deliberately not filtered against any one
-  // line's CN code (see listAvailableActualEmissionData's own doc
-  // comment for why); the same list is threaded down to every line's
-  // EmissionsCell.
-  const availableActualData =
-    await listAvailableActualEmissionData(
+  // Per-line, not org-wide -- listAvailableActualEmissionData now filters
+  // by cn_scope against a line's own declared cn_code (see its own doc
+  // comment). Fetched once per DISTINCT cn_code among this shipment's
+  // lines (not once per line) so two lines declaring the same code don't
+  // trigger redundant, identical queries, then fanned back out to every
+  // line that declared that code.
+  const distinctCnCodes =
+    Array.from(
+      new Set(
+        shipment.lines.map((line) => line.cn_code),
+      ),
+    );
+
+  const optionsByCnCode =
+    new Map(
+      await Promise.all(
+        distinctCnCodes.map(
+          async (cnCode) => (
+            [
+              cnCode,
+              await listAvailableActualEmissionData(
+                supabase,
+                orgSummary.context.org_id,
+                cnCode,
+              ),
+            ] as const
+          ),
+        ),
+      ),
+    );
+
+  const availableActualDataByLineId: Record<string, AvailableActualEmissionDataOption[]> =
+    {};
+
+  for (const line of shipment.lines) {
+    availableActualDataByLineId[line.id] =
+      optionsByCnCode.get(line.cn_code) ?? [];
+  }
+
+  // Which ACTUAL-determined lines now have newer producer data available
+  // -- purely an informational badge (see EmissionsCell), never anything
+  // that changes what determination is actually in force.
+  const actualDeterminationStaleness =
+    await checkActualDeterminationStalenessByShipment(
       supabase,
-      orgSummary.context.org_id,
+      shipment.lines,
+      shipment.reporting_period,
     );
 
   const editable =
@@ -201,7 +245,8 @@ export default async function ShipmentDetailPage(
           lines={shipment.lines}
           editable={editable}
           latestCalculations={latestCalculations}
-          availableActualData={availableActualData}
+          availableActualDataByLineId={availableActualDataByLineId}
+          actualDeterminationStaleness={actualDeterminationStaleness}
         />
       </Card>
 

@@ -126,9 +126,18 @@ export default async function SharingPage() {
       ]}
       activeNavLabel="Sharing"
     >
-      <h1 className="mb-4 text-2xl font-semibold text-[var(--text-primary)]">
-        Sharing
-      </h1>
+      <div className="mb-4 flex max-w-2xl items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
+          Sharing
+        </h1>
+
+        <a
+          href="/sharing/status"
+          className="text-sm font-medium text-[var(--accent-brand)] hover:underline"
+        >
+          Shared-data status &rarr;
+        </a>
+      </div>
 
       <Card className="max-w-2xl">
         <CardHeader>

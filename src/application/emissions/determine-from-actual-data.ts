@@ -58,7 +58,34 @@ export type DetermineFromActualDataRejectionReason =
   | "PERSIST_FAILED";
 
 export type DetermineFromActualDataResult =
-  | { status: "DETERMINED"; line: ShipmentLine; snapshot: ActualEmissionSnapshot }
+  | {
+      status: "DETERMINED";
+      line: ShipmentLine;
+      snapshot: ActualEmissionSnapshot;
+      // True whenever there was nothing cross-org to report
+      // (snapshot.sharing_grant_id === null -- an own-org determination)
+      // OR the record_shared_data_consumption RPC (S8, master plan §9:
+      // "consumption events ... recorded on BOTH orgs' audit streams")
+      // reported OK. False only when sharing_grant_id is non-null AND
+      // that RPC call failed or returned a non-OK status -- see this
+      // module's own file-level context below for why that does NOT
+      // flip the overall result to REJECTED: the shipment_lines UPDATE
+      // above has already durably committed by the time this call runs,
+      // so reporting REJECTED here would misrepresent database state
+      // (the line WAS determined) for a mutation this function has no
+      // compensating-transaction mechanism to unwind. This field is the
+      // non-silent signal instead -- a caller (the server action today;
+      // a reconciliation job or UI warning later) can act on a
+      // false here without this being indistinguishable from a fully
+      // clean success, the same "returns whether it succeeded rather
+      // than throwing or silently swallowing" posture recordAuditEvent's
+      // own doc comment already establishes for the importer-side audit
+      // event, applied here via a typed result field instead of a
+      // boolean return value because the compliance stakes of the
+      // GRANTOR never learning their data was read are higher than an
+      // ordinary same-org audit gap.
+      crossOrgConsumptionRecorded: boolean;
+    }
   | { status: "REJECTED"; reason: DetermineFromActualDataRejectionReason };
 
 interface LineForDetermination {
@@ -303,6 +330,15 @@ async function fetchAuthorizedEmissionData(
 interface PerformDeterminationOptions {
   allowOverwrite: boolean;
   auditEventType: string;
+  // Fed straight through to record_shared_data_consumption's own
+  // p_determination_kind (validated there against this exact pair by
+  // that function's own CHECK -- see 20260829310000). Distinct from
+  // auditEventType (which both determine/redetermine already share,
+  // per redetermineLineFromActualData's own doc comment) so the
+  // GRANTOR-side event can still distinguish a first-time consumption
+  // from a redetermination without depending on auditEventType's own
+  // naming staying in sync with this RPC's enum.
+  determinationKind: "DETERMINED" | "REDETERMINED";
 }
 
 async function performDetermination(
@@ -497,11 +533,87 @@ async function performDetermination(
     },
   );
 
+  const crossOrgConsumptionRecorded =
+    await recordSharedDataConsumptionIfCrossOrg(
+      supabase,
+      snapshot,
+      updatedLine.id,
+      options.determinationKind,
+    );
+
   return {
     status: "DETERMINED",
     line: updatedLine,
     snapshot,
+    crossOrgConsumptionRecorded,
   };
+}
+
+interface RecordSharedDataConsumptionRpcRow {
+  result_status: string;
+  result_audit_event_id: string | null;
+}
+
+/**
+ * Calls record_shared_data_consumption()
+ * (20260829310000_p7d3_shared_data_consumption_audit.sql) -- the only
+ * way the GRANTOR org's own audit_events table can ever learn a member
+ * of the grantee org actually read/used their shared data (S8, master
+ * plan §9: "consumption events ... recorded on BOTH orgs' audit
+ * streams"; recordAuditEvent's own doc comment explains why a bare
+ * client-side insert can never write into an org other than the
+ * caller's own, so this cross-org half needs a dedicated SECURITY
+ * DEFINER RPC the same way accept_sharing_grant_invitation() does for
+ * the grant-acceptance case).
+ *
+ * A no-op returning `true` (nothing to record, not a failure) for an
+ * own-org determination -- `snapshot.sharing_grant_id === null` is
+ * exactly the signal ActualEmissionSnapshot's own doc comment already
+ * documents for "this snapshot was read across organizations".
+ *
+ * Checked, not fire-and-forget: unlike the plain recordAuditEvent()
+ * call above (best-effort by that helper's own explicit design, since
+ * an ordinary same-org audit gap is recoverable from the mutation's own
+ * row history), this RPC's outcome is returned to the caller as
+ * `crossOrgConsumptionRecorded` rather than silently discarded -- see
+ * DetermineFromActualDataResult's own doc comment for why a failure
+ * here does not flip the whole determination to REJECTED (the
+ * shipment_lines UPDATE has already durably committed by the time this
+ * runs) yet must still be visible rather than swallowed, given the
+ * compliance stakes of the grantor never learning their data was
+ * consumed.
+ */
+async function recordSharedDataConsumptionIfCrossOrg(
+  supabase: SupabaseClient,
+  snapshot: ActualEmissionSnapshot,
+  shipmentLineId: string,
+  determinationKind: "DETERMINED" | "REDETERMINED",
+): Promise<boolean> {
+  if (!snapshot.sharing_grant_id) {
+    return true;
+  }
+
+  const { data, error } =
+    await supabase.rpc(
+      "record_shared_data_consumption",
+      {
+        p_sharing_grant_id: snapshot.sharing_grant_id,
+        p_installation_id: snapshot.installation_id,
+        p_emission_data_id: snapshot.emission_data_id,
+        p_emission_data_version: snapshot.emission_data_version,
+        p_shipment_line_id: shipmentLineId,
+        p_determination_kind: determinationKind,
+      },
+    );
+
+  if (error) {
+    return false;
+  }
+
+  const row =
+    (data as RecordSharedDataConsumptionRpcRow[] | null)?.[0];
+
+  return row?.result_status === "OK";
 }
 
 /**
@@ -530,6 +642,7 @@ export async function determineLineFromActualData(
     {
       allowOverwrite: false,
       auditEventType: "emission_determination.set",
+      determinationKind: "DETERMINED",
     },
   );
 }
@@ -577,6 +690,7 @@ export async function redetermineLineFromActualData(
     {
       allowOverwrite: true,
       auditEventType: "emission_determination.redetermined",
+      determinationKind: "REDETERMINED",
     },
   );
 }
