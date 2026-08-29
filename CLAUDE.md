@@ -17,9 +17,11 @@ are built and locally verified through Phase 11, per the phase roadmap
 in the master plan. Do not assume features described in the master
 plan already exist, or that everything the plan describes has been
 built exactly as specced — check the actual code, and see README.md's
-"Current state" section and the P13 release-readiness report for a
-precise account of what's implemented, tested, verified, deferred, or
-still blocked on Railway/staging access.
+"Current state" section and
+[`docs/plans/P13_RELEASE_READINESS_REPORT.md`](docs/plans/P13_RELEASE_READINESS_REPORT.md)
+for a precise account of what's implemented, tested, verified,
+deferred, or still blocked on Railway access (currently down — see
+that report's §29).
 
 ## Protected regulatory foundation
 

@@ -22,10 +22,13 @@ tests plus three full-journey Playwright E2E suites
 (`tests/e2e/{importer,producer,cross-org-sharing}-journey.spec.ts`) run
 against real local Supabase. See
 [`docs/plans/MASTER_PLAN.md`](docs/plans/MASTER_PLAN.md) for the full
-phase-by-phase contract and acceptance criteria, and the P13
-release-readiness report (when published) for a precise
-implemented/tested/verified/deferred/blocked breakdown per capability —
-this paragraph is a summary, not a substitute for that audit.
+phase-by-phase contract and acceptance criteria, and
+[`docs/plans/P13_RELEASE_READINESS_REPORT.md`](docs/plans/P13_RELEASE_READINESS_REPORT.md)
+for a precise implemented/tested/verified/deferred/blocked breakdown per
+capability — this paragraph is a summary, not a substitute for that
+report, whose current headline finding is that the Railway production
+deployment is down and release is blocked pending that and one
+regulatory-interpretation decision.
 
 What is genuinely **not** done: CSV/XLSX shipment import (Phase 4's
 manual-entry-only today; bulk import was never built), a resolution
