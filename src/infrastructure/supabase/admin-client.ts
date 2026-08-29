@@ -12,6 +12,9 @@ import {
 let cachedClient:
   SupabaseClient | undefined;
 
+let cachedEnvKey:
+  string | undefined;
+
 /**
  * A service-role Supabase client, memoized, for the Auth admin API
  * (`client.auth.admin.*`) -- currently just `inviteUserByEmail`.
@@ -26,12 +29,21 @@ let cachedClient:
  * the UI_ALLOWED_INFRASTRUCTURE_IMPORTS exception in
  * tests/architecture/layering-rules.ts for the layering rule this
  * narrowness is load-bearing for.
+ *
+ * 2026-08-30: rebuilt if env resolves differently on a later call
+ * rather than cached unconditionally forever -- same live-reproduced
+ * defect and identical fix as
+ * src/infrastructure/supabase/client.ts's getSupabaseClient(); see
+ * that function's own doc comment for the full account.
  */
 export function getSupabaseAdminClient(): SupabaseClient {
-  if (!cachedClient) {
-    const env =
-      loadSupabaseEnv();
+  const env =
+    loadSupabaseEnv();
 
+  const envKey =
+    `${env.SUPABASE_URL} ${env.SUPABASE_SERVICE_ROLE_KEY}`;
+
+  if (!cachedClient || cachedEnvKey !== envKey) {
     cachedClient =
       createClient(
         env.SUPABASE_URL,
@@ -43,6 +55,9 @@ export function getSupabaseAdminClient(): SupabaseClient {
           },
         },
       );
+
+    cachedEnvKey =
+      envKey;
   }
 
   return cachedClient;
