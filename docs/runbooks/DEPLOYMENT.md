@@ -331,6 +331,24 @@ docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t snowkap-cbam:l
 docker run --rm -p 3000:3000 --env-file .env snowkap-cbam:local
 ```
 
+**Update, 2026-08-29 (P13 continuation, Railway now available):
+re-confirmed a third time, fresh, on this same day** -- Docker's data
+root has since moved to `D:\DockerDesktopWSL` (off the `C:` drive that
+caused every failure below), and this pass ran `docker build` at HEAD
+`fd516b3` with the real `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`
+build args, producing a 391 MB `snowkap-cbam:p13-verify` image (every
+route in the app tree built cleanly, no route-level build errors). Ran
+the container, confirmed independently:
+`GET /api/health` → `{"status":"ok","git_sha":"fd516b3","checks":{"database":"ok","active_regulatory_dataset":"ok"}}`
+(git_sha matches the build-arg exactly); `docker exec ... whoami`/`id`
+→ `nextjs` (uid 1001, gid 1001), not root; and a direct grep of
+`.next/static` inside the running container for the real
+`SUPABASE_SERVICE_ROLE_KEY` value found zero matches while the same
+grep for the (safe-to-expose) `NEXT_PUBLIC_SUPABASE_ANON_KEY` value
+found it correctly inlined -- confirming the client bundle carries the
+publishable key but not the service-role secret. Container stopped and
+removed after verification.
+
 **Update, 2026-08-29 (later the same day): re-confirmed for real, after
 the disk-exhaustion blocker below was resolved (C: freed to ~38 GB).**
 A real `docker build` (against the fixed Dockerfile — §3's
