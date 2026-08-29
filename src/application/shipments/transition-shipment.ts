@@ -43,7 +43,16 @@ export type TransitionShipmentActionResult =
         | "NOT_FOUND"
         | "FETCH_FAILED"
         | "PERSIST_FAILED"
-        | "PERMISSION_DENIED";
+        | "PERMISSION_DENIED"
+        // Lost a race against a concurrent transition on the same
+        // shipment (P13 adversarial audit) -- see the CAS guard on the
+        // persist below, same shape as every other state-transition
+        // service in this codebase (mark-declaration-ready.ts,
+        // manage-emission-data.ts's applyTransition, etc.). Previously
+        // missing here: a lost race silently returned {status:"OK"}
+        // and recorded a false audit event for a transition that never
+        // actually happened.
+        | "CONCURRENT_MODIFICATION";
     };
 
 const AUDIT_EVENT_TYPE_BY_ACTION: Record<ShipmentTransitionAction, string> =
@@ -173,18 +182,37 @@ export async function transitionShipmentStatus(
     return transitionResult;
   }
 
-  const { error: updateError } =
+  // CAS guard (.eq("status", shipment.status)): without it, two
+  // concurrent transitions racing between their own fetch above and
+  // this UPDATE (e.g. one admin's VOID racing another's LOCK) could
+  // both pass transitionShipment's in-memory check against their own
+  // stale snapshot -- the second UPDATE would then be silently
+  // filtered to zero rows by RLS's own terminal-status check (no
+  // error), and this function would still report {status:"OK"} and
+  // record a permanent, false shipment.locked/.voided audit event for
+  // a transition that never happened (P13 adversarial audit).
+  const { data: updated, error: updateError } =
     await supabase
       .from("shipments")
       .update(
         { status: transitionResult.shipment.status },
       )
-      .eq("id", shipmentId);
+      .eq("id", shipmentId)
+      .eq("status", shipment.status)
+      .select("id")
+      .maybeSingle();
 
   if (updateError) {
     return {
       status: "REJECTED",
       reason: "PERSIST_FAILED",
+    };
+  }
+
+  if (!updated) {
+    return {
+      status: "REJECTED",
+      reason: "CONCURRENT_MODIFICATION",
     };
   }
 

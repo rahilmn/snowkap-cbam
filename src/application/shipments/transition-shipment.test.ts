@@ -74,10 +74,18 @@ function mockSupabase(
     shipmentResult,
     linesResult = { data: [], error: null },
     updateError = null,
+    // Row-count check for the CAS guard: defaults to "the update
+    // matched" (a truthy stand-in row) so every existing test, which
+    // doesn't care about the concurrency case, keeps passing without
+    // having to know about this parameter. A test exercising
+    // CONCURRENT_MODIFICATION passes { id: null } here (matching a
+    // real .maybeSingle() finding zero rows).
+    updateData = { id: "ship-1" },
   }: {
     shipmentResult: { data: unknown; error: unknown };
     linesResult?: { data: unknown; error: unknown };
     updateError?: unknown;
+    updateData?: unknown;
   },
 ) {
   return {
@@ -120,14 +128,18 @@ function mockSupabase(
           }
         ),
 
-        update: () => (
-          {
-            eq: () =>
+        update: () => {
+          const chain = {
+            eq: () => chain,
+            select: () => chain,
+            maybeSingle: () =>
               Promise.resolve(
-                { error: updateError },
+                { data: updateError ? null : updateData, error: updateError },
               ),
-          }
-        ),
+          };
+
+          return chain;
+        },
       };
     },
   } as never;
@@ -357,6 +369,28 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "PERSIST_FAILED" },
+        );
+      },
+    );
+
+    it(
+      "rejects CONCURRENT_MODIFICATION (not a silent OK) when the CAS predicate matches zero rows -- e.g. another request already transitioned this shipment out of the status this call read (P13 adversarial audit: this UPDATE previously carried no CAS predicate at all, so a lost race silently succeeded and recorded a false audit event)",
+      async () => {
+        const result =
+          await transitionShipmentStatus(
+            mockSupabase(
+              {
+                shipmentResult: { data: draftShipmentRow, error: null },
+                updateData: null,
+              },
+            ),
+            memberContext(),
+            shipmentId,
+            "VOID",
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "CONCURRENT_MODIFICATION" },
         );
       },
     );

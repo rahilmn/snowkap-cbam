@@ -210,6 +210,9 @@ function transitionMessageFor(
     case "PERMISSION_DENIED":
       return "Only an ADMIN or OWNER can lock a shipment.";
 
+    case "CONCURRENT_MODIFICATION":
+      return "This shipment changed while you were viewing it -- reload and try again.";
+
     default:
       return "Something went wrong. Please try again.";
   }
