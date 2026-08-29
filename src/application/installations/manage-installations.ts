@@ -315,10 +315,18 @@ interface InstallationOwnershipRow {
  * only ever stopped a direct DELETE, never one arriving via cascade,
  * and cascade deletes are not subject to a child table's RLS at all).
  * INSTALLATION_HAS_DEPENDENTS surfaces that as a real, actionable
- * rejection instead of a generic PERSIST_FAILED -- the caller must
- * discard/retire the dependent emission_data and revoke the sharing
- * grants first, an explicit action with its own audit trail, rather
- * than an implicit side effect of removing their parent.
+ * rejection instead of a generic PERSIST_FAILED. Note this is
+ * permanent, not something the caller can clear and retry: the FK
+ * fires on the dependent ROW's existence, not its status, so
+ * discarding emission_data or revoking a sharing_grant (both status
+ * flips, never row deletions -- deliberately, so that history stays
+ * intact) does NOT remove the block. An installation that has ever
+ * had emission_data or a sharing_grant recorded against it can never
+ * be deleted again; only an installation with zero recorded activity
+ * can be (P13 adversarial audit finding: the caller-facing message
+ * used to imply discard/revoke-then-retry would work, which is false
+ * and left users at a dead end -- see app/(producer)/installations/
+ * actions.ts's corrected copy).
  */
 export async function removeInstallation(
   supabase: SupabaseClient,

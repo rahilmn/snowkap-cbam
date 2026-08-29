@@ -152,6 +152,15 @@ build-time/inlined, a rotation or environment promotion of either value
 requires a rebuild, not just a config change, once a hosted build
 pipeline exists (see `docs/runbooks/SECRET_ROTATION.md`'s note on this).
 
+The Docker build path needs both passed explicitly as `--build-arg`s —
+Next.js can only inline a `NEXT_PUBLIC_*` value that was actually
+present in the build-stage process environment, and a Docker build
+stage starts with none of the host's env vars. The
+[`Dockerfile`](../../Dockerfile)'s build stage declares matching `ARG`
+declarations (lines 42–45) for exactly this reason; omitting either
+`--build-arg` produces an image whose client bundle silently has no
+Supabase URL/key baked in, not a build failure.
+
 ## 2. Application runtime
 
 ### `APP_URL`
@@ -197,7 +206,7 @@ for `next build`/`next start`) — it is not something a developer
 usually sets by hand in `.env`, which is why it is absent from
 `.env.example` (see "Cross-check against `.env.example`" below). The
 Dockerfile's run stage also sets it explicitly (`ENV NODE_ENV=production`,
-line 34) so the container's runtime value matches its build mode
+line 51) so the container's runtime value matches its build mode
 regardless of how it's launched.
 
 **Differs by environment**: local is `development`; CI, staging, and
@@ -211,7 +220,7 @@ is correct, not a gap.
 
 A Docker build **ARG**, promoted to a runtime **ENV** in both the
 `build` and `run` stages of the [`Dockerfile`](../../Dockerfile) (lines
-27–28 and 35–36) — this is deliberately not `.env`-configured; it comes
+27–28 and 52–53) — this is deliberately not `.env`-configured; it comes
 from the deploying commit itself. `next.config.ts:16` reads it at build
 time to derive the client-exposed `NEXT_PUBLIC_GIT_SHA` (see the
 dedicated section below). Two runtime call sites read it directly,

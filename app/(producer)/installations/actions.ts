@@ -337,7 +337,7 @@ export async function removeInstallationAction(
       status: "error",
       message:
         result.reason === "INSTALLATION_HAS_DEPENDENTS"
-          ? "This installation has emission records or sharing grants attached and can't be removed. Discard its emission data and revoke any sharing grants first."
+          ? "This installation has emission records or sharing grants in its history and can't be removed. That history is kept even after data is discarded or a grant is revoked, so this installation can no longer be deleted -- only installations with no recorded activity can be."
           : "Something went wrong. Please try again.",
     };
   }
