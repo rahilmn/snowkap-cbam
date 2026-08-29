@@ -46,6 +46,10 @@ import {
   calculateLine,
 } from "../../../../src/application/calculations/calculate-line";
 
+import {
+  reproduceCalculationResult,
+} from "../../../../src/application/calculations/reproduce-calculation-result";
+
 import type {
   ShipmentTransitionAction,
 } from "../../../../src/domain/shipments/lifecycle";
@@ -57,6 +61,10 @@ import type {
 import type {
   ResolveEmissionsActionState,
 } from "./resolve-emissions-action-state";
+
+import type {
+  ReproductionActionState,
+} from "./reproduction-action-state";
 
 function lineMessageFor(
   reason: string,
@@ -854,5 +862,103 @@ export async function calculateLineAction(
 
   return {
     status: "idle",
+  };
+}
+
+const verifyCalculationReproducibilitySchema =
+  z.object({
+    calculationResultId:
+      z.string().min(1),
+  });
+
+/**
+ * The on-demand half of P8's reproduction-proof contract (master plan
+ * §17/§21 -- "same inputs + engine_version => byte-identical output,
+ * re-provable on demand"; the CI-side half is a separate test against
+ * reproduceCalculationResult directly, not this action). Follows
+ * calculateLineAction's exact auth/org-context shape -- same
+ * getServerSupabaseClient / getCurrentOrgSummary / getUser sequence --
+ * but unlike every other action in this file, reproduceCalculationResult
+ * only reads and compares (its own doc comment): it never writes to
+ * calculation_results or anywhere else, so there is deliberately no
+ * revalidatePath call here -- nothing about the shipment's persisted
+ * state changes as a result of running this check.
+ *
+ * Returns reproduceCalculationResult's own ReproductionResult verbatim
+ * as `result` rather than mapping it to a message the way this file's
+ * other REJECTED-reason functions do -- ReproductionResult's variants
+ * (REPRODUCIBLE / MISMATCH / ENGINE_VERSION_CHANGED / INPUTS_DRIFTED /
+ * NOT_FOUND) are meaningfully different UI states, not interchangeable
+ * error strings, so the panel that renders them needs the full typed
+ * union, not a pre-collapsed message.
+ *
+ * Gated on org membership only (the same getCurrentOrgSummary check
+ * every other action in this file uses), not hasAdminAccess -- master
+ * plan §21 describes the reproduction proof's on-demand half as an
+ * "admin check", but this is read-only over a calculation result the
+ * member can already see rendered on the same screen (the panel that
+ * renders `result` is on the same shipment-detail page this member
+ * already has MEMBER+ access to), so there is no additional exposure a
+ * stricter gate would prevent -- same MEMBER+-pending-§41-decision
+ * reasoning app/(importer)/audit/page.tsx's own doc comment applies to
+ * the audit screens, noted here since this is a deliberate divergence
+ * from §21's literal wording, not an oversight (P8 security review,
+ * finding #4).
+ */
+export async function verifyCalculationReproducibilityAction(
+  _previousState: ReproductionActionState,
+  formData: FormData,
+): Promise<ReproductionActionState> {
+  const parsed =
+    verifyCalculationReproducibilitySchema.safeParse(
+      {
+        calculationResultId: formData.get("calculationResultId"),
+      },
+    );
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Invalid request.",
+    };
+  }
+
+  const supabase =
+    await getServerSupabaseClient();
+
+  const orgSummary =
+    await getCurrentOrgSummary(
+      supabase,
+      await getPreferredOrgId(),
+    );
+
+  if (!orgSummary) {
+    return {
+      status: "error",
+      message: "You are not a member of an organization.",
+    };
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(
+      "/sign-in",
+    );
+  }
+
+  const result =
+    await reproduceCalculationResult(
+      supabase,
+      getRegulatoryRepository(),
+      orgSummary.context.org_id,
+      parsed.data.calculationResultId as never,
+    );
+
+  return {
+    status: "checked",
+    result,
   };
 }

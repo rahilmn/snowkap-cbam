@@ -13,13 +13,8 @@ import {
 } from "../../../../components/ui/button";
 
 import {
-  resolveEmissionsAction,
   determineFromActualDataAction,
 } from "./actions";
-
-import {
-  initialResolveEmissionsActionState,
-} from "./resolve-emissions-action-state";
 
 import {
   initialLineActionState,
@@ -30,10 +25,6 @@ import type {
 } from "../../../../src/domain/shipments/types";
 
 import type {
-  RegulatoryValue,
-} from "../../../../src/domain/regulatory/types";
-
-import type {
   AvailableActualEmissionDataOption,
 } from "../../../../src/application/emissions/list-available-actual-data";
 
@@ -41,13 +32,9 @@ import type {
   ActualSnapshotStaleness,
 } from "../../../../src/domain/emissions/check-actual-snapshot-staleness";
 
-const VALUE_STATUS_TONE = {
-  AVAILABLE: "success" as const,
-  REFERENCE_REQUIRED: "warning" as const,
-  UNAVAILABLE: "neutral" as const,
-  NOT_APPLICABLE: "neutral" as const,
-  SOURCE_TEXT: "neutral" as const,
-};
+import type {
+  ResolveEmissionsActionState,
+} from "./resolve-emissions-action-state";
 
 const REASON_TONE: Record<string, "success" | "warning" | "danger" | "neutral"> = {
   EXACT_TARIC_MATCH: "success",
@@ -61,91 +48,6 @@ const REASON_TONE: Record<string, "success" | "warning" | "danger" | "neutral"> 
   AMBIGUOUS: "danger",
   NO_MATCH: "danger",
 };
-
-function ValuePill(
-  {
-    label,
-    value,
-  }: {
-    label: string;
-    value: RegulatoryValue;
-  },
-) {
-  return (
-    <div className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-sunken)] px-2 py-1">
-      <span className="text-xs text-[var(--text-tertiary)]">
-        {label}
-      </span>
-
-      {value.status === "AVAILABLE" ? (
-        <span className="font-mono text-xs tabular-nums text-[var(--text-primary)]">
-          {value.value}
-        </span>
-      ) : (
-        <Badge tone={VALUE_STATUS_TONE[value.status]}>
-          {value.status.replace(/_/g, " ")}
-        </Badge>
-      )}
-    </div>
-  );
-}
-
-function TraceList(
-  {
-    trace,
-  }: {
-    trace: { step: string; outcome: string }[];
-  },
-) {
-  if (trace.length === 0) {
-    return null;
-  }
-
-  return (
-    <ol className="mt-2 space-y-1 border-t border-[var(--border-default)] pt-2">
-      {trace.map(
-        (entry, index) => (
-          <li
-            key={`${entry.step}-${index}`}
-            className="flex flex-col gap-0.5 font-mono text-[11px] leading-tight text-[var(--text-tertiary)]"
-          >
-            <span className="text-[var(--text-secondary)]">
-              {entry.step}
-            </span>
-
-            <span>
-              {entry.outcome}
-            </span>
-          </li>
-        ),
-      )}
-    </ol>
-  );
-}
-
-function DecimalPill(
-  {
-    label,
-    value,
-    unit,
-  }: {
-    label: string;
-    value: string;
-    unit: string;
-  },
-) {
-  return (
-    <div className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-sunken)] px-2 py-1">
-      <span className="text-xs text-[var(--text-tertiary)]">
-        {label}
-      </span>
-
-      <span className="font-mono text-xs tabular-nums text-[var(--text-primary)]">
-        {value} {unit}
-      </span>
-    </div>
-  );
-}
 
 /**
  * The DEFAULT-path button was previously labeled generic "Determine"/
@@ -192,6 +94,19 @@ function formatActualDataOptionLabel(
     : base;
 }
 
+/**
+ * `resolveState`/`resolveFormAction`/`resolvePending` are lifted from
+ * this component into lines-table.tsx's LineRow (P8) rather than owned
+ * here via a local useActionState call, the way this component did
+ * through P7 -- an UNRESOLVED outcome carries a reason/trace that
+ * why-this-number-panel.tsx now also needs to render (its own "do not
+ * drop that error path" requirement), and two independent
+ * useActionState calls against the same resolveEmissionsAction would
+ * mean submitting the form only updates whichever component's own hook
+ * instance the form element belongs to -- not both. One hook, one
+ * source of truth, shared by both this cell's compact badge/button and
+ * the panel's fuller unresolved-state rendering.
+ */
 export function EmissionsCell(
   {
     shipmentId,
@@ -199,24 +114,20 @@ export function EmissionsCell(
     editable,
     availableActualData,
     staleness,
+    resolveState: state,
+    resolveFormAction: formAction,
+    resolvePending: pending,
   }: {
     shipmentId: string;
     line: ShipmentLine;
     editable: boolean;
     availableActualData: AvailableActualEmissionDataOption[];
     staleness: ActualSnapshotStaleness | undefined;
+    resolveState: ResolveEmissionsActionState;
+    resolveFormAction: (formData: FormData) => void;
+    resolvePending: boolean;
   },
 ) {
-  const [
-    state,
-    formAction,
-    pending,
-  ] =
-    useActionState(
-      resolveEmissionsAction,
-      initialResolveEmissionsActionState,
-    );
-
   const [
     actualDataState,
     actualDataFormAction,
@@ -287,62 +198,6 @@ export function EmissionsCell(
         ) : null}
       </div>
 
-      {resolution ? (
-        <details className="group">
-          <summary className="cursor-pointer text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
-            Why this number?
-          </summary>
-
-          <div className="mt-2 flex flex-col gap-1.5">
-            <div className="grid grid-cols-3 gap-1.5">
-              <ValuePill label="Direct" value={resolution.values.direct} />
-              <ValuePill label="Indirect" value={resolution.values.indirect} />
-              <ValuePill label="Total" value={resolution.values.total} />
-            </div>
-
-            <p className="text-[11px] text-[var(--text-tertiary)]">
-              Dataset {resolution.dataset_version} · Unit {resolution.emission_unit} ·{" "}
-              {resolution.country_mapping.status === "MAPPED"
-                ? `Origin mapped to "${resolution.country_mapping.regulatory_country_name}"`
-                : "Origin not individually listed -- Other Countries and Territories used"}
-            </p>
-
-            <TraceList trace={resolution.trace} />
-          </div>
-        </details>
-      ) : null}
-
-      {actualSnapshot ? (
-        <details className="group">
-          <summary className="cursor-pointer text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
-            Why this number?
-          </summary>
-
-          <div className="mt-2 flex flex-col gap-1.5">
-            <div className="grid grid-cols-2 gap-1.5">
-              <DecimalPill
-                label="Direct"
-                value={actualSnapshot.values.direct_specific}
-                unit={actualSnapshot.emission_unit}
-              />
-
-              <DecimalPill
-                label="Indirect"
-                value={actualSnapshot.values.indirect_specific}
-                unit={actualSnapshot.emission_unit}
-              />
-            </div>
-
-            <p className="text-[11px] text-[var(--text-tertiary)]">
-              Methodology {actualSnapshot.methodology.replace(/_/g, " ")} ·{" "}
-              {actualSnapshot.sharing_grant_id !== null
-                ? "via a shared installation"
-                : "from your organization's own data"}
-            </p>
-          </div>
-        </details>
-      ) : null}
-
       {editable && availableActualData.length > 0 ? (
         <form
           action={actualDataFormAction}
@@ -406,19 +261,6 @@ export function EmissionsCell(
         <p className="text-xs text-[var(--color-warning-700)]">
           {actualDataState.warning}
         </p>
-      ) : null}
-
-      {state.status === "unresolved" ? (
-        <details
-          className="group"
-          open
-        >
-          <summary className="cursor-pointer text-xs text-[var(--color-danger-700)]">
-            {state.message}
-          </summary>
-
-          <TraceList trace={state.trace ?? []} />
-        </details>
       ) : null}
 
       {state.status === "error" ? (
