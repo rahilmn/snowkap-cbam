@@ -8,13 +8,43 @@ producer/operator organizations on one platform. See
 [`docs/plans/MASTER_PLAN.md`](docs/plans/MASTER_PLAN.md) for the full
 product plan and phase roadmap.
 
-**Current state**: the regulatory foundation and the branded Next.js
-application shell (below) are built and verified. Tenancy, auth, and
-the actual product screens (shipments, emissions, calculations) are in
-active development per the phase roadmap — see the master plan for
-what exists today versus what's planned. Staging/production deployment
-is not yet live (Railway account access is an owner-provided
-precondition, not yet available in this environment).
+**Current state, honestly, as of 2026-08-29 (through Phase 11, mid-Phase
+13)**: this is a substantially built, locally-verified, multi-tenant
+product today — not early scaffolding. The regulatory foundation, a
+full RLS-protected tenancy/auth layer, and real product screens for
+both importer and producer/operator organizations (shipment intake and
+classification, regulatory resolution, calculation, "Why this number?"
+explainability, period reporting/export, declaration preparation
+through LOCK, installation/operator management, actual-emissions entry
+and verification, cross-org sharing) all exist, are backed by 39
+applied Supabase migrations, and are covered by 873 passing automated
+tests plus three full-journey Playwright E2E suites
+(`tests/e2e/{importer,producer,cross-org-sharing}-journey.spec.ts`) run
+against real local Supabase. See
+[`docs/plans/MASTER_PLAN.md`](docs/plans/MASTER_PLAN.md) for the full
+phase-by-phase contract and acceptance criteria, and the P13
+release-readiness report (when published) for a precise
+implemented/tested/verified/deferred/blocked breakdown per capability —
+this paragraph is a summary, not a substitute for that audit.
+
+What is genuinely **not** done: CSV/XLSX shipment import (Phase 4's
+manual-entry-only today; bulk import was never built), a resolution
+explorer/batch-resolve UI (Phase 5's per-line "Why this number?" is
+real; the cross-shipment explorer view is not), real importer/producer
+dashboards (the post-sign-in landing page is still a Phase-2
+placeholder — every wired screen is reachable from the sidebar, just
+not summarized on one dashboard), org-capability enforcement at the
+service layer (role/tenancy isolation is enforced and tested; the
+IMPORTER_DECLARANT/PRODUCER_OPERATOR capability dimension is not — see
+`docs/architecture/AUTHORIZATION_MATRIX.md`), and the bootstrap-by-email
+sharing invite does not actually send an email yet (see
+`docs/adr/ADR-0012-cross-organization-sharing-model.md`). Staging and
+production deployment are not live anywhere — no Railway or
+staging/production Supabase project has ever been connected to this
+environment (an owner-provided precondition); see
+`docs/runbooks/DEPLOYMENT.md` for exactly what is and isn't verified
+locally versus what still needs a real Railway/Supabase project to
+confirm.
 
 ## What's here today
 
@@ -23,27 +53,41 @@ precondition, not yet available in this environment).
   documented rules in
   [`docs/architecture/REGULATORY_RESOLUTION_RULES.md`](docs/architecture/REGULATORY_RESOLUTION_RULES.md),
   reading from a Supabase-hosted, checksum-verified CBAM default
-  emission values dataset (12,540 records; see
+  emission values dataset (12,540 records, 283 CBAM goods, 122
+  countries; see
   [`docs/architecture/DATABASE_SCHEMA.md`](docs/architecture/DATABASE_SCHEMA.md)).
   This subsystem is **protected** — see `CLAUDE.md`.
-- **Product domain model** (`src/domain/{organizations,shipments,emissions,installations,calculations,audit,sharing}/`)
-  — types plus pure invariant/lifecycle functions for the aggregates
-  described in
-  [`docs/architecture/DOMAIN_MODEL.md`](docs/architecture/DOMAIN_MODEL.md).
-  No persistence yet.
-- **Application shell** (`app/`, `components/`) — Next.js 16 App
-  Router, the Snowkap design system (`app/globals.css`; light + true
-  dark, WCAG AA verified), the branded shell (topbar, capability-aware
-  sidebar, breadcrumbs), and a dev-only `/design` component gallery.
-  No real auth/org-switching yet — the sidebar/org-switcher are
-  static.
+- **Product domain + application layers**
+  (`src/domain/{organizations,shipments,emissions,installations,calculations,audit,sharing,declarations,evidence}/`,
+  `src/application/**`) — real, persisted aggregates (see
+  [`docs/architecture/DOMAIN_MODEL.md`](docs/architecture/DOMAIN_MODEL.md))
+  backing every screen listed below, not a types-only sketch.
+- **Multi-tenant RLS + auth** (`supabase/migrations/`) — organizations,
+  memberships (with deactivation), invitations, and row-level security
+  on every product table, independently re-verified this phase against
+  a real local Supabase instance (see
+  [`docs/architecture/AUTHORIZATION_MATRIX.md`](docs/architecture/AUTHORIZATION_MATRIX.md)
+  for the full role/capability gate inventory, including its
+  self-disclosed gaps).
+- **Application shell + product screens** (`app/`, `components/`) —
+  Next.js 16 App Router, the Snowkap design system (`app/globals.css`;
+  light + true dark, WCAG AA verified), the branded shell (topbar,
+  capability-aware sidebar, breadcrumbs, real auth/org-switching), and
+  real screens for both experiences: importer shipments/emissions/
+  suppliers/reports/declarations/audit, producer
+  installations/emission-data/sharing/activity. A `/design` component
+  gallery also exists at that route — not gated to development, just
+  unlinked from navigation.
 - **Health check** (`app/api/health/route.ts`) — process liveness +
   Supabase connectivity + exactly-one-ACTIVE-dataset check. Backs the
   Railway healthcheck once deployed.
 - **Deployment artifacts** (`Dockerfile`, `railway.json`,
   `.dockerignore`) — a multi-stage build around Next's standalone
-  output, verified to build and serve correctly locally. Not yet
-  deployed anywhere (no Railway account access in this environment).
+  output. Re-verified locally this phase (real `docker build` + `docker
+  run` + healthcheck + non-root-user check, after fixing a real
+  Dockerfile defect the build-arg wiring had — see
+  `docs/runbooks/DEPLOYMENT.md` §3 and §8). Not yet deployed anywhere
+  (no Railway account access in this environment).
 - **Data pipeline** (`scripts/regulatory/*.py`) — parses, validates,
   reconciles, and loads the CBAM regulatory dataset from its source
   Excel workbook into Supabase, and verifies the loaded data matches

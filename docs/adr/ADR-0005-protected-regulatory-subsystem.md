@@ -50,3 +50,15 @@ explicitly in its description and include `pnpm regulatory:verify`
 output as evidence. See `CLAUDE.md` for the concrete "never" list
 (never convert UNAVAILABLE/REFERENCE_REQUIRED/NOT_APPLICABLE to zero,
 never invent a value, etc.) this ADR operationalizes.
+
+### Addendum, 2026-08-29 (P13 audit finding)
+
+This Context section's "the four applied Supabase migrations" is now
+stale: a fifth regulatory-foundation migration
+(`20260828100000_authenticated_read_regulatory_data.sql`, added
+correctly under this ADR's own process in Phase 3) brings the protected
+migration count to five. The decision, alternatives, and consequences
+above are unchanged and this is not a decision reversal, so the
+original text is left as the historical record; `CLAUDE.md`'s protected
+regulatory foundation list now names all five files explicitly rather
+than relying on a count.

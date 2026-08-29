@@ -5,7 +5,7 @@
 #
 # Install with: pip install -r scripts/regulatory/requirements.txt
 # Requires Python 3.13 (matches the version this was pinned against;
-# see CLAUDE.md).
+# see README.md's Prerequisites section).
 #
 # pandas + openpyxl: reading the source .xlsx workbooks
 # (pandas.read_excel relies on openpyxl as its .xlsx engine, even

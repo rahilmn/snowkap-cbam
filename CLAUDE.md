@@ -10,10 +10,16 @@ product plan this codebase is being built toward.
 A CBAM compliance platform, built around a verified regulatory
 foundation. The regulatory subsystem is production-grade and protected;
 a branded Next.js application shell and design system exist (`app/`,
-`components/`); auth, tenancy, and the actual product screens
-(shipments, emissions, calculations) are under active construction per
-the phase roadmap in the master plan. Do not assume features described
-in the master plan already exist — check the actual code.
+`components/`); auth, RLS-enforced tenancy, and real product screens
+for both importer/declarant and producer/operator organizations
+(shipments, emissions, calculations, sharing, declarations, and more)
+are built and locally verified through Phase 11, per the phase roadmap
+in the master plan. Do not assume features described in the master
+plan already exist, or that everything the plan describes has been
+built exactly as specced — check the actual code, and see README.md's
+"Current state" section and the P13 release-readiness report for a
+precise account of what's implemented, tested, verified, deferred, or
+still blocked on Railway/staging access.
 
 ## Protected regulatory foundation
 
@@ -24,7 +30,15 @@ These are **protected**, per
 - `src/infrastructure/regulatory/` (the Supabase adapter and DB row
   types)
 - `src/infrastructure/supabase/client.ts`
-- `supabase/migrations/*.sql` (all four, applied)
+- The five regulatory-foundation migrations, applied (**not** every file
+  matching `supabase/migrations/*.sql` — that glob now also matches ~35
+  unrelated product-schema migrations from P3 onward, which are not
+  protected):
+  `20260826133116_create_regulatory_foundation.sql`,
+  `20260827093000_support_regulatory_geography.sql`,
+  `20260827110000_activate_definitive_regulatory_dataset.sql`,
+  `20260827130000_harden_regulatory_emission_uniqueness.sql`,
+  `20260828100000_authenticated_read_regulatory_data.sql`
 - `scripts/regulatory/*.py` (the data pipeline)
 - The ACTIVE `default_emission_values` dataset in Supabase itself
 
@@ -76,7 +90,16 @@ for the full rules — in short:
 - `app/**` (outside `app/api/**`) and `components/**` must not import
   `src/infrastructure/**` directly — reach it through an application
   service once one exists. `app/api/**` route handlers are the
-  sanctioned exception (health checks, uploads/downloads, webhooks).
+  sanctioned exception (health checks, uploads/downloads, webhooks), as
+  are a small, explicit allowlist of infrastructure entry points
+  `tests/architecture/layering-rules.ts` (`UI_ALLOWED_INFRASTRUCTURE_IMPORTS`)
+  permits directly from Server Actions/Components:
+  `src/infrastructure/supabase/{server-client,browser-client,admin-client}`,
+  `src/infrastructure/regulatory/get-regulatory-repository`, and
+  `src/infrastructure/rate-limit/rate-limiter`. Importing one of these
+  five from `app/**`/`components/**` is sanctioned, existing practice
+  (e.g. every `app/(auth)/actions.ts`-style Server Action) — not a
+  layering violation to flag or work around.
 - Regulated numerics are always `DecimalString`
   (`src/domain/shared/decimal.ts`), never `number`.
 - Expected outcomes are discriminated `{status, reason}` unions
