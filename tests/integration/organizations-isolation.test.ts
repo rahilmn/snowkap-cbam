@@ -12,6 +12,10 @@ import {
 } from "@supabase/supabase-js";
 
 import {
+  createHmac,
+} from "node:crypto";
+
+import {
   changeMemberRole,
   reactivateMember,
   removeMember,
@@ -45,6 +49,82 @@ const LOCAL_ANON_KEY =
 const LOCAL_SERVICE_ROLE_KEY =
   process.env.SUPABASE_LOCAL_SERVICE_ROLE_KEY ??
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
+
+// Same "the equally-public default local JWT_SECRET" the two keys
+// above are already derived from (`supabase status` prints it
+// verbatim for a fresh local project) -- not a secret, meaningless
+// outside a local, unauthenticated Docker network. Used ONLY to mint a
+// raw session token below for the email-confirmation test, which
+// deliberately does NOT go through any GoTrue grant flow (signUp/
+// signInWithPassword) -- see that test's own comment for why.
+const LOCAL_JWT_SECRET =
+  process.env.SUPABASE_LOCAL_JWT_SECRET ??
+  "super-secret-jwt-token-with-at-least-32-characters-long";
+
+function base64UrlEncode(
+  input: string | Buffer,
+): string {
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/**
+ * Mints a validly-signed (HS256, LOCAL_JWT_SECRET) session token for
+ * `userId`/`email` directly, in the same shape a real GoTrue-issued
+ * access token carries (aud/role "authenticated", sub, email, iat/exp)
+ * -- WITHOUT calling any Auth endpoint. Exists for exactly one test:
+ * GoTrue's own password-grant sign-in already refuses to issue a
+ * session for a genuinely unconfirmed user locally (live-confirmed:
+ * "Email not confirmed", even with enable_confirmations = false, which
+ * only auto-confirms the ordinary signUp flow -- it does not weaken
+ * the password-grant login check for a user created any other way,
+ * e.g. via the admin API with email_confirm: false). That is a real
+ * wall, but it is a property of ONE specific grant flow, not something
+ * Postgres/PostgREST itself enforces -- exactly why
+ * create_organization_with_owner needs its OWN independent, DB-level
+ * check (20260829460000), matching the P11 review's own "regardless of
+ * what enable_confirmations is set to" reasoning. This function
+ * constructs the artifact that check must defend against on its own:
+ * a validly-signed token for a real, genuinely-unconfirmed user,
+ * indistinguishable at the PostgREST/Postgres layer from a token
+ * issued by any other current or future grant flow.
+ */
+function mintRawSessionJwt(
+  userId: string,
+  email: string,
+): string {
+  const header = {
+    alg: "HS256",
+    typ: "JWT",
+  };
+
+  const nowSeconds =
+    Math.floor(
+      Date.now() / 1000,
+    );
+
+  const payload = {
+    aud: "authenticated",
+    role: "authenticated",
+    sub: userId,
+    email,
+    iat: nowSeconds,
+    exp: nowSeconds + 3600,
+  };
+
+  const signingInput =
+    `${base64UrlEncode(JSON.stringify(header))}.${base64UrlEncode(JSON.stringify(payload))}`;
+
+  const signature =
+    createHmac("sha256", LOCAL_JWT_SECRET)
+      .update(signingInput)
+      .digest();
+
+  return `${signingInput}.${base64UrlEncode(signature)}`;
+}
 
 async function isLocalSupabaseReachable(): Promise<boolean> {
   try {
@@ -624,6 +704,186 @@ describe.skipIf(!localSupabaseReachable)(
         } finally {
           await serviceClient.auth.admin.deleteUser(
             onboardingUserId,
+          );
+        }
+      },
+    );
+
+    // P13 adversarial audit, live-reproduced against real Postgres (see
+    // 20260829460000_p13_review_onboarding_email_confirmation_hardening.sql's
+    // own header comment): create_organization_with_owner's ONLY
+    // precondition used to be `auth.uid() is null`, so a caller who
+    // signed up with an email they never proved control of could
+    // become OWNER of a brand-new organization under that identity.
+    // This proves BOTH sides live: an unconfirmed caller is rejected,
+    // with no organization/membership/audit-event row left behind, and
+    // the SAME caller, once their email is confirmed, succeeds exactly
+    // as before -- via the SAME token, since app.user_confirmed_email()
+    // reads auth.users.email_confirmed_at live on every call rather
+    // than trusting anything baked into the JWT.
+    //
+    // Uses mintRawSessionJwt() rather than signInAnonClient()
+    // (password-grant sign-in) -- live-checked while writing this test:
+    // GoTrue's own password-grant login already refuses to issue a
+    // session for a genuinely unconfirmed user ("Email not confirmed"),
+    // even with enable_confirmations = false (that flag only
+    // auto-confirms the ordinary public signUp flow; it does not
+    // relax the login check for a user left unconfirmed any other
+    // way, e.g. admin-created with email_confirm: false). That is a
+    // real wall, but it is specific to ONE grant flow and is not
+    // something Postgres/PostgREST itself enforces -- which is exactly
+    // why this RPC needs its own independent, DB-level check
+    // (matching the P11 review's "regardless of what
+    // enable_confirmations is set to" reasoning, applied here to the
+    // login gate itself rather than just the config flag). This test
+    // constructs the artifact that check must defend against on its
+    // own: a validly-signed session for a real, genuinely-unconfirmed
+    // user, indistinguishable at the Postgres layer from a token any
+    // other current or future grant flow might issue.
+    it(
+      "the onboarding RPC rejects a caller whose email was never confirmed, and accepts the same caller once it is",
+      async () => {
+        const unconfirmedEmail =
+          `isolation-unconfirmed-${runId}@example.com`;
+
+        const unconfirmedPassword =
+          `isolation-test-password-${runId}!`;
+
+        const { data: unconfirmedUser, error: unconfirmedUserError } =
+          await serviceClient.auth.admin.createUser(
+            {
+              email: unconfirmedEmail,
+              password: unconfirmedPassword,
+              // false (not omitted): explicitly leaves
+              // email_confirmed_at null -- live-verified against this
+              // local project.
+              email_confirm: false,
+            },
+          );
+
+        if (unconfirmedUserError || !unconfirmedUser.user) {
+          throw new Error(
+            `Failed to create unconfirmed user: ${unconfirmedUserError?.message}`,
+          );
+        }
+
+        const unconfirmedUserId =
+          unconfirmedUser.user.id;
+
+        try {
+          const clientUnconfirmed =
+            createClient(
+              LOCAL_API_URL,
+              LOCAL_ANON_KEY,
+              {
+                auth: { persistSession: false },
+                global: {
+                  headers: {
+                    Authorization:
+                      `Bearer ${mintRawSessionJwt(unconfirmedUserId, unconfirmedEmail)}`,
+                  },
+                },
+              },
+            );
+
+          const attemptedSlug =
+            `unconfirmed-onboarding-attempt-${runId}`;
+
+          const { data: rejectedOrg, error: rejectedError } =
+            await clientUnconfirmed.rpc(
+              "create_organization_with_owner",
+              {
+                p_name: `Unconfirmed Onboarding Attempt ${runId}`,
+                p_slug: attemptedSlug,
+                p_capabilities: ["IMPORTER_DECLARANT"],
+              },
+            );
+
+          expect(rejectedOrg).toBeNull();
+          expect(rejectedError).not.toBeNull();
+          expect(
+            rejectedError?.message.toLowerCase(),
+          ).toContain(
+            "confirm",
+          );
+
+          // Nothing was left behind by the rejected attempt -- no
+          // half-created org, no membership, no audit event (the whole
+          // insert sequence never started; the check runs before the
+          // first INSERT).
+          const { data: orgAfterRejection } =
+            await serviceClient
+              .from("organizations")
+              .select("id")
+              .eq("slug", attemptedSlug);
+
+          expect(orgAfterRejection).toHaveLength(0);
+
+          // Now confirm the SAME user's email (service-role admin API
+          // -- the same mechanism a real confirmation-link click drives
+          // in production) and retry with the SAME already-signed-in
+          // client. No fresh sign-in is needed: the RPC's guard reads
+          // auth.users.email_confirmed_at live via
+          // app.user_confirmed_email(), not a JWT claim.
+          const { error: confirmError } =
+            await serviceClient.auth.admin.updateUserById(
+              unconfirmedUserId,
+              { email_confirm: true },
+            );
+
+          if (confirmError) {
+            throw new Error(
+              `Failed to confirm test user's email: ${confirmError.message}`,
+            );
+          }
+
+          const confirmedSlug =
+            `confirmed-onboarding-attempt-${runId}`;
+
+          const { data: acceptedOrg, error: acceptedError } =
+            await clientUnconfirmed.rpc(
+              "create_organization_with_owner",
+              {
+                p_name: `Confirmed Onboarding Attempt ${runId}`,
+                p_slug: confirmedSlug,
+                p_capabilities: ["IMPORTER_DECLARANT"],
+              },
+            );
+
+          expect(acceptedError).toBeNull();
+          expect(acceptedOrg?.id).toBeDefined();
+
+          const acceptedOrgId: string =
+            acceptedOrg.id;
+
+          const { data: membership, error: membershipError } =
+            await serviceClient
+              .from("memberships")
+              .select("role")
+              .eq("org_id", acceptedOrgId)
+              .eq("user_id", unconfirmedUserId)
+              .single();
+
+          expect(membershipError).toBeNull();
+          expect(membership?.role).toBe("OWNER");
+
+          await serviceClient
+            .from("audit_events")
+            .delete()
+            .eq("org_id", acceptedOrgId);
+
+          await serviceClient
+            .from("memberships")
+            .delete()
+            .eq("org_id", acceptedOrgId);
+
+          await serviceClient
+            .from("organizations")
+            .delete()
+            .eq("id", acceptedOrgId);
+        } finally {
+          await serviceClient.auth.admin.deleteUser(
+            unconfirmedUserId,
           );
         }
       },
