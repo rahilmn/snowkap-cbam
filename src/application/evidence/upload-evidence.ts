@@ -446,12 +446,23 @@ export type RemoveEvidenceFileResult =
  * storage object now orphaned with no owning row." The
  * evidence_file_ids array update is best-effort after the metadata row
  * is already gone (same non-atomicity posture documented on
- * uploadEvidenceFile above) -- if it fails, the id is left in the
- * array pointing at a now-nonexistent evidence_files row; this is a
- * known, documented gap (not silently assumed away), and is no worse
- * than any other single-statement failure in this codebase's own
- * activateEmissionData (its own doc comment names the identical
- * limitation for its two-row supersede-then-activate sequence).
+ * uploadEvidenceFile above) -- its error IS now captured (P13
+ * adversarial audit: it previously wasn't, at all) and, on failure,
+ * retried exactly once against a fresh read of the array. This closes
+ * the concurrent-second-removal race that made this genuinely
+ * dangerous rather than merely best-effort: two removals reading the
+ * array before either writes would otherwise leave the second writer's
+ * filtered array still naming the FIRST writer's already-deleted id,
+ * which 20260829480000's evidence_file_ids anti-join then permanently
+ * rejects -- bricking every future UPDATE to that emission_data row,
+ * not just this one. A single retry against a fresh read picks up the
+ * concurrent writer's own result instead of the stale pre-race array.
+ * Residual, stated plainly: a THIRD overlapping removal, or a genuine
+ * persistent DB error surviving the retry, still leaves a dangling id
+ * -- the same non-atomicity posture activateEmissionData's own doc
+ * comment already names for its two-row supersede-then-activate
+ * sequence, now narrowed from "the common case" to "a rare compound
+ * race."
  */
 export async function removeEvidenceFile(
   supabase: SupabaseClient,
@@ -517,16 +528,51 @@ export async function removeEvidenceFile(
     );
 
   if (ownership.status === "OK") {
-    await supabase
-      .from("emission_data")
-      .update(
-        {
-          evidence_file_ids: ownership.evidenceFileIds.filter(
-            (id) => id !== evidenceFileId,
-          ),
-        },
-      )
-      .eq("id", fetched.file.emission_data_id);
+    const { error: arrayUpdateError } =
+      await supabase
+        .from("emission_data")
+        .update(
+          {
+            evidence_file_ids: ownership.evidenceFileIds.filter(
+              (id) => id !== evidenceFileId,
+            ),
+          },
+        )
+        .eq("id", fetched.file.emission_data_id);
+
+    // P13 adversarial audit: this write was previously unguarded and
+    // its error uncaptured. The failure this closes is a concurrent
+    // second removal racing this one -- both read the array before
+    // either writes, so the second writer's own filtered array still
+    // names the FIRST writer's already-deleted id, which
+    // 20260829480000's evidence_file_ids anti-join then permanently
+    // rejects (every future UPDATE to this row fails the same way,
+    // since the dangling id never leaves the array). A single retry
+    // against a FRESH read closes it: by the time this runs, the
+    // concurrent writer's own update has already landed, so re-reading
+    // and re-filtering picks up its result instead of the stale
+    // pre-race array this call started with.
+    if (arrayUpdateError) {
+      const retryOwnership =
+        await fetchOwnedEmissionDataForEvidence(
+          supabase,
+          orgId,
+          fetched.file.emission_data_id,
+        );
+
+      if (retryOwnership.status === "OK") {
+        await supabase
+          .from("emission_data")
+          .update(
+            {
+              evidence_file_ids: retryOwnership.evidenceFileIds.filter(
+                (id) => id !== evidenceFileId,
+              ),
+            },
+          )
+          .eq("id", fetched.file.emission_data_id);
+      }
+    }
   }
 
   await recordAuditEvent(

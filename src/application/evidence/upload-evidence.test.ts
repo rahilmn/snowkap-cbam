@@ -697,6 +697,65 @@ describe(
     );
 
     it(
+      "retries the evidence_file_ids array update against a FRESH read when the first attempt fails -- P13 audit: a concurrent second removal previously left a dangling id that permanently bricked the parent emission_data record",
+      async () => {
+        const recorder =
+          makeRecorder();
+
+        const result =
+          await removeEvidenceFile(
+            makeMockSupabase(
+              {
+                evidence_files: { data: evidenceFileRow, error: null },
+                emission_data: [
+                  // 1. Initial read: the pre-race array this call itself started with.
+                  { data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1", "stale-other"] }, error: null },
+                  // 2. First update attempt: fails (a concurrent second
+                  //    removal's own write landed first, and this
+                  //    stale-array-derived payload no longer satisfies
+                  //    the evidence-integrity WITH CHECK).
+                  { data: null, error: { message: "new row violates row-level security policy for table \"emission_data\"" } },
+                  // 3. Retry read: the ARRAY AS IT ACTUALLY IS NOW, after
+                  //    the concurrent writer's own update landed.
+                  { data: { entered_by_org_id: "org-1", evidence_file_ids: ["fresh-other"] }, error: null },
+                  // 4. Retry update: succeeds.
+                  { data: null, error: null },
+                ],
+                audit_events: { data: null, error: null },
+              },
+              {},
+              recorder,
+            ),
+            memberContext(),
+            "evidence-file-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "OK" },
+        );
+
+        const emissionDataUpdateOps =
+          recorder.ops.filter(
+            (op) => op.table === "emission_data" && op.op === "update",
+          );
+
+        expect(emissionDataUpdateOps).toHaveLength(
+          2,
+        );
+
+        // The retry's payload must come from the FRESH read (entry 3),
+        // not the stale pre-race array (entry 1) -- "fresh-other" only
+        // appears in the fresh read, "stale-other" only in the initial
+        // one.
+        expect(
+          (emissionDataUpdateOps[1]?.payload as { evidence_file_ids: string[] }).evidence_file_ids,
+        ).toEqual(
+          ["fresh-other"],
+        );
+      },
+    );
+
+    it(
       "rejects NOT_FOUND when the file belongs to a different org, without touching storage",
       async () => {
         const recorder =
