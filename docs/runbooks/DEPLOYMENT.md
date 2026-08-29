@@ -1,0 +1,387 @@
+# Deployment runbook
+
+This is the P12 deployment runbook named in
+[`docs/plans/MASTER_PLAN.md`](../plans/MASTER_PLAN.md) §29 ("Railway")
+and §31 ("CI/CD"), and checked in §44's production-readiness list
+("Railway healthy... alerts tested"). It sits alongside
+[`ROLLBACK.md`](./ROLLBACK.md) (what to do when a deployment goes bad),
+[`BACKUP_RESTORE.md`](./BACKUP_RESTORE.md) (the database side of
+recovery), [`SECRET_ROTATION.md`](./SECRET_ROTATION.md) (the
+credentials this procedure depends on), and
+[`INCIDENT_RESPONSE.md`](./INCIDENT_RESPONSE.md) /
+[`OPERATIONAL_DIAGNOSTICS.md`](./OPERATIONAL_DIAGNOSTICS.md) (what to do
+once something is live and misbehaving).
+
+**Status, honestly, as of 2026-08-29**: no staging or production
+Railway project is connected to this environment, and no staging or
+production Supabase project exists either — see `README.md`'s "Current
+state" ("Staging/production deployment is not yet live... not yet
+available in this environment") and master plan §41, which still lists
+"Production Supabase/Railway/DNS provisioning + go/no-go" as an
+owner-input item needed by P12. **Nothing in this document has been
+executed against a real Railway environment.** It is written to be
+immediately actionable the moment one exists — every step below is a
+description of a ready, unexecuted procedure, derived directly from
+this repo's actual `Dockerfile`, `railway.json`, `.github/workflows/ci.yml`,
+and `app/api/health/route.ts` (not an invented design), not a record of
+a completed deployment. Where this document distinguishes "designed"
+from "verified locally," that distinction is real — see the "Local
+verification, honestly" section near the end.
+
+## 1. Pre-deploy gates
+
+Every deployment — staging or production — starts from a commit that
+already passed the same gates `.github/workflows/ci.yml` enforces on
+every push to `main` and every pull request (public PR gate, no secrets
+required):
+
+```
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test
+pnpm exec playwright install --with-deps chromium
+pnpm exec playwright test        # builds the app itself, runs the smoke suite against it
+pnpm audit --audit-level high    # blocking since P11 (see ci.yml's own comment on this step)
+# secret scan (ci.yml's inline pattern scan over tracked files)
+```
+
+`pnpm regulatory:verify` is **not** part of this gate — it needs
+`SUPABASE_DB_PASSWORD` and a Python environment
+(`scripts/regulatory/requirements.txt`), and per CLAUDE.md and
+`README.md` it stays a locally-run / manually-dispatched gate. Run it
+by hand before any deployment that touches
+`src/domain/regulatory/`, `src/infrastructure/regulatory/`,
+`supabase/migrations/*.sql`, or the ACTIVE `default_emission_values`
+dataset itself, and confirm `RESULT: VALID` before proceeding — per
+CLAUDE.md's protected-zone rule, this is not optional for a regulatory-
+touching change regardless of what CI ran.
+
+Never deploy a commit CI hasn't run green against, and never deploy
+directly from a local working tree with uncommitted changes — the
+`GIT_SHA` baked into the image (see below) is only meaningful as a
+deployment-visibility signal if it names a real, reviewed commit.
+
+## 2. How Railway builds this app
+
+`railway.json`'s `build.builder` is `DOCKERFILE`, pointing at the
+repo-root `Dockerfile` — Railway does not use Nixpacks or any other
+auto-detected builder for this service; the Dockerfile is authoritative.
+
+The Dockerfile is a three-stage build (see the file's own header
+comment, citing master plan §29: "pinned Node LTS, corepack-pinned
+pnpm, non-root user, standalone output"):
+
+1. **`deps`** — `node:22-slim`, `corepack enable`, `pnpm install
+   --frozen-lockfile` against `package.json` / `pnpm-lock.yaml` /
+   `pnpm-workspace.yaml` only (so this layer caches across builds that
+   don't touch dependencies).
+2. **`build`** — copies `node_modules` from `deps`, copies the full
+   source, accepts a `GIT_SHA` build arg (default `unknown`), sets it
+   as `ENV GIT_SHA`, then runs `pnpm build` (`next build`, followed by
+   the `postbuild` script `scripts/build/copy-standalone-assets.mjs`,
+   which copies `.next/static` and `public/` into `.next/standalone` —
+   required because Next's `output: "standalone"` mode, set in
+   `next.config.ts`, does not include those on its own).
+3. **`run`** — a fresh `node:22-slim` layer (nothing from the `build`
+   stage's `node_modules`/build tooling carries over), creates a
+   non-root `nextjs` user/group (uid/gid 1001), copies **only**
+   `.next/standalone` from the `build` stage (chowned to `nextjs`),
+   switches to that user, exposes port 3000, sets `PORT=3000` /
+   `HOSTNAME=0.0.0.0`, and runs `node server.js`.
+
+**`GIT_SHA` is a build arg, not a runtime secret.** Railway (or
+whatever triggers the build) must pass `--build-arg
+GIT_SHA=<the deploying commit's SHA>` — in Railway's own UI/config this
+is a "Build Argument," configured per-service, sourced from the commit
+Railway is building (Railway exposes the deploying commit SHA as
+context it can template into build args; confirm the exact mechanism
+in the Railway dashboard when the service is first created, since this
+has not been done in this environment yet). Without it, the image
+silently falls back to `GIT_SHA=unknown`/`dev` and the deployment-
+visibility guarantee (`/api/health`'s `git_sha` field, the `/status`
+page's "Version" card) goes dark — this is exactly the failure mode
+`app/status/page.tsx`'s own doc comment calls out ("never a fabricated
+commit hash when the env var is unset").
+
+There is no Docker `HEALTHCHECK` instruction in the image deliberately
+— see the Dockerfile's own comment: Railway's `healthcheckPath` (below)
+is the single health-check mechanism, so a second, independent one
+inside the image can't ever disagree with it.
+
+## 3. Environment variables
+
+Read from `.env.example`, `next.config.ts`, and every
+`process.env.*` reference in `src/` and `app/` — nothing below is
+invented; each row states what actually reads it today.
+
+| Variable | Where it's used | Server-only or public | Set on |
+| --- | --- | --- | --- |
+| `SUPABASE_URL` | `src/infrastructure/config/env.ts` → `src/infrastructure/supabase/client.ts` (the protected regulatory adapter) and `server-client.ts` | Server-only | Railway runtime env (both `web` service environments) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Same as above, plus `src/infrastructure/supabase/admin-client.ts` (`inviteUserByEmail` only) | Server-only, bypasses RLS — see `SECRET_ROTATION.md` | Railway runtime env |
+| `NEXT_PUBLIC_SUPABASE_URL` | `src/infrastructure/supabase/browser-client.ts` | Public — inlined into the client bundle at **build** time | Railway **build** args/env (not just runtime — see caveat below) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Same as above | Public by design (RLS-enforced — see `.env.example`'s own comment) | Railway **build** args/env |
+| `GIT_SHA` | Dockerfile `ARG`/`ENV`, surfaced via `next.config.ts`'s `NEXT_PUBLIC_GIT_SHA`, read by `app/api/health/route.ts` and `app/status/page.tsx` | Public (a commit hash, not a credential) | Passed as a Docker build arg per deploy (see §2) |
+
+**The `NEXT_PUBLIC_*` build-time caveat, stated plainly because it's
+the easiest mistake to make**: Next.js inlines `NEXT_PUBLIC_*`
+variables into the client JavaScript bundle **at `next build` time**,
+not at container start. Setting them only as Railway *runtime*
+variables (visible to `node server.js` via `process.env`) has no effect
+on the already-built client bundle — they must be present in the
+build environment Railway's Dockerfile build runs in. Confirm Railway
+actually passes its configured environment variables through to the
+Docker build step for this service (Railway's own per-service settings
+control this) before relying on it; if it does not, these two need to
+be passed as explicit `--build-arg`s the same way `GIT_SHA` is, which
+would mean adding two more `ARG`/`ENV` pairs to the Dockerfile's
+`build` stage — a real Dockerfile change, out of this document's
+docs-only scope, and something to confirm and fix at first real setup
+time, not something already done.
+
+**`SUPABASE_DB_PASSWORD` is never a Railway runtime variable.** Master
+plan §29 states this explicitly ("pipeline/CI-only, never runtime"),
+and nothing in `app/` or `src/` reads it — only
+`scripts/regulatory/*.py` does, via `pnpm regulatory:verify` and the
+data-loading pipeline, run locally or from a future secret-bearing CI
+gate (§31), never from the deployed `web` service. Do not add it to the
+Railway service's environment.
+
+**`APP_URL` — a real, currently-open gap, not invented for this
+document.** `app/team/actions.ts`'s `getAppOrigin()` already reads
+`process.env.APP_URL` today (as of the in-progress P11 work in this
+working tree) and prefers it unconditionally when set, falling back to
+a trusted-local-host check otherwise — its own doc comment states
+plainly that `APP_URL` "is not yet set anywhere" and names the real fix
+as setting it "once this app's environment matrix is resolved (master
+plan §41, still an open owner decision)." This document does not
+invent a value for it; when a production domain exists, set
+`APP_URL=https://<the real domain>` on the Railway `web` service before
+relying on any auth-redirect flow (invitations, password reset) in that
+environment, and update `.env.example` in the same change that does —
+`SECRET_ROTATION.md`'s own convention for a newly-adopted variable.
+
+**`LOG_LEVEL` is named in master plan §29's environment matrix but is
+not read anywhere in this codebase today** (`src/infrastructure/observability/logger.ts`
+logs every call unconditionally — there is no level-filtering logic to
+configure). Do not set it; it would currently do nothing. Add it to
+this table, and to `.env.example`, only in the same change that
+actually implements level filtering.
+
+**Master plan §29 also names "SIGTERM graceful shutdown (stop intake,
+drain, close pool)" and it is not implemented today** — a repo-wide
+search finds no `process.on("SIGTERM", ...)` (or any `process.on`
+handler) anywhere in `src/`, `app/`, or the Dockerfile's `CMD`. The
+standalone `server.js` Next generates receives whatever Node's default
+signal handling does (process exit, no explicit drain of in-flight
+requests or the Supabase client's connection pool) when Railway sends
+`SIGTERM` ahead of a redeploy or restart. This is the same kind of gap
+as `LOG_LEVEL` above — named here because it's true, not implemented
+elsewhere in this repo, and worth fixing before relying on zero-downtime
+redeploys in production; it is not part of this document's docs-only
+scope to add.
+
+## 4. Healthcheck
+
+`railway.json`'s `deploy` block wires Railway's healthcheck to
+`GET /api/health`, `healthcheckTimeout: 30` (seconds), with
+`restartPolicyType: "ON_FAILURE"` and `restartPolicyMaxRetries: 3` — a
+container that never reports healthy within 30 seconds is restarted, up
+to 3 times, before Railway gives up and leaves it failed.
+
+`app/api/health/route.ts` checks, in order: process liveness (it
+responded at all), Supabase reachability (via the service-role client),
+and the one regulatory invariant a broken deploy could silently
+violate — exactly one `ACTIVE` `default_emission_values` dataset
+(`checkActiveDefaultEmissionValuesDataset`, shared with the `/status`
+page so the two can never disagree about what "ok" means). Response
+shape:
+
+```json
+{
+  "status": "ok" | "degraded",
+  "git_sha": "<the deployed build's GIT_SHA, or \"dev\">",
+  "checks": {
+    "database": "ok" | "error",
+    "active_regulatory_dataset": "ok" | "missing" | "duplicate" | "error"
+  }
+}
+```
+
+HTTP status is **200 only when `status: "ok"`, 503 for every degraded
+case** (`result.status === "ok" ? 200 : 503` — the route's own mapping,
+with no partial-credit middle state). Railway's healthcheck treats a
+non-2xx response the same as unreachable, so any `degraded` response
+triggers the restart policy above — which will not fix a genuine
+Supabase outage or dataset misconfiguration (see
+`INCIDENT_RESPONSE.md`'s per-state triage), but is exactly the correct
+behavior for a transient startup race or a bad container that a fresh
+process might clear.
+
+## 5. Where staging and production diverge
+
+Per master plan §29: **staging and production are separate Railway
+environments *and* separate Supabase projects** — not one Railway
+project with two environment variable sets pointed at the same
+database, and not one Supabase project shared across both. This
+matters for this runbook specifically because it means every step
+below (migrations, env vars, the healthcheck, GIT_SHA visibility) is
+duplicated per environment, never shared.
+
+Per §29/§31's flow:
+
+```
+merge to main
+  → CI green (public PR gate, above)
+  → staging migrations applied
+  → staging auto-deploys from main
+  → [staging smoke/verification — this document, staging environment]
+  → gated manual production promotion (owner participation, per §29/§34)
+  → [production smoke/verification — this document, production environment]
+```
+
+Migrations are **never** applied at app startup (§29) — they are a
+separate, explicit step before the app deploy that depends on them,
+staging first, always (§43: "staging always one step ahead").
+Production migrations go through "the gated runbook" master plan §30
+names — that gated migration-promotion runbook is not itself the
+subject of this document (this document covers the *application*
+deploy) and does not yet exist as a separate written procedure; treat
+"apply to staging, verify, then apply the same migration to production
+with owner sign-off" as the standing rule per §29/§43 until a dedicated
+migration-promotion runbook is written.
+
+## 6. Deployment procedure (staging)
+
+1. Confirm the commit on `main` passed CI (§1) — check the GitHub
+   Actions run for that commit, not just that CI "usually" passes.
+2. Apply any new files under `supabase/migrations/*.sql` to the
+   staging Supabase project (forward-only — see `ROLLBACK.md`'s
+   database section for why this order matters).
+3. Let Railway's staging `web` service auto-deploy from `main` (per
+   §29), or trigger it manually if auto-deploy is disabled for this
+   service — either way, confirm the build used the exact commit SHA
+   expected as its `GIT_SHA` build arg (§2).
+4. Watch the Railway deploy's healthcheck (§4) go green within the
+   30-second/3-retry window. If it doesn't, the deploy fails and the
+   previous build stays live (Railway does not cut traffic to a build
+   that never reports healthy) — see `INCIDENT_RESPONSE.md` for triage,
+   not this document.
+5. Once green, verify by hand, not just by trusting the platform:
+   - `curl https://<staging-url>/api/health` → `status: "ok"`, `200`,
+     and `git_sha` matching the deployed commit's short SHA.
+   - Open `/status` as a logged-in member → "Version (GIT_SHA)" card
+     matches the same commit; "Regulatory foundation" card shows
+     `Exactly one ACTIVE dataset` (green).
+   - Skim the first minute of Railway logs for unexpected `"level":"error"`
+     lines (see `OPERATIONAL_DIAGNOSTICS.md` for how to read them).
+
+## 7. Deployment procedure (production promotion)
+
+Production promotion requires owner participation per master plan §29
+("production promotes via runbook with owner participation") and §34.
+It is a **promotion of the already-staging-verified build**, not a
+fresh build from a possibly-drifted source state — reuse the exact
+image/commit that just passed staging verification above rather than
+re-triggering a new build from `main` a second time (which could pick
+up a commit merged in the gap between staging verification and
+production promotion). Railway's environment-promotion or manual
+redeploy-by-commit mechanism is how this is done in practice; the exact
+click-path depends on the Railway project's configuration, which does
+not exist yet in this environment to document precisely.
+
+1. Owner sign-off to proceed (per §29/§34 — this is a human gate, not
+   an automatic one).
+2. Apply the same migrations already applied to staging in step 6.2,
+   now to the production Supabase project — staging-first, already
+   proven, per §43.
+3. Promote the staging-verified build to the production Railway
+   environment.
+4. Repeat step 6.4–6.5's healthcheck and manual verification against
+   the production URL.
+5. Confirm `GIT_SHA` on `/status` and `/api/health` matches the
+   intended release commit in production specifically, not just that
+   staging looked right earlier.
+
+If anything in steps 3–5 goes wrong, stop and go to `ROLLBACK.md`
+rather than attempting to force the deploy through.
+
+## 8. Local verification, honestly
+
+`README.md` documents that this repo's Dockerfile/`railway.json`
+combination has previously been "verified to build and serve correctly
+locally" via:
+
+```bash
+docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t snowkap-cbam:local .
+docker run --rm -p 3000:3000 --env-file .env snowkap-cbam:local
+```
+
+**Local Docker build validation is a genuinely open P12 item — not
+satisfied, and not something any session this phase has been able to
+safely re-run.** Three separate checks, across separate sessions the
+same day, all trace to the same root cause and are recorded here
+without smoothing over the fact that they don't describe identical
+symptoms:
+
+1. An earlier P12 Docker-validation pass *did* attempt a real
+   `docker build` — it ran through `corepack enable`, created the
+   `nextjs` user, and got partway into `pnpm install` (224 of 225
+   packages, per that pass's own report) before failing on disk
+   exhaustion. That report and its logs are not checked into this repo,
+   so this document cites the package count as *reported*, not as
+   something independently re-derived from an artifact this session
+   could inspect.
+2. A later same-day check (documented previously in this section, and
+   in `BACKUP_RESTORE.md`'s 2026-08-29 handoff) found the engine itself
+   unreachable — `docker version`/`docker info` both returned
+   `500 Internal Server Error`, with `Get-PSDrive C` showing ~365 MiB
+   free — the point at which the host's `C:` drive had tipped from
+   "nearly full" to effectively full.
+3. This fix, re-checked live rather than assumed (`docker version`,
+   `docker info`, `wsl -l -v`, `Get-PSDrive C`, 2026-08-29 14:34 local):
+   `docker version`'s client call succeeds but the daemon call now fails
+   with `open //./pipe/dockerDesktopLinuxEngine: The system cannot find
+   the file specified` — a colder failure than #2's 500 error, matching
+   `wsl -l -v` showing the `docker-desktop` distro as `Stopped` (it
+   never came up this session, rather than coming up and then dying).
+   `C:` free space at the same moment: **0.493 GB**.
+
+These are not three unrelated blockers — they're the same root cause
+(host disk exhaustion, with Docker's ~31 GB WSL VHDX itself living on
+`C:`, at `C:\Users\rahil.naik\AppData\Local\Docker\wsl\disk\docker_data.vhdx`)
+presenting differently depending on how far the engine got before it
+was starved: far enough to install 224/225 packages in #1, far enough
+to answer with an HTTP 500 in #2, not far enough to open its own named
+pipe in #3. **This fix did not attempt a build or start Docker Desktop
+either**, for the same reason #1 already demonstrates concretely: with
+under 0.5 GB free on the drive hosting both the OS and Docker's VHDX, a
+build predictably fails at the same `pnpm install` stage before it can
+prove anything about the Dockerfile itself, and there is direct
+same-day precedent (`BACKUP_RESTORE.md`'s handoff: `C:` measured at
+**0.01 GB free** later the same day) that pushing this host further
+risks driving `C:` to literal zero, a host-stability risk out of
+proportion to what a documentation-validation task should take on.
+
+**Treat the README's "verified to build" claim as a fact from an
+earlier, separate session — not something any P12 session has been
+able to re-confirm this phase.** Local Docker build validation stays
+open until either this host has several GB of real headroom on `C:` (or
+Docker's data root is moved off `C:` entirely — see Docker Desktop's
+"Resources" settings) or the build is run on a machine/CI runner with
+adequate disk; only then does re-running the build-and-serve check
+above actually prove anything about current Dockerfile correctness.
+
+## Related documents
+
+- `docs/plans/MASTER_PLAN.md` §29 (Railway), §31 (CI/CD), §32
+  (Observability), §41 (open decisions this document names honestly),
+  §44 (production-readiness checklist this document is evidence for).
+- `Dockerfile`, `railway.json`, `.github/workflows/ci.yml`,
+  `app/api/health/route.ts`, `next.config.ts` — the actual source this
+  document describes.
+- [`ROLLBACK.md`](./ROLLBACK.md) — what to do when a deployment made
+  here needs to be undone.
+- [`INCIDENT_RESPONSE.md`](./INCIDENT_RESPONSE.md) — first response
+  when a deployed environment is unhealthy.
+- [`SECRET_ROTATION.md`](./SECRET_ROTATION.md) — the credentials this
+  procedure's environment variables depend on.
