@@ -1,12 +1,18 @@
 # Domain Model
 
-The product domain model — as implemented today in `src/domain/`
-(types plus pure invariant/lifecycle functions, no persistence yet) —
-plus the tenancy design and the DDL template Phase 3 will follow when
-it introduces the first product migration. See
-[`ARCHITECTURE.md`](./ARCHITECTURE.md) for the layering rules this code
-obeys, and [`docs/plans/MASTER_PLAN.md`](../plans/MASTER_PLAN.md) for
-how each aggregate fits into the phase roadmap.
+This is a **living document tracking current reality**, last brought
+into alignment with the code on **2026-08-29** (through Phase 11). It
+documents the product domain model exactly as implemented in
+`src/domain/` — real TypeScript interfaces, real invariant/lifecycle
+functions, and the real migrations that back each aggregate today. It
+is not a forward-looking template: 39 migrations are applied, and every
+aggregate below has real persisted backing in Postgres, enforced by
+Row Level Security. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the
+layering rules this code obeys, [`DATABASE_SCHEMA.md`](./DATABASE_SCHEMA.md)
+for full column-by-column DDL detail (a separate document — this one's
+job is the domain shape and its behavioral rules, not the SQL), and
+[`docs/plans/MASTER_PLAN.md`](../plans/MASTER_PLAN.md) for how each
+aggregate fits into the phase roadmap.
 
 ## Regulatory role model
 
@@ -47,14 +53,14 @@ differs by capability while sharing this same domain model).
 
 | Module | Provides |
 |---|---|
-| `ids.ts` | `Brand<T, B>` and every branded ID type (`OrganizationId`, `ShipmentId`, `EmissionDataId`, `SharingGrantId`, ...) |
-| `decimal.ts` | `DecimalString`, `parseDecimalString`/`toDecimal`/`toDecimalString`, `MoneyEUR`. The only file under `src/domain` (besides the future calculation engine) allowed to import `decimal.js` |
+| `ids.ts` | `Brand<T, B>` and every branded ID type (`OrganizationId`, `InvitationId`, `ShipmentId`, `EmissionDataId`, `SharingGrantId`, `DeclarationId`, `EvidenceFileId`, ...) |
+| `decimal.ts` | `DecimalString`, `parseDecimalString`/`toDecimal`/`toDecimalString`, `MoneyEUR`. The only file under `src/domain` (besides `src/domain/calculations/**`) allowed to import `decimal.js`. `parseDecimalString` validates a strict canonical grammar (`^-?[0-9]+(\.[0-9]+)?$`) — no scientific notation, no hex/octal/binary/underscore literals — and returns the trimmed (not raw) string, matching the CHECK constraints on `emission_data`/`shipment_lines`' own numeric columns byte-for-byte (hardened 2026-08-29, P11 review finding #9) |
 | `country.ts` | `CountryCode` (ISO 3166-1 alpha-2), `parseCountryCode` |
 | `reporting-period.ts` | `IsoDate`/`IsoTimestamp`, `parseIsoDate`, `ReportingPeriod` (`ANNUAL` for the definitive regime, 2026 onward; `QUARTERLY` for the transitional regime before it), `reportingPeriodForReleaseDate`, `formatReportingPeriod` |
 
 ## Aggregates
 
-### Organization / Membership (`src/domain/organizations/`)
+### Organization / Membership / Invitation (`src/domain/organizations/`)
 
 ```ts
 interface Organization {
@@ -75,22 +81,66 @@ interface Membership {
   user_id: UserId;                                // Supabase Auth identity; opaque here
   role: "OWNER" | "ADMIN" | "MEMBER";
   created_at: IsoTimestamp;
+
+  // Null = active. Non-null = offboarded (P10, master plan §14): the
+  // person holds no access anywhere, but the row survives so their
+  // historical audit_events still resolve to a person, not a bare uuid.
+  deactivated_at: IsoTimestamp | null;
+}
+
+// OWNER is deliberately excluded from what an invite can grant.
+type InvitableRole = "ADMIN" | "MEMBER";
+
+interface Invitation {
+  id: InvitationId;
+  org_id: OrganizationId;
+  email: string;
+  role: InvitableRole;
+  status: "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED";
+  invited_by: UserId;
+  created_at: IsoTimestamp;
+  expires_at: IsoTimestamp;
 }
 ```
 
-**Invariant** (`invariants.ts`, TDD'd): an organization must always
-have at least one `OWNER`. `changeMembershipRole` and
-`removeMembership` both refuse an action that would leave zero owners,
-counted **per organization** — a sole owner of a *different* org never
-satisfies this org's minimum.
+**Invariants** (`invariants.ts`, TDD'd, all operate on the org's full
+membership list and return either `{status: "OK", memberships}` or a
+named `{status: "REJECTED", reason}`):
+
+- `changeMembershipRole` / `removeMembership` — an organization must
+  always have at least one **active** `OWNER`; both refuse an action
+  that would leave zero, counted **per organization** (a sole owner of
+  a *different* org never satisfies this org's minimum).
+- `deactivateMembership` — same last-active-owner check (reason
+  `LAST_OWNER`), plus refuses a second deactivation of an already-
+  deactivated row (`ALREADY_DEACTIVATED`) rather than silently
+  overwriting the original offboarding timestamp.
+- `reactivateMembership` — restores access at the role already held
+  (no owner-count check in this direction — reactivation only adds an
+  active owner); refuses a non-deactivated target (`NOT_DEACTIVATED`).
+- The private helper `isLastActiveOwner` is the single source of truth
+  all four functions call: "active" is load-bearing on both sides — a
+  deactivated `OWNER` confers no authority (skipped by
+  `app.user_is_admin_or_owner_of()`) and so counts as neither a
+  protector nor a target of the minimum.
+
+**Backing migrations**: `20260828070000` (organizations + memberships
++ RLS, `app.user_org_ids()`), `20260828130000` (`organization_invitations`
+table + `accept_organization_invitation()` RPC), `20260829360000` (P10:
+`deactivated_at` column + deactivate/reactivate RPCs), `20260829370000`
+(P10 review: `user_id` pinned immutable on `memberships`) and
+`20260829420000` (P11 review: `org_id` likewise pinned immutable — a
+bare `UPDATE` can no longer relocate a membership across orgs or
+reassign it to a different user), `20260829380000` (P11 review finding
+#1: invitation acceptance now requires a *confirmed* email, not just a
+matching claim).
 
 ### Shipment / ShipmentLine (`src/domain/shipments/`)
 
 A `Shipment` is one release-for-free-circulation event of CBAM goods —
 deliberately named "Shipment", not "ImportDeclaration": the *customs*
 document is carried as `customs_mrn`, and the periodic *CBAM*
-declaration is a separate future aggregate (`CBAMDeclaration`, modeled
-fully in Phase 9).
+declaration is the separate `Declaration` aggregate below.
 
 ```ts
 interface Shipment {
@@ -119,7 +169,7 @@ interface ShipmentLine {
   net_mass_tonnes: DecimalString | null;          // exactly one of these two set, and > 0
   quantity_mwh: DecimalString | null;
   production_route: { name: string; source_route_indicator: string } | null;
-  emission_determination: EmissionDetermination | null;   // immutable once set (see below)
+  emission_determination: EmissionDetermination | null;   // immutable once set (see Emissions below)
 }
 ```
 
@@ -136,17 +186,29 @@ DRAFT|READY --VOID--> VOID
 `MARK_READY` requires at least one line and every line "complete"
 (non-empty code, non-empty origin, a valid quantity, and a determination
 — `isLineComplete` in `invariants.ts`). `LOCK` only leaves `READY` (in
-the target design, only via inclusion in a `CBAMDeclaration` — that
-coupling is an application-layer concern, not encoded in this pure
-function). `LOCKED` and `VOID` are terminal. Every rejection carries an
-enumerated reason (`NO_LINES`, `LINE_INCOMPLETE`,
+practice, only via inclusion in a filed `Declaration` — see
+`record_declaration_filed()` below; that coupling is a
+database/application-layer concern, not encoded in this pure function).
+`LOCKED` and `VOID` are terminal. Every rejection carries an enumerated
+reason (`NO_LINES`, `LINE_INCOMPLETE`,
 `SHIPMENT_NOT_DRAFT`/`_NOT_READY`, `SHIPMENT_ALREADY_LOCKED`/`_VOID`) —
 never a bare boolean.
 
 **Line invariants** (`invariants.ts`): `isLineQuantityValid` — exactly
-one of `net_mass_tonnes`/`quantity_mwh` set to a finite number `> 0`.
-`hasDenseUniqueLineNumbers` — a shipment's line numbers are exactly
-`{1, ..., n}` with no gaps or repeats, independent of array order.
+one of `net_mass_tonnes`/`quantity_mwh` set to a finite number `> 0`,
+validated through `parseDecimalString` (tightened 2026-08-29, P13 audit
+finding — previously widened through a native JS `Number()`, which
+ADR-0006 forbids for any regulated numeric). `hasDenseUniqueLineNumbers`
+— a shipment's line numbers are exactly `{1, ..., n}` with no gaps or
+repeats, independent of array order.
+
+**Backing migrations**: `20260828150000` (P4: `suppliers`, `shipments`,
+`shipment_lines`, `import_batches`), `20260829090000` (P4 review:
+`org_id` pinned immutable), `20260829150000` (P5: the `emission_determination`
+jsonb column plus its generated "hot key" columns), `20260829440000`
+(P11 review finding #9: canonical-decimal CHECK on
+`net_mass_tonnes`/`quantity_mwh`, matching `parseDecimalString`'s
+grammar).
 
 ### Emissions (`src/domain/emissions/`)
 
@@ -180,12 +242,48 @@ interface EmissionData {                          // an operator's actual emissi
 }
 ```
 
-Only `ACTIVE` + `VERIFIED` `EmissionData` is ever eligible to back an
-`ACTUAL` determination (enforced at the application layer, Phase 7).
-Supersession always creates a **new** row referencing its predecessor
-via `predecessor_id`/`version` — a predecessor is never mutated or
-deleted, so any `ActualEmissionSnapshot` already taken from it stays
-valid forever.
+**Lifecycle** (`emission-data-lifecycle.ts`, TDD'd —
+`transitionEmissionData`): two coupled state machines on one row.
+
+```
+verification_status: UNVERIFIED --SUBMIT_FOR_VERIFICATION-->
+  VERIFICATION_PENDING --VERIFY--> VERIFIED
+                        --REJECT--> REJECTED --SUBMIT_FOR_VERIFICATION-->
+  VERIFICATION_PENDING (resubmission clears the prior rejection_reason)
+
+status: DRAFT --ACTIVATE--> ACTIVE   (only once verification_status = VERIFIED)
+        DRAFT --DISCARD--> DISCARDED
+```
+
+`ACTIVATE` is the producer's explicit "publish" step, separate from
+verification succeeding — a record can sit `DRAFT` + `VERIFIED`
+indefinitely before the producer makes it the installation's current
+record for its `(installation, cn_scope, period)`. Rejections are named
+(`RECORD_NOT_DRAFT`, `VERIFICATION_NOT_PENDING`, `NOT_VERIFIED`,
+`REJECTION_REASON_REQUIRED`). Only `ACTIVE` + `VERIFIED` `EmissionData`
+is ever eligible to back an `ACTUAL` determination (enforced at the
+application layer). Supersession always creates a **new** row
+referencing its predecessor via `predecessor_id`/`version` — a
+predecessor is never mutated or deleted, so any `ActualEmissionSnapshot`
+already taken from it stays valid forever.
+
+Two further pure functions round out the module:
+`checkEmissionDataEvidenceCompleteness` (`snapshot-completeness.ts`) —
+a *live*, re-derived-every-time check (never a cached flag) that
+`evidence_file_ids` is non-empty, gating verify/activate/consume so a
+record can never become usable with evidence later stripped away — and
+`checkActualSnapshotStaleness` (`check-actual-snapshot-staleness.ts`) —
+compares a frozen `ActualEmissionSnapshot`'s `emission_data_version`
+against the installation's current `ACTIVE` row's version to report
+`STALE`/`CURRENT`, purely for UI display (re-determination itself is
+always an explicit, audited importer action).
+
+**Backing migrations**: `20260829230000` (P7-B: `emission_data`
+schema), `20260829240000` (P7-C: evidence-file wiring fix — made
+`evidence_file_ids` mutable after insert, since evidence must attach
+during/after verification, not only at creation), `20260829270000`
+(FK hardening), `20260829280000` (`updated_at` trigger),
+`20260829290000` (version-lineage hardening).
 
 ### Installations (`src/domain/installations/`)
 
@@ -228,8 +326,13 @@ interface Supplier {                                // importer-side commercial 
 
 `provenance` distinguishes a record the producer entered themselves
 from one an importer entered on behalf of an off-platform producer with
-no Snowkap account — both are legitimate, and the UI (Phase 7) labels
-them differently.
+no Snowkap account — both are legitimate, and the UI labels them
+differently. No dedicated `invariants.ts`/`lifecycle.ts` exists for
+this module — these three are plain, no-transition records at the
+domain layer today.
+
+**Backing migrations**: `20260828150000` (P4: `suppliers`, alongside
+`shipments`), `20260829220000` (P7-A: `operators` + `installations`).
 
 ### Calculations (`src/domain/calculations/`)
 
@@ -239,7 +342,7 @@ interface CalculationResult {                       // append-only — never upd
   org_id: OrganizationId;
   line_id: ShipmentLineId;
   shipment_id: ShipmentId;
-  engine_version: string;
+  engine_version: string;                            // ENGINE_VERSION const, currently "1.1.0"
   parameter_datasets: { dataset_id: string; dataset_type: string; dataset_version: string }[];
   inputs: { quantity: DecimalString; quantity_unit: "TONNES" | "MWH"; determination: EmissionDetermination };
   steps: { step: string; rule_ref: string; formula: string; inputs: Record<string, string>; value: DecimalString }[];
@@ -253,13 +356,34 @@ interface CalculationResult {                       // append-only — never upd
 }
 ```
 
-Every step's `rule_ref` points at an entry in the future
-`docs/regulatory/CALCULATION_RULE_REGISTER.md` (authored before the
-calculation-engine phase, per the master plan) — the engine never
-applies a formula that isn't registered there. `certificates_due` and
-`liability` stay `null` (not a guessed zero) until the parameter
-datasets a liability estimate depends on actually exist and are
-`ACTIVE`.
+Every step's `rule_ref` points at an entry in
+`docs/regulatory/CALCULATION_RULE_REGISTER.md` — the engine
+(`calculate-line-emissions.ts`) never applies a formula that isn't
+registered there. `certificates_due` and `liability` stay `null` (not a
+guessed zero) until the parameter datasets a liability estimate depends
+on actually exist and are `ACTIVE`.
+
+The pure engine's own return shape, `LineEmissionsCalculation`, is
+distinct from the persisted `CalculationResult` above — only a
+`COMPUTED` result is ever turned into a row; every other status is an
+explicit non-computable outcome surfaced for one request/response only,
+never written:
+
+```ts
+type CalculationStatus =
+  | "COMPUTED"
+  | "INPUT_UNRESOLVED"              // line has no emission_determination at all
+  | "VALUE_UNAVAILABLE"             // defense-in-depth: resolved/verified value not actually usable
+  | "UNIT_UNSUPPORTED"              // determination's emission_unit inconsistent with the line's quantity basis
+  | "PARAMETER_DATASET_UNAVAILABLE"; // added 2026-08-29: an ACTUAL determination on an Annex-II direct-emissions-only
+                                      // sector good with non-zero indirect_specific — no Annex II CN-code dataset
+                                      // exists yet to gate the exception precisely, so the engine refuses rather
+                                      // than overstate (RULE-EE-009's own Exceptions bullet, owner-directed gate)
+```
+
+**Backing migrations**: `20260829180000` (P6: `calculation_results`
+schema, insert+select only — no update/delete grants, append-only at
+the database level), `20260829200000` (P6 review hardening).
 
 ### Audit (`src/domain/audit/`)
 
@@ -275,6 +399,23 @@ interface AuditEvent {                               // append-only, immutable
   correlation_id: string | null;
 }
 ```
+
+`AuditAggregateType` now covers every aggregate in this document:
+`ORGANIZATION | MEMBERSHIP | SHIPMENT | SHIPMENT_LINE | EMISSION_DATA |
+INSTALLATION | OPERATOR | SUPPLIER | SHARING_GRANT | CALCULATION_RESULT
+| DECLARATION | EVIDENCE_FILE`. `src/domain/emissions/summarize-determination-for-audit.ts`
+is a small helper the emissions application layer uses to compress an
+`EmissionDetermination` into a compact `previous_determination` audit
+payload field, rather than duplicating a full snapshot into every
+change event.
+
+**Backing migrations**: `20260828070000` (created alongside
+`organizations`/`memberships`), `20260828090000` (audit organization
+creation), `20260829430000` (P11 review finding #10: an insert trigger
+now pins `event_type`/`aggregate_type`/`payload` to a real catalog, so
+a plain `MEMBER` can no longer forge an arbitrary audit entry as
+themselves — `audit_events` carries no `UPDATE`/`DELETE` policy at all,
+so a forged row could never have been retracted).
 
 ### Sharing (`src/domain/sharing/`)
 
@@ -295,6 +436,158 @@ interface SharingGrant {
 }
 ```
 
+**Lifecycle** (`grant-lifecycle.ts`, TDD'd — `transitionSharingGrant`):
+
+```
+INVITED --ACCEPT--> ACTIVE --REVOKE--> REVOKED
+  |                    |
+  +------REVOKE--------+
+
+INVITED --EXPIRE--> EXPIRED / ACTIVE --EXPIRE--> EXPIRED
+  (only once now >= expires_at; a grant with no expires_at never auto-expires)
+```
+
+`ACCEPT` also refuses an already-lapsed invitation (`GRANT_EXPIRED`) —
+widened 2026-08-29 (P11 review finding #5): this pure function's
+`EXPIRE` action used to require `status === 'ACTIVE'`, so a grant that
+was invited and simply lapsed without ever being accepted could never
+reach `EXPIRED` through it at all; only the accept RPC's own lazy-expire
+check covered that path. `REVOKED`/`EXPIRED` are terminal. Rejection
+reasons: `GRANT_NOT_INVITED`, `GRANT_NOT_ACTIVE`, `ALREADY_TERMINAL`,
+`GRANT_EXPIRED`, `NOT_YET_EXPIRED`.
+
+**Backing migrations**: `20260829260000` (P7-D: `sharing_grants`
+schema + the two SELECT-RLS extensions it needs on
+`installations`/`emission_data`), `20260829300000` (P7-D2: email
+invite bootstrap RPC), `20260829310000` (P7-D3: shared-data
+consumption audit), `20260829320000` (P7-D4: grantee-visible status),
+`20260829390000` (P11 review: sharing-grant email-confirmation and
+expiry hardening, mirroring the invitation fix above).
+
+### Declaration (`src/domain/declarations/`)
+
+The TypeScript-side view of one `declarations` row — master plan §6's
+`CBAMDeclaration`: "annual reporting_period, member shipments,
+completeness report, DRAFT -> READY -> FILED_RECORDED, filed snapshot,
+amendments as versions."
+
+```ts
+type DeclarationStatus = "DRAFT" | "READY" | "FILED_RECORDED" | "VOID";
+
+interface Declaration {
+  id: DeclarationId;
+  org_id: OrganizationId;
+  reporting_period: ReportingPeriod;
+  status: DeclarationStatus;
+
+  // Frozen once the row leaves DRAFT (app.prevent_declaration_fact_change())
+  // — never a live-recomputed set.
+  member_shipment_ids: ShipmentId[];
+  completeness_report: CompletenessReport | null;
+
+  // Built entirely inside public.record_declaration_filed() from a
+  // fresh aggregation at filing time — never constructed, recomputed,
+  // or validated by TypeScript. Deliberately a loose record, not a
+  // typed FiledSnapshot interface: re-typing SQL-authored jsonb here
+  // would invite this module to trust a shape it never produces.
+  filed_snapshot: Record<string, unknown> | null;
+
+  // Verbatim declarant-typed filing reference — never generated,
+  // parsed, or defaulted (Snowkap records a filing it did not perform).
+  filed_reference: string | null;
+  filed_at: IsoTimestamp | null;
+
+  supersedes_declaration_id: DeclarationId | null;   // null for an original; the prior version for an amendment
+
+  created_by_user_id: UserId;
+  created_at: IsoTimestamp;
+  updated_at: IsoTimestamp;
+}
+
+interface CompletenessReport {
+  generated_at: IsoTimestamp;
+  shipment_count: number;
+  line_count: number;
+  complete: boolean;                                 // derived (blockers.length === 0), never stored independently
+  blockers: CompletenessBlocker[];
+}
+```
+
+**Architecturally distinct from every aggregate above**: there is no
+`lifecycle.ts` for `Declaration`. The `DRAFT -> READY` transition is
+application-layer (`mark-declaration-ready.ts`, gated by re-running the
+completeness check — never trusting the row's own cached
+`completeness_report`, which can go stale while a member shipment's
+lines are still editable). `READY -> FILED_RECORDED` is a single
+atomic `record_declaration_filed()` SQL RPC (`20260829330000`, section
+4) — chosen because that transition has to LOCK N member shipments and
+build `filed_snapshot` together, atomically, which is a
+database-shaped requirement, not a pure-function-shaped one. Amendment
+creation (`create-declaration-amendment.ts`) makes a new `DRAFT` row
+chained via `supersedes_declaration_id`, only from a `FILED_RECORDED`
+original.
+
+What domain-layer pure functions *do* own: `completeness.ts`'s
+`buildCompletenessReport` — given every shipment currently in a period,
+names every reason it isn't ready to file (or reports none), reusing
+the same blocker vocabulary `record_declaration_filed()`'s own
+`result_status` values do (`NO_MEMBER_SHIPMENTS`/`SHIPMENTS_NOT_LOCKABLE`/`INCOMPLETE`
+at the RPC; `NO_SHIPMENTS_IN_PERIOD`/`SHIPMENT_NOT_LOCKABLE`/`SHIPMENT_HAS_NO_LINES`/`LINE_NOT_DETERMINED`/`LINE_NOT_CALCULATED`
+at this finer per-line grain) so a reader who has seen one recognizes
+the other. A shipment counts as "lockable" at `READY` or `LOCKED`
+status — `LOCKED` is accepted because an amendment's member set
+legitimately includes shipments the superseded declaration already
+locked.
+
+**Backing migrations**: `20260829330000` (P9: `declarations` schema +
+`record_declaration_filed()`), `20260829340000` (insert-policy
+recursion fix), `20260829350000` (filed-membership + completeness
+fix), `20260829400000` (P11 review: `record_declaration_filed()`
+membership-oracle fix).
+
+### EvidenceFile (`src/domain/evidence/`)
+
+A supporting document (test report, certificate, invoice, ...)
+attached to one `EmissionData` row. Immutable once uploaded — a mistake
+is removed and re-uploaded, never edited in place, so there is no
+"update" shape for this type.
+
+```ts
+interface EvidenceFile {
+  id: EvidenceFileId;
+  org_id: OrganizationId;
+  emission_data_id: EmissionDataId;
+  storage_path: string;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;                                // always computed server-side from actual bytes, never client input
+  sha256: string;                                     // always computed server-side, never client input
+  uploaded_by_user_id: UserId;
+  created_at: IsoTimestamp;
+}
+```
+
+**Invariant** (`validate-evidence-upload.ts`, TDD'd —
+`validateEvidenceUpload`, pure and runs before any storage/DB I/O): the
+executable-extension check runs first and unconditionally
+(`.exe .sh .bat .cmd .ps1 .dll .app .scr .js .msi` rejected outright,
+regardless of claimed MIME type); then a `20 MiB` size cap; then MIME
+type and file extension are each checked against their own allowlist
+(PDF, PNG, JPEG, DOCX, XLSX) *independently* and required to *agree*
+with each other — a spoofed `Content-Type` claiming `application/pdf`
+for a file named `payload.exe` cannot pass on the MIME check alone.
+Named rejection reasons: `EMPTY_FILE`, `FILE_TOO_LARGE`,
+`EXECUTABLE_EXTENSION`, `DISALLOWED_MIME_TYPE`, `DISALLOWED_EXTENSION`,
+`MIME_EXTENSION_MISMATCH`.
+
+**Backing migrations**: `20260829240000` (P7-C: storage bucket +
+`evidence_files` table), `20260829410000` (P11 review finding #6: a
+CHECK constraint now pins `storage_path` to the row's own `org_id`
+prefix, so a forged cross-org `storage_path` can never be inserted in
+the first place — closing a gap where only the Storage-layer RLS
+policy, not row-level integrity, stood between a caller and another
+org's evidence files).
+
 ## Provenance snapshots
 
 `RegulatoryResolutionSnapshot` and `ActualEmissionSnapshot`
@@ -309,6 +602,7 @@ interface RegulatoryResolutionSnapshot {
   dataset_version: string;
   resolved_at: IsoTimestamp;
   reason: ResolutionReason;                          // from src/domain/regulatory/types.ts, type-only import
+  country_mapping: CountryMappingOutcome;             // whether the origin ISO code had its own dataset row, or fell to the fallback geography
   record_identity: {
     source_sheet: string; source_row: number; source_trade_code: string;
     origin_country_name: string; source_production_route_code: string | null;
@@ -332,6 +626,20 @@ interface ActualEmissionSnapshot {
 }
 ```
 
+`country_mapping` (`CountryMappingOutcome`, `{status: "MAPPED";
+regulatory_country_name}` or `{status: "UNLISTED"}`) records whether
+the shipment line's ISO origin code had its own row in the regulatory
+`countries` table or fell through to the "Other Countries and
+Territories" fallback geography (R7) — so the explanation UI can
+honestly say *why* the fallback was used, distinct from a listed
+country that simply had no country-specific record. `buildResolutionSnapshot`
+(`build-resolution-snapshot.ts`) is the pure function that freezes a
+`RESOLVED` resolver result into this shape — every other resolver
+status (`REFERENCE_REQUIRED`, `UNAVAILABLE`, `NOT_APPLICABLE`,
+`AMBIGUOUS`, `NO_MATCH`) means nothing is frozen and
+`emission_determination` stays `null`, never a synthetic "unresolved"
+variant.
+
 `checkRegulatoryResolutionSnapshotCompleteness` and
 `checkActualEmissionSnapshotCompleteness`
 (`src/domain/emissions/snapshot-completeness.ts`) verify every
@@ -342,7 +650,10 @@ snapshot missing either cannot satisfy
 calculation must record the regulatory dataset version used") or the
 auditability chain in `ARCHITECTURE.md`, even though a looser type
 would accept it. Both functions report **every** missing field in one
-pass, not just the first.
+pass, not just the first. A third function in the same module,
+`checkEmissionDataEvidenceCompleteness`, is a distinct, live check on a
+current `EmissionData` row's `evidence_file_ids` (not an
+already-constructed snapshot) — see "Emissions" above.
 
 ## Cross-organization sharing
 
@@ -358,24 +669,28 @@ relationship and not a bare share link:
   installation the producer owns.
 - **Bootstrap**: if the importer org isn't yet known, the grant starts
   `INVITED` against an email address; accepting the invitation resolves
-  `grantee_org_id` and moves the grant to `ACTIVE`.
+  `grantee_org_id` and moves the grant to `ACTIVE`. Acceptance requires
+  a *confirmed* email on the accepting account (P11 hardening — see
+  Sharing above), and an already-lapsed invitation cannot be accepted
+  even if its status still reads `INVITED`.
 - **Access is read-only**, enforced at both walls described below —
-  application-layer scope checks, and (Phase 3+) an RLS `SELECT` policy
-  keyed off the grants table. No write policy ever crosses
-  organizations.
+  application-layer scope checks, and an RLS `SELECT` policy keyed off
+  the grants table (`app.user_shared_installation_ids()`). No write
+  policy ever crosses organizations.
 - **Revocation/expiry** ends *future* reads only. Nothing historical is
   clawed back, because every determination made from shared data holds
   a frozen `ActualEmissionSnapshot` — revoking the grant cannot alter a
   result that already copied the values out.
 - **Updates**: when the producer supersedes an `EmissionData` record,
   the grantee sees the new `ACTIVE` version going forward; any
-  importer line already determined from the old version shows a stale
-  indicator (Phase 7 UI), and re-determination is an explicit, audited
-  importer action — never automatic.
+  importer line already determined from the old version can be flagged
+  `STALE` via `checkActualSnapshotStaleness`, and re-determination is
+  an explicit, audited importer action — never automatic.
 
 ## Tenancy
 
-Two enforcement walls, always both:
+Two enforcement walls, always both, live today across every product
+table:
 
 1. **Application** — every service that touches product data takes an
    explicit `OrgContext { org_id, user_id, role, capabilities }`
@@ -385,82 +700,49 @@ Two enforcement walls, always both:
 2. **Database** — every product table carries `org_id` (denormalized
    onto child rows so RLS policies never need a join through a parent)
    and has Row Level Security **enabled at creation**, with policies
-   defined in the same migration — not deferred, the way the
-   regulatory tables' policies currently are (see
-   [`DATABASE_SCHEMA.md`](./DATABASE_SCHEMA.md)).
+   defined in the same migration — unlike the regulatory tables, whose
+   policies were deferred to a later migration (see
+   [`DATABASE_SCHEMA.md`](./DATABASE_SCHEMA.md)). `app.user_org_ids()`
+   is the shared per-org RLS helper every later product-table policy
+   builds on; `app.user_shared_installation_ids()` is its sharing-grant
+   analog.
 
 Sharing (above) is the one sanctioned way data crosses an organization
-boundary, and it is itself dual-wall-enforced and read-only.
+boundary, and it is itself dual-wall-enforced and read-only. The P11
+mandatory security review (11 findings across the migrations cited
+throughout this document) specifically re-tested this dual-wall
+posture end to end and closed every gap it found live — see each
+aggregate's "Backing migrations" note above for the specific fix, and
+the individual `p11_review_*.sql` migration headers for full
+reproduction detail on each.
 
-## Phase 3 DDL template
+## Persistence: migrations by aggregate
 
-This is the shape Phase 3's first product migration follows. It is a
-template, not yet-applied SQL — no product migration exists as of
-Phase 1. `organizations` and `memberships` come first because every
-other product table's `org_id` foreign key needs them to exist.
+Every aggregate in this document now has real, applied backing —
+fulfilling the commitment ADR-0011 made when this document instead
+carried a DDL template. `organizations` + `memberships` landed first
+(P3, `20260828070000`), because every other product table's `org_id`
+foreign key needs them to exist. Startup order, by phase:
 
-```sql
--- Per-org RLS helper: every product-table policy is written in terms
--- of this, so a user's accessible orgs are computed once per statement
--- rather than once per row.
-create function app.user_org_ids()
-returns setof uuid
-language sql
-security definer
-stable
-as $$
-  select org_id from public.memberships where user_id = auth.uid();
-$$;
+| Phase | Aggregate(s) | First migration |
+|---|---|---|
+| P3 | Organization, Membership, Invitation, AuditEvent | `20260828070000` |
+| P4 | Shipment, ShipmentLine, Supplier | `20260828150000` |
+| P5 | Emissions determination columns on ShipmentLine | `20260829150000` |
+| P6 | CalculationResult | `20260829180000` |
+| P7 | Operator, Installation, EmissionData, EvidenceFile, SharingGrant | `20260829220000` |
+| P9 | Declaration | `20260829330000` |
+| P10 | Membership deactivation | `20260829360000` |
+| P11 | Mandatory security review hardening (cross-cutting, 8 migrations: `20260829370000` P10-review + 7 `p11_review_*` migrations) | `20260829370000`–`20260829440000` |
 
-create table public.organizations (
-    id uuid primary key default gen_random_uuid(),
-    name text not null,
-    slug text not null unique,
-    capabilities text[] not null default '{}',
-    eori_number text,
-    cbam_declarant_status text not null default 'NOT_REGISTERED'
-        check (cbam_declarant_status in ('NOT_REGISTERED', 'APPLICATION_PENDING', 'AUTHORISED')),
-    acts_as_indirect_representative boolean not null default false,
-    country_of_establishment text,                    -- ISO 3166-1 alpha-2, format-checked
-    created_at timestamptz not null default now()
-);
-
-alter table public.organizations enable row level security;
-
-create policy organizations_select on public.organizations
-    for select using (id in (select app.user_org_ids()));
--- insert/update/delete policies follow the same org_id-scoped shape,
--- refined per role once the capability matrix (ARCHITECTURE.md) lands.
-
-create table public.memberships (
-    id uuid primary key default gen_random_uuid(),
-    org_id uuid not null references public.organizations(id) on delete cascade,
-    user_id uuid not null references auth.users(id) on delete cascade,
-    role text not null check (role in ('OWNER', 'ADMIN', 'MEMBER')),
-    created_at timestamptz not null default now(),
-    unique (org_id, user_id)
-);
-
-alter table public.memberships enable row level security;
-
-create policy memberships_select on public.memberships
-    for select using (org_id in (select app.user_org_ids()));
-```
-
-Every subsequent product table (`shipments`, `shipment_lines`,
-`installations`, `emission_data`, `sharing_grants`, `audit_events`,
-`calculation_results`, ...) follows the same pattern: `org_id uuid not
-null references public.organizations(id)`, RLS enabled and policies
-defined in the same migration, and — for `audit_events` and
+Every product table follows the same shape: `org_id uuid not null
+references public.organizations(id)`, RLS enabled and policies defined
+in the same migration, and — for `audit_events` and
 `calculation_results` specifically — `insert`+`select` policies only,
 with `update`/`delete` grants revoked entirely (append-only at the
-database level, not just by convention). `sharing_grants`-driven reads
-add a second helper, `app.user_shared_installation_ids()`, following
-the same `security definer` shape, so a grantee's `select` policy on
-`installations`/`emission_data` can check grant-based access alongside
-ordinary org ownership.
-
-See [`docs/plans/MASTER_PLAN.md`](../plans/MASTER_PLAN.md) §12/§38 (Phase
-3 contract) for the full migration ordering and RLS policy
-responsibilities, and `docs/adr/ADR-0011-product-schema-timing.md` for
-why this template is documented now but not yet applied.
+database level, not just by convention). See
+[`docs/plans/MASTER_PLAN.md`](../plans/MASTER_PLAN.md) §12/§38 for the
+full phase-by-phase contract, and
+[`docs/adr/ADR-0011-product-schema-timing.md`](../adr/ADR-0011-product-schema-timing.md)
+for why the schema was deliberately documented as a template before P3
+rather than created alongside the P1 domain types.
