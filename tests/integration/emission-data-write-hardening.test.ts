@@ -473,6 +473,89 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "a malformed (non-uuid) evidence_file_ids entry is cleanly rejected by the WITH CHECK anti-join, not a raw Postgres type-cast crash (P13 audit follow-up)",
+      async () => {
+        // evidence_file_ids is one of app.prevent_emission_data_fact_change's
+        // protected "fact" columns -- it can only ever be set at INSERT,
+        // never rewritten via UPDATE (not even by service_role: that
+        // trigger fires for every role, RLS bypass has no effect on
+        // ordinary BEFORE UPDATE triggers), so the malformed value has
+        // to be seeded here, at creation.
+        const emissionDataId =
+          await insertDraftEmissionData(
+            { evidence_file_ids: ["not-a-real-uuid"] },
+          );
+
+        // A real evidence_files row for this SAME emission_data_id is
+        // required to actually exercise the anti-join's uuid cast --
+        // with zero evidence_files rows referencing this id at all, the
+        // planner resolves the correlated NOT EXISTS as true via the
+        // emission_data_id filter alone (empirically confirmed), never
+        // evaluating `ef.id = claimed...::uuid` against any row at all,
+        // which would make this test pass regardless of whether the
+        // cast is hardened.
+        await insertRealEvidenceFile(
+          emissionDataId,
+          serviceClient,
+          producerAdminId,
+        );
+
+        // updated_at is the one column neither BEFORE UPDATE trigger
+        // (app.prevent_emission_data_fact_change,
+        // app.enforce_emission_data_verification_gate) constrains at
+        // all -- touching any of the "fact" columns those triggers
+        // protect (direct_specific, cn_scope, etc.) would raise ITS
+        // OWN exception first and never reach the RLS WITH CHECK
+        // anti-join this test targets.
+        const { error } =
+          await clientProducerMember
+            .from("emission_data")
+            .update(
+              { updated_at: new Date().toISOString() },
+            )
+            .eq(
+              "id",
+              emissionDataId,
+            );
+
+        expect(error).not.toBeNull();
+
+        // A clean policy rejection (Postgres error 42501, "new row
+        // violates row-level security policy") is the anti-join
+        // correctly treating the malformed entry as "does not name a
+        // real evidence_files row" and blocking the UPDATE. Before
+        // app.try_cast_uuid() replaced the bare `::uuid` cast here, this
+        // same malformed value made the cast itself RAISE
+        // invalid_text_representation (22P02) -- a raw internal type
+        // error surfacing as the failure instead of a policy rejection,
+        // and (per app.try_cast_uuid()'s own precedent from
+        // 20260829410000) a shape of bug that, in a USING clause
+        // evaluated across a full table scan, can take an entire
+        // table's reads offline for every user from a single malformed
+        // row -- here confined to this one row's own UPDATE attempts,
+        // but still a real, un-recoverable-without-service-role
+        // failure mode were it left as a bare cast.
+        expect(error?.code).toBe(
+          "42501",
+        );
+
+        const { data: after } =
+          await serviceClient
+            .from("emission_data")
+            .select("direct_specific")
+            .eq(
+              "id",
+              emissionDataId,
+            )
+            .single();
+
+        expect(after?.direct_specific).toBe(
+          "1.0",
+        );
+      },
+    );
+
+    it(
       "Finding 2: an ADMIN verifying a record cannot name an arbitrary other user as verifier_user_id -- it is force-pinned to their own auth.uid()",
       async () => {
         const emissionDataId =
