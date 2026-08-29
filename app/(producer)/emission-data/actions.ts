@@ -133,6 +133,9 @@ function transitionMessageFor(
     case "NOT_FOUND":
       return "That record could not be found.";
 
+    case "CONCURRENT_MODIFICATION":
+      return "This record changed while you were viewing it -- reload and try again.";
+
     default:
       return "Something went wrong. Please try again.";
   }

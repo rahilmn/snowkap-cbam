@@ -907,6 +907,30 @@ describe(
     );
 
     it(
+      "rejects CONCURRENT_MODIFICATION (not a silent OK) when another request already transitioned the record between fetch and write -- e.g. a concurrent VERIFY claimed it first (P13 adversarial audit: applyTransition's UPDATE previously carried no CAS predicate)",
+      async () => {
+        const result =
+          await rejectEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: [
+                  { data: pendingRow, error: null },
+                  { data: null, error: null },
+                ],
+              },
+            ),
+            adminContext,
+            "emission-data-1" as never,
+            "Evidence does not support the declared value.",
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "CONCURRENT_MODIFICATION" },
+        );
+      },
+    );
+
+    it(
       "rejects PERMISSION_DENIED for a plain MEMBER, without touching the database",
       async () => {
         const recorder: Recorder =

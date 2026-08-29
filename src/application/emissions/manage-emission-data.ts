@@ -364,7 +364,12 @@ export type EmissionDataActionResult =
         // BEFORE any database read (P10/P11 capability-matrix hardening
         // pass -- see docs/architecture/AUTHORIZATION_MATRIX.md's
         // "Capability enforcement" section).
-        | "CAPABILITY_NOT_HELD";
+        | "CAPABILITY_NOT_HELD"
+        // Lost a race against a concurrent transition on the same
+        // record (P13 adversarial audit) -- see applyTransition's CAS
+        // guard below, same shape as CONCURRENT_MODIFICATION in
+        // mark-declaration-ready.ts/generate-or-refresh-declaration-draft.ts.
+        | "CONCURRENT_MODIFICATION";
     };
 
 /**
@@ -484,7 +489,17 @@ async function applyTransition(
     }
   }
 
-  const { error } =
+  // CAS guard (.eq("status", ...).eq("verification_status", ...)):
+  // without it, two concurrent legitimate transitions on the same
+  // record (e.g. an admin's VERIFY and a producer's DISCARD, or two
+  // admins' VERIFY and REJECT, racing between their own independent
+  // fetch above and this UPDATE) would each pass transitionEmissionData's
+  // in-memory check against their own stale snapshot and both persist,
+  // silently producing a lost update instead of one of them failing
+  // closed (P13 adversarial audit -- same pattern already established
+  // in mark-declaration-ready.ts / generate-or-refresh-declaration-draft.ts
+  // / resolve-line-emissions.ts, previously missing here).
+  const { data: updated, error } =
     await supabase
       .from("emission_data")
       .update(
@@ -492,12 +507,23 @@ async function applyTransition(
           transition.record,
         ),
       )
-      .eq("id", emissionDataId);
+      .eq("id", emissionDataId)
+      .eq("status", fetched.record.status)
+      .eq("verification_status", fetched.record.verification_status)
+      .select("id")
+      .maybeSingle();
 
   if (error) {
     return {
       status: "REJECTED",
       reason: "PERSIST_FAILED",
+    };
+  }
+
+  if (!updated) {
+    return {
+      status: "REJECTED",
+      reason: "CONCURRENT_MODIFICATION",
     };
   }
 
