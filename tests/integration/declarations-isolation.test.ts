@@ -109,6 +109,69 @@ interface RpcResultRow {
   result_declaration_id: string | null;
 }
 
+// 2026-08-29 (P13 release-blocker remediation,
+// 20260829500000_p13_review_shipment_line_determination_forgery_fix.sql):
+// shipment_lines.emission_determination now carries a WITH CHECK
+// requiring a DEFAULT-method determination's claimed values to
+// byte-match a REAL default_emission_values row -- the synthetic
+// shorthand this suite previously wrote directly
+// ({method:"DEFAULT", resolution:{dataset_version:"2026.1",
+// reason:"EXACT_TRADE_CODE_MATCH"}}, with no record_identity/values at
+// all) is no longer accepted by any real authenticated client (only
+// service_role, which this suite deliberately does not use for these
+// writes -- see seedShipment's own comment on exercising RLS for
+// real). Two real, distinct rows from the live ACTIVE dataset are
+// fetched once in beforeAll and reused everywhere this suite needs "a
+// determination" and "a genuinely different determination" -- the
+// exact same pattern
+// tests/integration/shipment-line-determination-hardening.test.ts
+// (that migration's own regression suite) uses, not duplicated
+// reasoning.
+interface RealRegulatoryRecord {
+  dataset_id: string;
+  dataset_version: string;
+  source_sheet: string;
+  source_row: number;
+  source_trade_code: string;
+  origin_country_name: string;
+  total_value: string;
+  total_status: string;
+  direct_value: string;
+  direct_status: string;
+  indirect_value: string;
+  indirect_status: string;
+  emission_unit: string;
+}
+
+function determinationFrom(
+  record: RealRegulatoryRecord,
+): Record<string, unknown> {
+  return {
+    method: "DEFAULT",
+    resolution: {
+      dataset_id: record.dataset_id,
+      dataset_version: record.dataset_version,
+      resolved_at: "2026-08-29T00:00:00.000Z",
+      reason: "EXACT_CN8_MATCH",
+      country_mapping: { status: "MAPPED", regulatory_country_name: record.origin_country_name },
+      record_identity: {
+        source_sheet: record.source_sheet,
+        source_row: record.source_row,
+        source_trade_code: record.source_trade_code,
+        origin_country_name: record.origin_country_name,
+        source_production_route_code: null,
+      },
+      values: {
+        direct: { value: record.direct_value, status: record.direct_status, raw_source_value: record.direct_value },
+        indirect: { value: record.indirect_value, status: record.indirect_status, raw_source_value: record.indirect_value },
+        total: { value: record.total_value, status: record.total_status, raw_source_value: record.total_value },
+      },
+      emission_unit: record.emission_unit,
+      trace: [],
+    },
+  };
+}
+
 describe.skipIf(!localSupabaseReachable)(
   "declarations RLS + record_declaration_filed (local Supabase only)",
   () => {
@@ -126,6 +189,9 @@ describe.skipIf(!localSupabaseReachable)(
           auth: { persistSession: false },
         },
       );
+
+    let recordA: RealRegulatoryRecord;
+    let recordB: RealRegulatoryRecord;
 
     let orgAId: string;
     let orgBId: string;
@@ -241,13 +307,9 @@ describe.skipIf(!localSupabaseReachable)(
                 cn_code_level: "CN8",
                 origin_country: "IN",
                 net_mass_tonnes: "10",
-                emission_determination: {
-                  method: "DEFAULT",
-                  resolution: {
-                    dataset_version: "2026.1",
-                    reason: "EXACT_TRADE_CODE_MATCH",
-                  },
-                },
+                emission_determination: determinationFrom(
+                  recordA,
+                ),
               },
             )
             .select("id")
@@ -277,13 +339,20 @@ describe.skipIf(!localSupabaseReachable)(
                 engine_version: "1.1.0",
                 quantity: "10",
                 quantity_unit: "TONNES",
-                determination: {
-                  method: "DEFAULT",
-                  resolution: {
-                    dataset_version: "2026.1",
-                    reason: "EXACT_TRADE_CODE_MATCH",
-                  },
-                },
+                // Deliberately BYTE-IDENTICAL to the line's own
+                // emission_determination above (both determinationFrom(recordA))
+                // -- calculation_results isn't subject to the new
+                // regulatory-content WITH CHECK itself (only
+                // shipment_lines is), but the P13 stale-calculation
+                // gate (20260829470000) compares this column against
+                // shipment_lines.emission_determination for equality,
+                // so keeping them matched is what makes every line
+                // this helper seeds "current" by default -- the same
+                // invariant the old synthetic shorthand pair
+                // maintained, just now with real regulatory content.
+                determination: determinationFrom(
+                  recordA,
+                ),
                 steps: [],
                 embedded_emissions_tco2e: emission,
                 calculated_by_user_id: ownerAId,
@@ -367,6 +436,75 @@ describe.skipIf(!localSupabaseReachable)(
     }
 
     beforeAll(async () => {
+      const { data: candidates, error: candidatesError } =
+        await serviceClient
+          .from("default_emission_values")
+          .select(
+            "dataset_id, source_sheet, source_row, source_trade_code, total_value, total_status, direct_value, direct_status, indirect_value, indirect_status, emission_unit, production_route_id, countries!inner(name), regulatory_datasets!inner(version)",
+          )
+          .eq(
+            "total_status",
+            "AVAILABLE",
+          )
+          .is(
+            "production_route_id",
+            null,
+          )
+          .limit(50);
+
+      if (candidatesError || !candidates || candidates.length < 2) {
+        throw new Error(
+          `Failed to fetch real regulatory candidates: ${candidatesError?.message}`,
+        );
+      }
+
+      function toRealRecord(
+        row: NonNullable<typeof candidates>[number],
+      ): RealRegulatoryRecord {
+        const countryRow =
+          row.countries as unknown as { name: string };
+
+        const datasetRow =
+          row.regulatory_datasets as unknown as { version: string };
+
+        return {
+          dataset_id: row.dataset_id,
+          dataset_version: datasetRow.version,
+          source_sheet: row.source_sheet,
+          source_row: row.source_row,
+          source_trade_code: row.source_trade_code,
+          origin_country_name: countryRow.name,
+          total_value: row.total_value,
+          total_status: row.total_status,
+          direct_value: row.direct_value,
+          direct_status: row.direct_status,
+          indirect_value: row.indirect_value,
+          indirect_status: row.indirect_status,
+          emission_unit: row.emission_unit,
+        };
+      }
+
+      recordA =
+        toRealRecord(
+          candidates[0]!,
+        );
+
+      const secondCandidate =
+        candidates.find(
+          (candidate) => candidate.total_value !== candidates[0]!.total_value,
+        );
+
+      if (!secondCandidate) {
+        throw new Error(
+          "Could not find two distinct-valued regulatory candidates in the ACTIVE dataset.",
+        );
+      }
+
+      recordB =
+        toRealRecord(
+          secondCandidate,
+        );
+
       const { data: orgA, error: orgAError } =
         await serviceClient
           .from("organizations")
@@ -1074,7 +1212,7 @@ describe.skipIf(!localSupabaseReachable)(
         );
 
         expect(snapshot.provenance.regulatory_dataset_versions).toEqual(
-          ["2026.1"],
+          [recordA.dataset_version],
         );
 
         expect(
@@ -1609,13 +1747,9 @@ describe.skipIf(!localSupabaseReachable)(
             .from("shipment_lines")
             .update(
               {
-                emission_determination: {
-                  method: "DEFAULT",
-                  resolution: {
-                    dataset_version: "2026.2",
-                    reason: "OTHER_COUNTRIES_FALLBACK",
-                  },
-                },
+                emission_determination: determinationFrom(
+                  recordB,
+                ),
               },
             )
             .eq(
