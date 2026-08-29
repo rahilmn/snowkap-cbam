@@ -538,6 +538,21 @@ throughout, since RULE-EE-001's own trust-the-dataset-total design was never at 
   Not fixed here: no realistic CBAM shipment quantity approaches a value where this
   40-digit ceiling would matter, so this is recorded as a known, accepted bound rather
   than a rounding rule requiring its own register entry.
+- **2026-08-29 note (P9 declaration preparation)**: this rule's own gap now has a product
+  surface, not just a code-level interim rule. `public.record_declaration_filed()`
+  (`supabase/migrations/20260829330000_p9_declarations_schema.sql`, section 4) is the first
+  place a "declaration total" is actually produced end-to-end — its `filed_snapshot` carries
+  every figure at full `Decimal` precision, with an in-band `rounding` object naming this
+  rule (`declaration_rounding_method: "UNRESOLVED_ESCALATED"`, `rule_ref: "RULE-EE-006"`)
+  rather than silently applying HALF_UP or any other method. The Declaration detail screen
+  (`app/(importer)/declarations/[id]/filed-snapshot-card.tsx`) renders that same full-precision
+  figure with a permanently visible callout stating the gap plainly — not a tooltip, not
+  collapsed behind a disclosure — the same posture `emissions-cell.tsx`/`why-this-number-panel.tsx`
+  already apply to REFERENCE_REQUIRED/UNAVAILABLE. This is **not** an owner sign-off on either
+  candidate resolution path above (interim-rounding vs. HALF_UP-as-design-decision) — no owner
+  decision was sought or made in P9 — it is only the honest-gap UI this rule's own interim
+  rule already called for now existing, and where in the product it surfaces. The interim rule
+  itself, and the UNRESOLVED — escalated classification, are unchanged by this note.
 
 ## RULE-EE-007 — Conditions for actual embedded emissions in imported electricity
 
