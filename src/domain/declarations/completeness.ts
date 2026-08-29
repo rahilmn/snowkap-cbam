@@ -21,6 +21,16 @@ export interface CompletenessCheckLine {
   line_number: number;
   has_emission_determination: boolean;
   has_calculation_result: boolean;
+  // 2026-08-29 (P13 adversarial audit): whether the line's latest
+  // calculation_results row's own frozen `determination` still matches
+  // the line's CURRENT emission_determination -- meaningless (and never
+  // consulted) when has_calculation_result is false, since
+  // LINE_NOT_CALCULATED already covers that case. Computed by the
+  // caller (compute-declaration-draft-facts.ts), which is the layer
+  // that actually has both jsonb values in hand; this module stays a
+  // pure boolean-in, blocker-out function exactly as before, never
+  // performing the structural comparison itself.
+  calculation_is_current: boolean;
 }
 
 export interface CompletenessCheckShipment {
@@ -123,6 +133,24 @@ export function buildCompletenessReport(
         blockers.push(
           {
             reason: "LINE_NOT_CALCULATED",
+            shipment_id: shipment.shipment_id,
+            shipment_reference: shipment.shipment_reference,
+            line_id: line.line_id,
+            line_number: line.line_number,
+          },
+        );
+      } else if (!line.calculation_is_current) {
+        // Determined AND calculated, but not against each other: the
+        // line's latest calculation_results row was frozen against a
+        // determination this line no longer carries (redetermined
+        // without a follow-up recalculation -- see this reason's own
+        // doc comment on CompletenessBlockerReason). Distinct from, not
+        // layered onto, LINE_NOT_CALCULATED above -- an `else if`, not a
+        // second independent check, so a line is never flagged with
+        // both for the same underlying fact.
+        blockers.push(
+          {
+            reason: "LINE_CALCULATION_STALE",
             shipment_id: shipment.shipment_id,
             shipment_reference: shipment.shipment_reference,
             line_id: line.line_id,

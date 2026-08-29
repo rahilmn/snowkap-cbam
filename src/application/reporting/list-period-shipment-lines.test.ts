@@ -63,6 +63,7 @@ const calculationRow =
     embedded_emissions_tco2e: "12.5",
     steps: [],
     calculated_at: "2026-02-01T00:00:00Z",
+    determination: { method: "DEFAULT", resolution: { dataset_version: "2026.1" } },
   };
 
 interface Op {
@@ -167,6 +168,15 @@ describe(
               calculation: expect.objectContaining({ id: "calc-1", embedded_emissions_tco2e: "12.5" }),
             },
           ],
+        );
+
+        // The FROZEN determination the calculation was actually
+        // computed against -- compute-declaration-draft-facts.ts's P13
+        // staleness check (comparing this against the line's own
+        // CURRENT emission_determination) needs it on this shape, not
+        // just embedded_emissions_tco2e.
+        expect(result.lines[0]?.calculation?.determination).toEqual(
+          calculationRow.determination,
         );
       },
     );

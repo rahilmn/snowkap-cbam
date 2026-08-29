@@ -16,6 +16,13 @@ const BLOCKER_LABEL: Record<string, string> = {
   SHIPMENT_HAS_NO_LINES: "Shipment has no lines",
   LINE_NOT_DETERMINED: "Line not determined",
   LINE_NOT_CALCULATED: "Line not calculated",
+  // P13 adversarial audit: a line can be determined AND calculated and
+  // still not be ready -- if it was redetermined after its last
+  // calculation without being recalculated, the calculation on file no
+  // longer matches what the line would file with. Surfaced here so this
+  // is visible before attempting to file, not only as a filing-time
+  // INCOMPLETE rejection from record_declaration_filed().
+  LINE_CALCULATION_STALE: "Calculation is stale -- recalculate after re-determination",
 };
 
 /**

@@ -71,6 +71,13 @@ const calculationRow =
     embedded_emissions_tco2e: "12.5",
     steps: [],
     calculated_at: "2026-02-01T00:00:00Z",
+    // Matches lineRow()'s own default emission_determination -- keeps
+    // this shared fixture pair "current" by default, the same way it
+    // was implicitly current before calculation_is_current existed. A
+    // test that wants a STALE pairing overrides `determination` on the
+    // calculation row (or `emission_determination` on the line row) to
+    // deliberately diverge.
+    determination: { method: "DEFAULT" },
   };
 
 interface ShipmentsOp {
@@ -309,6 +316,122 @@ describe(
               shipment_reference: null,
             },
           ],
+        );
+      },
+    );
+
+    it(
+      "flags LINE_CALCULATION_STALE -- not LINE_NOT_CALCULATED, and not complete -- when a line's latest calculation was computed against a determination the line no longer carries (P13 adversarial audit: redetermined without a follow-up recalculation)",
+      async () => {
+        const facts =
+          await computeDeclarationDraftFacts(
+            makeMockSupabase(
+              {
+                shipments: { data: [fullShipmentRow()], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow(
+                      {
+                        emission_determination: {
+                          method: "DEFAULT",
+                          resolution: {
+                            dataset_version: "2026.2",
+                            reason: "OTHER_COUNTRIES_FALLBACK",
+                          },
+                        },
+                      },
+                    ),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    {
+                      ...calculationRow,
+                      // The calculation's own frozen determination --
+                      // a genuinely DIFFERENT value than the line's
+                      // current one above, same as an unrecalculated
+                      // redetermine leaves behind live.
+                      determination: {
+                        method: "DEFAULT",
+                        resolution: {
+                          dataset_version: "2026.1",
+                          reason: "EXACT_TRADE_CODE_MATCH",
+                        },
+                      },
+                    },
+                  ],
+                  error: null,
+                },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(facts.completeness_report.complete).toBe(
+          false,
+        );
+
+        expect(facts.completeness_report.blockers).toEqual(
+          [
+            {
+              reason: "LINE_CALCULATION_STALE",
+              shipment_id: "ship-1",
+              shipment_reference: "REF-001",
+              line_id: "line-1",
+              line_number: 1,
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "does not flag LINE_CALCULATION_STALE when the two determinations are structurally identical but their jsonb keys came back in a different order",
+      async () => {
+        const facts =
+          await computeDeclarationDraftFacts(
+            makeMockSupabase(
+              {
+                shipments: { data: [fullShipmentRow()], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow(
+                      {
+                        emission_determination: {
+                          method: "DEFAULT",
+                          resolution: { reason: "EXACT_TRADE_CODE_MATCH", dataset_version: "2026.1" },
+                        },
+                      },
+                    ),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    {
+                      ...calculationRow,
+                      determination: {
+                        resolution: { dataset_version: "2026.1", reason: "EXACT_TRADE_CODE_MATCH" },
+                        method: "DEFAULT",
+                      },
+                    },
+                  ],
+                  error: null,
+                },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(facts.completeness_report.complete).toBe(
+          true,
+        );
+
+        expect(facts.completeness_report.blockers).toEqual(
+          [],
         );
       },
     );

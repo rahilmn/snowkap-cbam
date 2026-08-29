@@ -36,6 +36,10 @@ import type {
   LatestLineCalculation,
 } from "../../../../src/application/calculations/get-latest-calculations";
 
+import {
+  checkCalculationCurrency,
+} from "../../../../src/domain/emissions/check-calculation-currency";
+
 const VALUE_STATUS_TONE = {
   AVAILABLE: "success" as const,
   REFERENCE_REQUIRED: "warning" as const,
@@ -397,6 +401,21 @@ export function WhyThisNumberPanel(
       ? `${line.net_mass_tonnes} t`
       : `${line.quantity_mwh} MWh`;
 
+  // P13 adversarial audit: shipment_lines stays fully writable while its
+  // parent shipment is READY, so this line's determination can have
+  // changed (redetermined, or edited to null) since latestCalculation
+  // was produced -- calculation_results is append-only and neither
+  // redetermine path nor updateLine ever touches it. The same fact
+  // record_declaration_filed() now refuses to file over, surfaced here
+  // as early and as concretely as this panel already surfaces every
+  // other input to the number it explains.
+  const isStale =
+    latestCalculation !== undefined &&
+    checkCalculationCurrency(
+      latestCalculation.determination,
+      determination,
+    ) === "STALE";
+
   return (
     <div className="flex flex-col gap-4 py-1">
       <PanelSection title="Line">
@@ -522,6 +541,15 @@ export function WhyThisNumberPanel(
           <p className="font-mono text-lg font-semibold tabular-nums text-[var(--text-primary)]">
             {latestCalculation.embedded_emissions_tco2e} tCO2e
           </p>
+
+          {isStale ? (
+            <div className="mt-2 rounded-[var(--radius-sm)] bg-[var(--color-warning-100)] px-3 py-2 text-xs text-[var(--color-warning-700)]">
+              Stale -- this result was calculated against a determination
+              this line no longer carries (it was re-determined, or
+              edited, since this calculation ran). Recalculate to bring
+              the result in line with the determination shown above.
+            </div>
+          ) : null}
         </PanelSection>
       ) : null}
 

@@ -26,6 +26,10 @@ import type {
   EngineVersion,
 } from "../../domain/calculations/types";
 
+import type {
+  EmissionDetermination,
+} from "../../domain/emissions/types";
+
 import {
   SHIPMENT_COLUMNS,
   SHIPMENT_LINE_COLUMNS,
@@ -52,6 +56,16 @@ export interface PeriodLineCalculation {
   embedded_emissions_tco2e: DecimalString;
   steps: CalculationStep[];
   calculated_at: IsoTimestamp;
+  // The FROZEN determination this calculation was actually computed
+  // against (calculate-line.ts writes it verbatim from the line's own
+  // emission_determination at calculation time -- never re-derived).
+  // Added for compute-declaration-draft-facts.ts's P13 staleness check:
+  // comparing this against the line's own CURRENT emission_determination
+  // is what distinguishes "calculated and current" from "calculated
+  // against a since-superseded determination" -- see
+  // src/domain/declarations/completeness.ts's calculation_is_current
+  // doc comment.
+  determination: EmissionDetermination;
 }
 
 interface CalculationResultRow {
@@ -61,6 +75,7 @@ interface CalculationResultRow {
   embedded_emissions_tco2e: string;
   steps: CalculationStep[];
   calculated_at: string;
+  determination: EmissionDetermination;
 }
 
 /**
@@ -339,7 +354,7 @@ export async function listPeriodShipmentLines(
       await supabase
         .from("latest_calculation_results")
         .select(
-          "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at",
+          "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at, determination",
         )
         .in("shipment_id", batch);
 
@@ -371,6 +386,7 @@ export async function listPeriodShipmentLines(
         embedded_emissions_tco2e: row.embedded_emissions_tco2e as DecimalString,
         steps: row.steps,
         calculated_at: row.calculated_at as IsoTimestamp,
+        determination: row.determination,
       },
     );
   }

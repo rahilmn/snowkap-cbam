@@ -103,6 +103,10 @@ const calculationRow =
     embedded_emissions_tco2e: "12.5",
     steps: [],
     calculated_at: "2026-02-01T00:00:00Z",
+    // Matches lineRow's own emission_determination -- keeps this
+    // fixture pair "current" (see compute-declaration-draft-facts.ts's
+    // P13 calculation_is_current check) by default.
+    determination: { method: "DEFAULT" },
   };
 
 interface Recorder {

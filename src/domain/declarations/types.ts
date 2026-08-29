@@ -88,7 +88,30 @@ export type CompletenessBlockerReason =
   | "SHIPMENT_NOT_LOCKABLE"
   | "SHIPMENT_HAS_NO_LINES"
   | "LINE_NOT_DETERMINED"
-  | "LINE_NOT_CALCULATED";
+  | "LINE_NOT_CALCULATED"
+  // 2026-08-29 (P13 adversarial audit, live-reproduced): a line can have
+  // has_calculation_result: true and STILL not be genuinely ready --
+  // shipment_lines stays fully writable while its parent is READY, so
+  // "Re-determine emissions" (the exact workflow emissions-cell.tsx's
+  // own "Stale -- newer data available" badge prompts an importer into)
+  // can update the line's emission_determination without ever touching
+  // the earlier calculation_results row calculated against the OLD one.
+  // record_declaration_filed() (see the P13 migration fixing it) now
+  // refuses this at filing time by folding it into the same INCOMPLETE
+  // path a missing calculation already uses; this reason is the same
+  // fact surfaced HERE, at DRAFT/READY completeness-check time, so a
+  // user sees it before attempting to file rather than only as a
+  // filing-time rejection. Named distinctly from LINE_NOT_CALCULATED
+  // (never merged into it) because the two point to different fixes: a
+  // line missing this reason needs its FIRST calculation, one carrying
+  // this reason needs a RECALCULATION of a determination that already
+  // changed. A line whose emission_determination itself is now null
+  // (manage-lines.ts's updateShipmentLine clearing it on a quantity/
+  // cn_code edit) is already caught by LINE_NOT_DETERMINED above --
+  // this reason exists for the case that blocker cannot see: a
+  // determination that is still present, but no longer the one the
+  // line's latest calculation was computed against.
+  | "LINE_CALCULATION_STALE";
 
 /**
  * One named blocker. `shipment_id`/`shipment_reference` are null only

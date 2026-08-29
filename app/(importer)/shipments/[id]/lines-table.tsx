@@ -291,6 +291,7 @@ function LineRow(
             lineId={line.id}
             editable={editable}
             latestCalculation={latestCalculation}
+            currentDetermination={line.emission_determination}
           />
         </td>
 

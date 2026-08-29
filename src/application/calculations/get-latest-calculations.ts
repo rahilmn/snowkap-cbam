@@ -20,6 +20,10 @@ import type {
   ShipmentId,
 } from "../../domain/shared/ids";
 
+import type {
+  EmissionDetermination,
+} from "../../domain/emissions/types";
+
 export interface LatestLineCalculation {
   // Added for P8's "Verify reproducibility" check
   // (reproduce-calculation-result.ts): that check operates on one
@@ -32,6 +36,15 @@ export interface LatestLineCalculation {
   embedded_emissions_tco2e: DecimalString;
   steps: CalculationStep[];
   calculated_at: IsoTimestamp;
+  // Added for the P13 adversarial audit's staleness signal: the FROZEN
+  // determination this calculation was actually computed against
+  // (calculate-line.ts writes it verbatim from the line's own
+  // emission_determination at calculation time -- never re-derived).
+  // The shipment detail screen compares this against the line's CURRENT
+  // emission_determination (src/domain/emissions/check-calculation-currency.ts)
+  // to show a real staleness badge, the same fact
+  // record_declaration_filed() now refuses to file over.
+  determination: EmissionDetermination;
 }
 
 interface CalculationResultRow {
@@ -41,6 +54,7 @@ interface CalculationResultRow {
   embedded_emissions_tco2e: string;
   steps: CalculationStep[];
   calculated_at: string;
+  determination: EmissionDetermination;
 }
 
 /**
@@ -72,7 +86,7 @@ export async function getLatestCalculationsByShipment(
     await supabase
       .from("latest_calculation_results")
       .select(
-        "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at",
+        "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at, determination",
       )
       .eq("shipment_id", shipmentId);
 
@@ -91,6 +105,7 @@ export async function getLatestCalculationsByShipment(
         embedded_emissions_tco2e: row.embedded_emissions_tco2e as DecimalString,
         steps: row.steps,
         calculated_at: row.calculated_at as IsoTimestamp,
+        determination: row.determination,
       };
   }
 

@@ -25,6 +25,7 @@ function readyShipment(
         line_number: 1,
         has_emission_determination: true,
         has_calculation_result: true,
+        calculation_is_current: true,
       },
     ],
     ...overrides,
@@ -169,6 +170,7 @@ describe(
                       line_number: 1,
                       has_emission_determination: false,
                       has_calculation_result: false,
+                      calculation_is_current: false,
                     },
                   ],
                 },
@@ -205,6 +207,7 @@ describe(
                       line_number: 1,
                       has_emission_determination: true,
                       has_calculation_result: false,
+                      calculation_is_current: false,
                     },
                   ],
                 },
@@ -243,12 +246,14 @@ describe(
                       line_number: 2,
                       has_emission_determination: false,
                       has_calculation_result: false,
+                      calculation_is_current: false,
                     },
                     {
                       line_id: "line-2" as never,
                       line_number: 1,
                       has_emission_determination: false,
                       has_calculation_result: false,
+                      calculation_is_current: false,
                     },
                   ],
                 },
@@ -261,6 +266,7 @@ describe(
                       line_number: 1,
                       has_emission_determination: false,
                       has_calculation_result: false,
+                      calculation_is_current: false,
                     },
                   ],
                 },
@@ -297,12 +303,14 @@ describe(
                       line_number: 1,
                       has_emission_determination: true,
                       has_calculation_result: true,
+                      calculation_is_current: true,
                     },
                     {
                       line_id: "line-2" as never,
                       line_number: 2,
                       has_emission_determination: false,
                       has_calculation_result: false,
+                      calculation_is_current: false,
                     },
                   ],
                 },
@@ -317,6 +325,90 @@ describe(
 
         expect(report.complete).toBe(
           false,
+        );
+      },
+    );
+
+    it(
+      "reports LINE_CALCULATION_STALE (not LINE_NOT_CALCULATED) for a determined AND calculated line whose calculation is no longer current -- P13 adversarial audit: redetermined without a follow-up recalculation",
+      () => {
+        const report =
+          buildCompletenessReport(
+            [
+              readyShipment(
+                {
+                  lines: [
+                    {
+                      line_id: "line-1" as never,
+                      line_number: 1,
+                      has_emission_determination: true,
+                      has_calculation_result: true,
+                      calculation_is_current: false,
+                    },
+                  ],
+                },
+              ),
+            ],
+            generatedAt,
+          );
+
+        expect(report.complete).toBe(
+          false,
+        );
+
+        expect(report.blockers).toEqual(
+          [
+            {
+              reason: "LINE_CALCULATION_STALE",
+              shipment_id: "ship-1",
+              shipment_reference: "REF-001",
+              line_id: "line-1",
+              line_number: 1,
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "never reports both LINE_NOT_CALCULATED and LINE_CALCULATION_STALE for the same line -- calculation_is_current is only consulted once has_calculation_result is true",
+      () => {
+        const report =
+          buildCompletenessReport(
+            [
+              readyShipment(
+                {
+                  lines: [
+                    {
+                      line_id: "line-1" as never,
+                      line_number: 1,
+                      has_emission_determination: true,
+                      has_calculation_result: false,
+                      // A deliberately inconsistent fixture (no real
+                      // caller would set calculation_is_current: false
+                      // alongside has_calculation_result: false) --
+                      // proves the `else if` short-circuits on
+                      // has_calculation_result alone rather than
+                      // evaluating calculation_is_current independently.
+                      calculation_is_current: false,
+                    },
+                  ],
+                },
+              ),
+            ],
+            generatedAt,
+          );
+
+        expect(report.blockers).toEqual(
+          [
+            {
+              reason: "LINE_NOT_CALCULATED",
+              shipment_id: "ship-1",
+              shipment_reference: "REF-001",
+              line_id: "line-1",
+              line_number: 1,
+            },
+          ],
         );
       },
     );

@@ -26,6 +26,10 @@ import type {
 } from "../../domain/shipments/types";
 
 import {
+  checkCalculationCurrency,
+} from "../../domain/emissions/check-calculation-currency";
+
+import {
   listPeriodShipmentLines,
   type PeriodShipmentLine,
 } from "../reporting/list-period-shipment-lines";
@@ -189,6 +193,28 @@ export async function computeDeclarationDraftFacts(
                 line_number: entry.line.line_number,
                 has_emission_determination: entry.line.emission_determination !== null,
                 has_calculation_result: entry.calculation !== null,
+                // 2026-08-29 (P13 adversarial audit): "false" whenever
+                // there's nothing to compare (entry.calculation === null
+                // -- meaningless in that case, since
+                // has_calculation_result: false already routes this line
+                // to LINE_NOT_CALCULATED and buildCompletenessReport
+                // never consults calculation_is_current on that path),
+                // otherwise checkCalculationCurrency's own real
+                // structural comparison between the calculation's FROZEN
+                // determination and the line's CURRENT one -- the same
+                // fact record_declaration_filed()'s own P13 fix checks in
+                // SQL (jsonb `is distinct from`), computed here in
+                // TypeScript because this is the application-layer
+                // completeness check, not a database RPC (this
+                // codebase's own precedent for evidence completeness, an
+                // application-level check paired with a SQL-level one
+                // elsewhere -- see e.g. the audit_events catalog).
+                calculation_is_current:
+                  entry.calculation !== null &&
+                  checkCalculationCurrency(
+                    entry.calculation.determination,
+                    entry.line.emission_determination,
+                  ) === "CURRENT",
               }
             ),
           ),

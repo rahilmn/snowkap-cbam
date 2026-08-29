@@ -1558,5 +1558,224 @@ describe.skipIf(!localSupabaseReachable)(
         expect(declarationAfter?.filed_snapshot).toBeNull();
       },
     );
+
+    it(
+      "record_declaration_filed refuses INCOMPLETE when a member line is redetermined -- a genuinely different determination -- without being recalculated afterward (P13 adversarial audit, Path A: 'Re-determine emissions' without a follow-up recalculation)",
+      async () => {
+        const shipmentId =
+          await seedShipment(
+            `DECL-ISO-STALE-REDETERMINE-${runId}`,
+            ["5"],
+            2022,
+          );
+
+        const declarationId =
+          await createDeclaration(
+            2022,
+            [shipmentId],
+            "READY",
+          );
+
+        const { data: lineRows, error: lineError } =
+          await serviceClient
+            .from("shipment_lines")
+            .select("id")
+            .eq(
+              "shipment_id",
+              shipmentId,
+            );
+
+        if (lineError || !lineRows || lineRows.length !== 1) {
+          throw new Error(
+            `Failed to fetch the seeded line: ${lineError?.message}`,
+          );
+        }
+
+        const lineId =
+          lineRows[0]?.id;
+
+        // Path A: redetermine the line to a genuinely DIFFERENT
+        // determination (a different dataset_version and reason) WITHOUT
+        // recalculating -- exactly the "Re-determine emissions" workflow
+        // the "Stale -- newer data available" badge
+        // (app/(importer)/emissions/page.tsx) prompts an importer into.
+        // calculation_results is left completely untouched, still frozen
+        // against the ORIGINAL determination this shipment was seeded
+        // with (resolve-line-emissions.ts's redetermineLineEmissions
+        // updates shipment_lines.emission_determination alone -- zero
+        // references to calculation_results in that file).
+        const { error: redetermineError } =
+          await clientOwnerA
+            .from("shipment_lines")
+            .update(
+              {
+                emission_determination: {
+                  method: "DEFAULT",
+                  resolution: {
+                    dataset_version: "2026.2",
+                    reason: "OTHER_COUNTRIES_FALLBACK",
+                  },
+                },
+              },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        if (redetermineError) {
+          throw new Error(
+            `Failed to redetermine the line: ${redetermineError.message}`,
+          );
+        }
+
+        const { data } =
+          await clientOwnerA.rpc(
+            "record_declaration_filed",
+            {
+              p_declaration_id: declarationId,
+              p_filed_reference: "REF-STALE-REDETERMINE",
+            },
+          );
+
+        const row =
+          (data as RpcResultRow[] | null)?.[0];
+
+        expect(row).toEqual(
+          { result_status: "INCOMPLETE", result_declaration_id: null },
+        );
+
+        // A refused filing must leave no wreckage.
+        const { data: shipmentAfter } =
+          await serviceClient
+            .from("shipments")
+            .select("status")
+            .eq(
+              "id",
+              shipmentId,
+            )
+            .single();
+
+        expect(shipmentAfter?.status).toBe(
+          "READY",
+        );
+
+        const { data: declarationAfter } =
+          await serviceClient
+            .from("declarations")
+            .select("status, filed_snapshot")
+            .eq(
+              "id",
+              declarationId,
+            )
+            .single();
+
+        expect(declarationAfter?.status).toBe(
+          "READY",
+        );
+
+        expect(declarationAfter?.filed_snapshot).toBeNull();
+      },
+    );
+
+    it(
+      "record_declaration_filed refuses INCOMPLETE when a member line's quantity is edited after READY -- clearing emission_determination -- while its stale calculation_results row survives untouched (P13 adversarial audit, Path B: append-only calculation_results outliving a cleared determination)",
+      async () => {
+        const shipmentId =
+          await seedShipment(
+            `DECL-ISO-STALE-EDIT-${runId}`,
+            ["7"],
+            2023,
+          );
+
+        const declarationId =
+          await createDeclaration(
+            2023,
+            [shipmentId],
+            "READY",
+          );
+
+        const { data: lineRows, error: lineError } =
+          await serviceClient
+            .from("shipment_lines")
+            .select("id")
+            .eq(
+              "shipment_id",
+              shipmentId,
+            );
+
+        if (lineError || !lineRows || lineRows.length !== 1) {
+          throw new Error(
+            `Failed to fetch the seeded line: ${lineError?.message}`,
+          );
+        }
+
+        const lineId =
+          lineRows[0]?.id;
+
+        // Path B: manage-lines.ts's updateLine deliberately clears
+        // emission_determination on a quantity/cn_code edit -- a
+        // determination is frozen against the exact inputs it was
+        // computed for, so editing them invalidates it -- but the
+        // pre-edit calculation_results row survives untouched, since
+        // that table is append-only (no UPDATE/DELETE policy exists on
+        // it at all). Reproduced directly against shipment_lines here
+        // rather than through the TS layer (which needs a live
+        // regulatory classification round-trip), the same way the
+        // "emptied member" test above manipulates shipment_lines
+        // directly rather than going through removeLine.
+        const { error: editError } =
+          await clientOwnerA
+            .from("shipment_lines")
+            .update(
+              {
+                net_mass_tonnes: "20",
+                emission_determination: null,
+              },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        if (editError) {
+          throw new Error(
+            `Failed to edit the line: ${editError.message}`,
+          );
+        }
+
+        const { data } =
+          await clientOwnerA.rpc(
+            "record_declaration_filed",
+            {
+              p_declaration_id: declarationId,
+              p_filed_reference: "REF-STALE-EDIT",
+            },
+          );
+
+        const row =
+          (data as RpcResultRow[] | null)?.[0];
+
+        expect(row).toEqual(
+          { result_status: "INCOMPLETE", result_declaration_id: null },
+        );
+
+        const { data: declarationAfter } =
+          await serviceClient
+            .from("declarations")
+            .select("status, filed_snapshot")
+            .eq(
+              "id",
+              declarationId,
+            )
+            .single();
+
+        expect(declarationAfter?.status).toBe(
+          "READY",
+        );
+
+        expect(declarationAfter?.filed_snapshot).toBeNull();
+      },
+    );
   },
 );
