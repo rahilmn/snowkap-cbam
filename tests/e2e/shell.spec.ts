@@ -72,22 +72,28 @@ test.describe(
         ).toBeVisible();
 
         // All nine importer nav items are present (docs/plans/MASTER_PLAN.md §7).
+        // Items with a real route (components/shell/sidebar.tsx's
+        // IMPORTER_NAV `href`) render as a <Link> (role "link");
+        // not-yet-built items with no href render as a disabled
+        // placeholder <button> (role "button") -- matching each item to
+        // its actual rendered role here, rather than asserting "button"
+        // for all nine, is what makes this test describe reality.
         for (
-          const label of [
-            "Dashboard",
-            "Shipments",
-            "Emissions",
-            "Calculations",
-            "Suppliers",
-            "Installations",
-            "Audit",
-            "Reports",
-            "Declarations",
+          const { label, role } of [
+            { label: "Dashboard", role: "button" as const },
+            { label: "Shipments", role: "link" as const },
+            { label: "Emissions", role: "link" as const },
+            { label: "Calculations", role: "button" as const },
+            { label: "Suppliers", role: "link" as const },
+            { label: "Installations", role: "button" as const },
+            { label: "Audit", role: "link" as const },
+            { label: "Reports", role: "link" as const },
+            { label: "Declarations", role: "link" as const },
           ]
         ) {
           await expect(
             page.getByRole(
-              "button",
+              role,
               { name: label, exact: true },
             ),
           ).toBeVisible();
