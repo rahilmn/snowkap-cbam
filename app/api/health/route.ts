@@ -12,6 +12,10 @@ import {
   log,
 } from "../../../src/infrastructure/observability/logger";
 
+import {
+  checkActiveDefaultEmissionValuesDataset,
+} from "../../../src/application/regulatory/check-active-default-emission-values-dataset";
+
 export const dynamic =
   "force-dynamic";
 
@@ -43,6 +47,16 @@ interface HealthCheckResult {
  * one ACTIVE DEFAULT_EMISSION_VALUES dataset. It does not verify full
  * regulatory correctness (that is pnpm regulatory:verify's job) --
  * only that the shape a healthy app depends on is present.
+ *
+ * The dataset-invariant query itself lives in
+ * checkActiveDefaultEmissionValuesDataset
+ * (src/application/regulatory/), shared with app/status/page.tsx's P10
+ * trust surface, so the two screens can never quietly disagree about
+ * what "ok" means here -- this route still owns the service-role client
+ * construction, the database-reachability mapping, and the
+ * ok/degraded + 200/503 response shape, none of which the status page
+ * needs (it reads through the caller's own session-scoped client
+ * instead, per its own file's doc comment).
  */
 export async function GET(): Promise<NextResponse<HealthCheckResult>> {
   const gitSha =
@@ -69,51 +83,29 @@ export async function GET(): Promise<NextResponse<HealthCheckResult>> {
     const supabase =
       getSupabaseClient();
 
-    const {
-      data,
-      error,
-    } = await supabase
-      .from(
-        "regulatory_datasets",
-      )
-      .select(
-        "id",
-      )
-      .eq(
-        "dataset_type",
-        "DEFAULT_EMISSION_VALUES",
-      )
-      .eq(
-        "status",
-        "ACTIVE",
-      )
-      .limit(
-        2,
+    const datasetCheck =
+      await checkActiveDefaultEmissionValuesDataset(
+        supabase,
       );
 
-    if (error) {
-      result.checks.database =
-        "error";
+    // Status vocabulary is shared byte-for-byte with
+    // checkActiveDefaultEmissionValuesDataset's own return type on
+    // purpose (see that function's doc comment) -- this assignment is
+    // the entire mapping.
+    result.checks.active_regulatory_dataset =
+      datasetCheck.status;
 
+    if (datasetCheck.status === "error") {
       // The dataset invariant was never actually checked -- it must not
       // default to "ok", or a broken deploy reads as fully healthy on
       // this specific field even though this is exactly the outage the
       // check exists to surface.
-      result.checks.active_regulatory_dataset =
+      result.checks.database =
         "error";
 
       result.status =
         "degraded";
-    } else if ((data ?? []).length === 0) {
-      result.checks.active_regulatory_dataset =
-        "missing";
-
-      result.status =
-        "degraded";
-    } else if ((data ?? []).length > 1) {
-      result.checks.active_regulatory_dataset =
-        "duplicate";
-
+    } else if (datasetCheck.status !== "ok") {
       result.status =
         "degraded";
     }

@@ -1,6 +1,9 @@
 import {
+  Info,
   LogOut,
 } from "lucide-react";
+
+import Link from "next/link";
 
 import {
   Wordmark,
@@ -63,6 +66,28 @@ export function Topbar(
         <CommandPaletteTrigger />
 
         <ThemeToggle />
+
+        {/*
+          Master plan §27 screen 6 ("System/status") is filed under
+          "Shared/auth", not either experience's own nav (IMPORTER_NAV/
+          PRODUCER_NAV, sidebar.tsx) -- so it lives here, next to the
+          other cross-experience/account-level controls (sign-out
+          below), rather than forced into one experience's primary nav.
+          Always visible (not gated on organizationName like sign-out
+          is): unlike sign-out, this link is meaningful even for a
+          signed-in user who hasn't finished onboarding into an org yet.
+        */}
+        <Link
+          href="/status"
+          aria-label="System status"
+          title="System status"
+          className="flex size-8 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--color-brand-100)] hover:text-[var(--color-brand-800)] focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          <Info
+            className="size-4"
+            aria-hidden="true"
+          />
+        </Link>
 
         {organizationName ? (
           <form action={signOutAction}>
