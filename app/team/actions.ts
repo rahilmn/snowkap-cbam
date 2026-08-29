@@ -83,6 +83,9 @@ function messageFor(
     case "LAST_OWNER":
       return "This organization must always have at least one OWNER.";
 
+    case "ONLY_OWNER_CAN_GRANT_OWNERSHIP":
+      return "Only an OWNER can grant OWNER to another member.";
+
     case "MEMBERSHIP_NOT_FOUND":
       return "That member no longer exists.";
 
@@ -223,7 +226,7 @@ export async function changeRoleAction(
   const result =
     await changeMemberRole(
       supabase,
-      orgSummary.context.org_id,
+      orgSummary.context,
       parsed.data.membershipId as never,
       parsed.data.role,
     );

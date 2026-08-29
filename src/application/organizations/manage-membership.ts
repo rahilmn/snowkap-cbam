@@ -21,6 +21,10 @@ import type {
 } from "../../domain/shared/ids";
 
 import type {
+  OrgContext,
+} from "./org-context";
+
+import type {
   IsoTimestamp,
 } from "../../domain/shared/reporting-period";
 
@@ -80,10 +84,13 @@ function toMembership(
  */
 export async function changeMemberRole(
   supabase: SupabaseClient,
-  orgId: OrganizationId,
+  context: OrgContext,
   membershipId: MembershipId,
   newRole: MembershipRole,
 ): Promise<ManageMembershipResult> {
+  const orgId =
+    context.org_id;
+
   const { data: rows, error: fetchError } =
     await supabase
       .from("memberships")
@@ -107,6 +114,7 @@ export async function changeMemberRole(
       memberships,
       membershipId,
       newRole,
+      context.role,
     );
 
   if (invariantResult.status === "REJECTED") {

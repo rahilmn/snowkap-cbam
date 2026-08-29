@@ -188,6 +188,18 @@ function mockSupabase(
 const orgId =
   "org-1" as never;
 
+// changeMemberRole now takes a full OrgContext (2026-08-29, P13 audit
+// fix -- only an OWNER may grant OWNER to someone else). Role "OWNER"
+// matches this file's own `twoOwners`/`oneOwnerOneMember` fixtures, so
+// existing demote-only assertions below stay valid unchanged.
+const ownerContext =
+  {
+    org_id: orgId,
+    user_id: "actor-1",
+    role: "OWNER",
+    capabilities: ["IMPORTER_DECLARANT"],
+  } as never;
+
 const twoOwners =
   {
     data: [
@@ -268,7 +280,7 @@ describe(
             mockSupabase(
               { selectResult: twoOwners },
             ),
-            orgId,
+            ownerContext,
             "m-2" as never,
             "ADMIN",
           );
@@ -293,7 +305,7 @@ describe(
               },
             },
           ),
-          orgId,
+          ownerContext,
           "m-2" as never,
           "ADMIN",
         );
@@ -326,7 +338,7 @@ describe(
         const result =
           await changeMemberRole(
             supabase,
-            orgId,
+            ownerContext,
             "m-1" as never,
             "MEMBER",
           );
@@ -350,7 +362,7 @@ describe(
                 },
               },
             ),
-            orgId,
+            ownerContext,
             "m-2" as never,
             "ADMIN",
           );
@@ -372,7 +384,7 @@ describe(
                 updateError: { message: "db error" },
               },
             ),
-            orgId,
+            ownerContext,
             "m-2" as never,
             "ADMIN",
           );
@@ -406,7 +418,7 @@ describe(
                 },
               },
             ),
-            orgId,
+            ownerContext,
             "m-2" as never,
             "ADMIN",
           );
@@ -416,6 +428,53 @@ describe(
         );
 
         expect(auditCalled).toBe(false);
+      },
+    );
+
+    // 2026-08-29 (P13 audit finding, live-reproduced against real
+    // Postgres): an ADMIN could self-promote or promote a confederate
+    // to OWNER, then demote the real OWNER (now legal, since a second
+    // OWNER exists) -- permanently locking the founder out of
+    // org-settings' danger zone. Fixed at the domain invariant
+    // (invariants.ts's changeMembershipRole, now caller-role-aware);
+    // this proves the application layer actually threads the caller's
+    // real role through rather than trusting anything client-supplied.
+
+    it(
+      "rejects an ADMIN granting OWNER to another member, without persisting",
+      async () => {
+        let updateCalled = false;
+
+        const adminContext =
+          {
+            org_id: orgId,
+            user_id: "actor-1",
+            role: "ADMIN",
+            capabilities: ["IMPORTER_DECLARANT"],
+          } as never;
+
+        const result =
+          await changeMemberRole(
+            mockSupabase(
+              {
+                selectResult: oneOwnerOneMember,
+                onAuditInsert: () => {
+                  updateCalled = true;
+                },
+              },
+            ),
+            adminContext,
+            "m-2" as never,
+            "OWNER",
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "ONLY_OWNER_CAN_GRANT_OWNERSHIP" },
+        );
+
+        expect(updateCalled).toBe(
+          false,
+        );
       },
     );
   },

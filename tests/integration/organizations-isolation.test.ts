@@ -1158,11 +1158,21 @@ describe.skipIf(!localSupabaseReachable)(
                 );
 
               // changeMemberRole: manage-membership.ts:121-134 before
-              // this fix.
+              // this fix. Now takes a full OrgContext (2026-08-29, P13
+              // audit fix -- only an OWNER may grant OWNER) -- the
+              // attacker's real role (MEMBER) is what RLS itself
+              // enforces against below; this context object doesn't
+              // change what's under test here (newRole "ADMIN", not
+              // "OWNER", never reaches the new caller-role check).
               const changeRoleResult =
                 await changeMemberRole(
                   clientAttacker,
-                  freshOrgId as never,
+                  {
+                    org_id: freshOrgId,
+                    user_id: attackerUser.user.id,
+                    role: "MEMBER",
+                    capabilities: ["IMPORTER_DECLARANT"],
+                  } as never,
                   targetMembershipId as never,
                   "ADMIN",
                 );

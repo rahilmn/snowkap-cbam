@@ -65,6 +65,7 @@ describe(
             [owner1, owner2],
             owner1.id,
             "ADMIN",
+            "OWNER",
           );
 
         expect(
@@ -101,6 +102,7 @@ describe(
             [soleOwner],
             soleOwner.id,
             "ADMIN",
+            "OWNER",
           );
 
         expect(
@@ -143,6 +145,7 @@ describe(
             [orgAOwner, orgBOwner],
             orgAOwner.id,
             "MEMBER",
+            "OWNER",
           );
 
         expect(
@@ -180,6 +183,7 @@ describe(
             [owner, member],
             member.id,
             "ADMIN",
+            "OWNER",
           );
 
         expect(
@@ -198,6 +202,7 @@ describe(
             [],
             "missing" as Membership["id"],
             "ADMIN",
+            "OWNER",
           );
 
         expect(
@@ -208,6 +213,129 @@ describe(
             reason: "MEMBERSHIP_NOT_FOUND",
           },
         );
+      },
+    );
+
+    // 2026-08-29 (P13 audit finding, live-reproduced against real
+    // Postgres): an ADMIN could promote a confederate MEMBER to OWNER,
+    // then demote the real OWNER (now legal, since a second OWNER
+    // exists) -- permanently locking the founding OWNER out of
+    // org-settings' danger zone. isLastActiveOwner alone never caught
+    // this: it only blocks a change that would leave zero active
+    // owners, never one that GRANTS ownership in the first place.
+
+    it(
+      "rejects an ADMIN granting OWNER to another member",
+      () => {
+        const admin =
+          membership(
+            {
+              id: "m-1" as Membership["id"],
+              role: "ADMIN",
+            },
+          );
+
+        const confederate =
+          membership(
+            {
+              id: "m-2" as Membership["id"],
+              user_id: "user-2" as Membership["user_id"],
+              role: "MEMBER",
+            },
+          );
+
+        const result =
+          changeMembershipRole(
+            [admin, confederate],
+            confederate.id,
+            "OWNER",
+            admin.role,
+          );
+
+        expect(
+          result,
+        ).toEqual(
+          {
+            status: "REJECTED",
+            reason: "ONLY_OWNER_CAN_GRANT_OWNERSHIP",
+          },
+        );
+      },
+    );
+
+    it(
+      "rejects an ADMIN self-promoting to OWNER",
+      () => {
+        const admin =
+          membership(
+            {
+              id: "m-1" as Membership["id"],
+              role: "ADMIN",
+            },
+          );
+
+        const result =
+          changeMembershipRole(
+            [admin],
+            admin.id,
+            "OWNER",
+            admin.role,
+          );
+
+        expect(
+          result,
+        ).toEqual(
+          {
+            status: "REJECTED",
+            reason: "ONLY_OWNER_CAN_GRANT_OWNERSHIP",
+          },
+        );
+      },
+    );
+
+    it(
+      "allows an OWNER to grant OWNER to another member",
+      () => {
+        const owner =
+          membership(
+            {
+              id: "m-1" as Membership["id"],
+              role: "OWNER",
+            },
+          );
+
+        const member =
+          membership(
+            {
+              id: "m-2" as Membership["id"],
+              user_id: "user-2" as Membership["user_id"],
+              role: "MEMBER",
+            },
+          );
+
+        const result =
+          changeMembershipRole(
+            [owner, member],
+            member.id,
+            "OWNER",
+            owner.role,
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "OK",
+        );
+
+        if (result.status === "OK") {
+          expect(
+            result.memberships.find(
+              (m) => m.id === member.id,
+            )?.role,
+          ).toBe(
+            "OWNER",
+          );
+        }
       },
     );
   },
@@ -356,6 +484,7 @@ describe(
             [activeOwner, deactivatedOwner],
             activeOwner.id,
             "ADMIN",
+            "OWNER",
           );
 
         expect(
@@ -400,6 +529,7 @@ describe(
             [deactivatedOwner],
             deactivatedOwner.id,
             "MEMBER",
+            "OWNER",
           );
 
         expect(

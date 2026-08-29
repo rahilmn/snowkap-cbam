@@ -15,7 +15,8 @@ export type MembershipInvariantRejectionReason =
   | "LAST_OWNER"
   | "MEMBERSHIP_NOT_FOUND"
   | "ALREADY_DEACTIVATED"
-  | "NOT_DEACTIVATED";
+  | "NOT_DEACTIVATED"
+  | "ONLY_OWNER_CAN_GRANT_OWNERSHIP";
 
 export type ChangeMembershipRoleResult =
   | { status: "OK"; memberships: Membership[] }
@@ -78,11 +79,24 @@ function isLastActiveOwner(
  * Changes one membership's role, refusing a change that would leave its
  * organization with no OWNER. Ownership is counted per-org: a sole OWNER
  * in a different organization never satisfies this org's minimum.
+ *
+ * `callerRole` is the ACTING caller's own current role (never trust a
+ * role embedded in the request itself) -- required so this function can
+ * enforce a second invariant: only an existing OWNER may grant OWNER to
+ * someone else. 2026-08-29 (P13 audit finding, live-reproduced against
+ * real Postgres): without this, an ADMIN could promote a confederate (or
+ * themselves) to OWNER -- isLastActiveOwner's own guard only fires when
+ * a change would leave an org with ZERO active owners, so it never
+ * blocked GRANTING ownership, only removing the last one. Once a second
+ * OWNER exists via that path, the org's real founding OWNER can then be
+ * demoted (now legal, since another OWNER exists), permanently locking
+ * them out of org-settings' danger zone.
  */
 export function changeMembershipRole(
   memberships: Membership[],
   membershipId: MembershipId,
   newRole: MembershipRole,
+  callerRole: MembershipRole,
 ): ChangeMembershipRoleResult {
   const target =
     memberships.find(
@@ -93,6 +107,16 @@ export function changeMembershipRole(
     return {
       status: "REJECTED",
       reason: "MEMBERSHIP_NOT_FOUND",
+    };
+  }
+
+  if (
+    newRole === "OWNER" &&
+    callerRole !== "OWNER"
+  ) {
+    return {
+      status: "REJECTED",
+      reason: "ONLY_OWNER_CAN_GRANT_OWNERSHIP",
     };
   }
 
