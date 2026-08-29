@@ -12,15 +12,29 @@ import {
 } from "@supabase/supabase-js";
 
 // Adversarial standing suite for the P13 release-blocker remediation
-// (supabase/migrations/20260829500000_p13_review_shipment_line_determination_forgery_fix.sql)
-// -- shipment_lines.emission_determination, the frozen regulatory
+// (supabase/migrations/20260829500000_..._forgery_fix.sql, replaced
+// wholesale by 20260829530000_..._forgery_fix_v2.sql) --
+// shipment_lines.emission_determination, the frozen regulatory
 // provenance snapshot every "Why this number?" render and filed
 // declaration trusts, was unvalidated JSON any org member could forge
-// via a direct PostgREST write, with zero audit trail. Live-reproduced
-// by the P13 final adversarial audit (against a real row this
-// migration's own author independently re-reproduced and confirmed
-// rejected before writing this suite -- see the migration's own header
-// comment). Same shape as tests/integration/emission-data-write-hardening.test.ts:
+// via a direct PostgREST write, with zero audit trail.
+//
+// This suite's FIRST version (against 20260829500000) was itself found
+// to be broken by an independent review: the v1 DB check's method gate
+// was inverted (anything that wasn't the literal string "DEFAULT" was
+// treated as "skip validation", including a MISSING "method" key --
+// while the real calculation engine treats a missing/non-ACTUAL method
+// as DEFAULT and computes it), the ACTUAL branch was entirely
+// unvalidated, and this suite's own 8th test asserted that gap as
+// INTENDED behavior rather than catching it. Every one of those
+// findings (F1-F10 in 20260829530000's header comment) was
+// independently re-reproduced live via rolled-back psql transactions
+// against the real local database before this rewrite, per CLAUDE.md's
+// "Adversarial / mutation-oriented testing against local Postgres"
+// section -- this file encodes those same reproductions as standing
+// regression tests.
+//
+// Same shape as tests/integration/emission-data-write-hardening.test.ts:
 // this suite exercises the RLS policy + trigger layer directly via raw
 // supabase-js client calls, never resolve-line-emissions.ts -- it is
 // deliberately testing the DB-layer backstop, the wall that stands even
@@ -29,7 +43,9 @@ import {
 // Uses two REAL, distinct rows from the live ACTIVE regulatory dataset
 // (queried dynamically, not hardcoded) rather than fabricated fixture
 // data -- default_emission_values is the protected regulatory dataset;
-// this suite reads it, never writes to it.
+// this suite reads it, never writes to it. A real, freshly-seeded
+// VERIFIED emission_data row is used the same way for the ACTUAL-method
+// coverage.
 
 const LOCAL_API_URL =
   process.env.SUPABASE_LOCAL_URL ??
@@ -106,7 +122,32 @@ function determinationFrom(
         total: { value: record.total_value, status: record.total_status, raw_source_value: record.total_value },
       },
       emission_unit: record.emission_unit,
-      trace: [],
+      // v2 (20260829530000, finding F3) rejects an empty trace -- must
+      // be a non-empty array to be accepted at all.
+      trace: [{ step: "EXACT_CN8_MATCH", outcome: "RESOLVED" }],
+    },
+  };
+}
+
+interface RealEmissionData {
+  id: string;
+  verification_status: string;
+  verifier_user_id: string;
+  emission_unit: string;
+  direct_specific: string;
+  indirect_specific: string;
+}
+
+function actualDeterminationFrom(
+  record: RealEmissionData,
+): Record<string, unknown> {
+  return {
+    method: "ACTUAL",
+    snapshot: {
+      emission_data_id: record.id,
+      verification: { status: record.verification_status, verifier_user_id: record.verifier_user_id },
+      emission_unit: record.emission_unit,
+      values: { direct_specific: record.direct_specific, indirect_specific: record.indirect_specific },
     },
   };
 }
@@ -137,6 +178,7 @@ describe.skipIf(!localSupabaseReachable)(
 
     let recordA: RealRecord;
     let recordB: RealRecord;
+    let realEmissionData: RealEmissionData;
 
     async function signInAnonClient(
       email: string,
@@ -361,6 +403,106 @@ describe.skipIf(!localSupabaseReachable)(
       }
 
       shipmentId = shipment.id;
+
+      // A REAL, VERIFIED emission_data row for the ACTUAL-method
+      // coverage below. The row's owning org is deliberately NOT
+      // importerOrgId -- the v2 validator function is SECURITY DEFINER
+      // precisely so it verifies "does a real row with these exact
+      // values exist" independent of the caller's own RLS visibility
+      // (see 20260829530000's header comment); this cross-org setup
+      // exercises exactly that.
+      const { data: producerOrg, error: producerOrgError } =
+        await serviceClient
+          .from("organizations")
+          .insert(
+            {
+              name: `Line Determination Hardening Producer ${runId}`,
+              slug: `line-determination-hardening-producer-${runId}`,
+              capabilities: ["PRODUCER_OPERATOR"],
+            },
+          )
+          .select("id")
+          .single();
+
+      if (producerOrgError || !producerOrg) {
+        throw new Error(
+          `Failed to create producer org: ${producerOrgError?.message}`,
+        );
+      }
+
+      const { data: operator, error: operatorError } =
+        await serviceClient
+          .from("operators")
+          .insert(
+            {
+              org_id: producerOrg.id,
+              provenance: "OPERATOR_PROVIDED",
+              name: `Hardening Operator ${runId}`,
+              country: "IN",
+            },
+          )
+          .select("id")
+          .single();
+
+      if (operatorError || !operator) {
+        throw new Error(
+          `Failed to create operator: ${operatorError?.message}`,
+        );
+      }
+
+      const { data: installation, error: installationError } =
+        await serviceClient
+          .from("installations")
+          .insert(
+            {
+              operator_id: operator.id,
+              org_id: producerOrg.id,
+              provenance: "OPERATOR_PROVIDED",
+              name: `Hardening Installation ${runId}`,
+              country: "IN",
+            },
+          )
+          .select("id")
+          .single();
+
+      if (installationError || !installation) {
+        throw new Error(
+          `Failed to create installation: ${installationError?.message}`,
+        );
+      }
+
+      const { data: emissionData, error: emissionDataError } =
+        await serviceClient
+          .from("emission_data")
+          .insert(
+            {
+              installation_id: installation.id,
+              entered_by_org_id: producerOrg.id,
+              cn_scope: [recordA.source_trade_code.replace(/\s+/g, "")],
+              reporting_period_kind: "ANNUAL",
+              reporting_period_year: 2026,
+              direct_specific: "0.10",
+              indirect_specific: "0.05",
+              emission_unit: "TCO2E_PER_TONNE",
+              methodology: "EU_METHOD",
+              verification_status: "VERIFIED",
+              verifier_user_id: memberId,
+              status: "ACTIVE",
+            },
+          )
+          .select(
+            "id, verification_status, verifier_user_id, emission_unit, direct_specific, indirect_specific",
+          )
+          .single();
+
+      if (emissionDataError || !emissionData) {
+        throw new Error(
+          `Failed to create emission_data: ${emissionDataError?.message}`,
+        );
+      }
+
+      realEmissionData =
+        emissionData as RealEmissionData;
     });
 
     afterAll(async () => {
@@ -504,6 +646,38 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "rejects the exact bypass an earlier version of this fix (20260829500000) let through: a determination with NO \"method\" key at all, carrying a fabricated dataset_version and total -- live-reproduced against 20260829500000 before this suite existed",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              {
+                emission_determination: {
+                  resolution: {
+                    dataset_id: recordA.dataset_id,
+                    dataset_version: "2099-totally-made-up",
+                    values: { total: { value: "0.001", status: "AVAILABLE" } },
+                  },
+                },
+              },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
       "rejects a real record's own values pasted under a completely invented record_identity",
       async () => {
         const lineId =
@@ -544,6 +718,224 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "rejects a real record's genuine identity and values paired with a fabricated narrative (wrong country claimed, invented reason, invented trace) -- these render verbatim in \"Why this number?\", exports, and audit payloads",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const forged =
+          determinationFrom(
+            recordA,
+          );
+
+        (forged.resolution as Record<string, unknown>).country_mapping =
+          { status: "MAPPED", regulatory_country_name: "FABRICATED_COUNTRY" };
+
+        (forged.resolution as Record<string, unknown>).reason =
+          "TOTALLY_MADE_UP_REASON";
+
+        (forged.resolution as Record<string, unknown>).trace =
+          [{ step: "FABRICATED", outcome: "Independently verified" }];
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "rejects a determination whose trace is an empty array -- an incomplete resolution narrative must not be accepted as though it were complete",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const forged =
+          determinationFrom(
+            recordA,
+          );
+
+        (forged.resolution as Record<string, unknown>).trace = [];
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "rejects structurally malformed determinations ({} and a bare array) instead of letting them through to crash the calculation engine later",
+      async () => {
+        const lineForEmpty =
+          await insertLine();
+
+        const emptyResult =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: {} },
+            )
+            .eq(
+              "id",
+              lineForEmpty,
+            );
+
+        expect(emptyResult.error).not.toBeNull();
+        expect(emptyResult.error?.code).toBe(
+          "42501",
+        );
+
+        const lineForArray =
+          await insertLine();
+
+        const arrayResult =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: [1, 2, 3] },
+            )
+            .eq(
+              "id",
+              lineForArray,
+            );
+
+        expect(arrayResult.error).not.toBeNull();
+        expect(arrayResult.error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "rejects a wholesale-fabricated ACTUAL determination -- invented emission_data_id, invented VERIFIED claim, invented values. A prior version of this fix (20260829500000) accepted this unconditionally; independently confirmed via live psql reproduction that it computed a 250x understatement before this fix existed",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              {
+                emission_determination: {
+                  method: "ACTUAL",
+                  snapshot: {
+                    emission_data_id: crypto.randomUUID(),
+                    verification: { status: "VERIFIED" },
+                    emission_unit: "TCO2E_PER_TONNE",
+                    values: { direct_specific: "0.0000001", indirect_specific: "0.0000001" },
+                  },
+                },
+              },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "accepts a genuine ACTUAL determination whose snapshot byte-matches a real, VERIFIED emission_data row, even from a different org (grant-authorization is the application layer's job; this check only verifies the claimed snapshot is not a forgery)",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: actualDeterminationFrom(realEmissionData) },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).toBeNull();
+
+        const { data: after } =
+          await serviceClient
+            .from("shipment_lines")
+            .select("emission_determination")
+            .eq(
+              "id",
+              lineId,
+            )
+            .single();
+
+        expect(
+          (after?.emission_determination as { method: string })
+            .method,
+        ).toBe(
+          "ACTUAL",
+        );
+      },
+    );
+
+    it(
+      "rejects a real emission_data row's identity paired with fabricated values (direct_specific tampered)",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const forged =
+          actualDeterminationFrom(
+            realEmissionData,
+          );
+
+        (
+          (forged.snapshot as Record<string, unknown>).values as Record<string, string>
+        ).direct_specific =
+          "999.999";
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
       "accepts a genuine redetermination to a different real regulatory record, and the change is unbypassably audited (attributed to the actual caller, not a system actor)",
       async () => {
         const lineId =
@@ -564,31 +956,51 @@ describe.skipIf(!localSupabaseReachable)(
 
         expect(error).toBeNull();
 
+        // insertLine seeded the line with recordA's determination
+        // already present (via the service client), which -- correctly,
+        // per finding F4 -- is itself now audited as an INSERT-time
+        // 'set' event. Filter specifically for the 'redetermined' event
+        // this test is actually about, rather than assuming this is the
+        // only audit row for the line.
         const { data: events } =
           await serviceClient
             .from("audit_events")
-            .select("event_type, actor_user_id, aggregate_id")
+            .select("event_type, actor_type, actor_user_id, payload")
             .eq(
               "aggregate_id",
               lineId,
             )
             .eq(
               "event_type",
-              "emission_determination.redetermined",
+              "shipment_line.updated",
+            )
+            .eq(
+              "payload->>change_kind",
+              "redetermined",
             );
 
         expect(events).toHaveLength(
           1,
         );
 
+        expect(events?.[0]?.actor_type).toBe(
+          "USER",
+        );
+
         expect(events?.[0]?.actor_user_id).toBe(
           memberId,
+        );
+
+        expect(
+          (events?.[0]?.payload as { change_kind: string }).change_kind,
+        ).toBe(
+          "redetermined",
         );
       },
     );
 
     it(
-      "writes emission_determination.set (not .redetermined) the first time a line's determination is written from null",
+      "audits change_kind 'set' the first time a line's determination is written from null, and 'cleared' when it is later wiped -- both under the DB trigger's own shipment_line.updated event_type (distinct from the application's own emission_determination.set/.redetermined names, per finding F10 -- a legitimate determination must not be double-counted on the Audit screen)",
       async () => {
         const lineId =
           await insertLine();
@@ -603,7 +1015,54 @@ describe.skipIf(!localSupabaseReachable)(
             lineId,
           );
 
+        await clientMember
+          .from("shipment_lines")
+          .update(
+            { emission_determination: null },
+          )
+          .eq(
+            "id",
+            lineId,
+          );
+
         const { data: events } =
+          await serviceClient
+            .from("audit_events")
+            .select("event_type, payload")
+            .eq(
+              "aggregate_id",
+              lineId,
+            )
+            .eq(
+              "event_type",
+              "shipment_line.updated",
+            )
+            .order(
+              "occurred_at",
+              { ascending: true },
+            );
+
+        expect(events).toHaveLength(
+          2,
+        );
+
+        expect(
+          (events?.[0]?.payload as { change_kind: string }).change_kind,
+        ).toBe(
+          "set",
+        );
+
+        expect(
+          (events?.[1]?.payload as { change_kind: string }).change_kind,
+        ).toBe(
+          "cleared",
+        );
+
+        // Neither the application's own event names nor a duplicate
+        // shipment_line.updated row should appear -- this suite bypasses
+        // resolve-line-emissions.ts entirely, so only the DB trigger's
+        // own writes should exist.
+        const { data: legacyNamedEvents } =
           await serviceClient
             .from("audit_events")
             .select("event_type")
@@ -611,13 +1070,13 @@ describe.skipIf(!localSupabaseReachable)(
               "aggregate_id",
               lineId,
             )
-            .eq(
+            .in(
               "event_type",
-              "emission_determination.set",
+              ["emission_determination.set", "emission_determination.redetermined"],
             );
 
-        expect(events).toHaveLength(
-          1,
+        expect(legacyNamedEvents).toHaveLength(
+          0,
         );
       },
     );
@@ -661,6 +1120,56 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "audits a genuine INSERT-time determination (a line created already carrying one), not only an UPDATE-time one",
+      async () => {
+        const { data: inserted, error: insertError } =
+          await clientMember
+            .from("shipment_lines")
+            .insert(
+              {
+                shipment_id: shipmentId,
+                org_id: importerOrgId,
+                line_number: Math.floor(
+                  Math.random() * 1_000_000,
+                ),
+                cn_code: recordA.source_trade_code.replace(/\s+/g, ""),
+                cn_code_level: "CN8",
+                origin_country: "IN",
+                net_mass_tonnes: "10",
+                emission_determination: determinationFrom(recordA),
+              },
+            )
+            .select("id")
+            .single();
+
+        expect(insertError).toBeNull();
+
+        const { data: events } =
+          await serviceClient
+            .from("audit_events")
+            .select("event_type, payload")
+            .eq(
+              "aggregate_id",
+              inserted?.id as string,
+            )
+            .eq(
+              "event_type",
+              "shipment_line.updated",
+            );
+
+        expect(events).toHaveLength(
+          1,
+        );
+
+        expect(
+          (events?.[0]?.payload as { change_kind: string }).change_kind,
+        ).toBe(
+          "set",
+        );
+      },
+    );
+
+    it(
       "does not audit a no-op write that leaves emission_determination unchanged",
       async () => {
         const lineId =
@@ -686,45 +1195,94 @@ describe.skipIf(!localSupabaseReachable)(
               "aggregate_id",
               lineId,
             )
-            .in(
+            .eq(
               "event_type",
-              ["emission_determination.set", "emission_determination.redetermined"],
+              "shipment_line.updated",
             );
 
-        // The INSERT already carried the determination (no trigger fires
-        // on INSERT), and this UPDATE is a byte-identical no-op --
-        // Postgres's own `is distinct from` correctly treats structurally
-        // identical jsonb as unchanged, so no audit row should exist.
+        // The INSERT already carried the determination (audited once,
+        // change_kind 'set'), and this UPDATE is a byte-identical no-op
+        // -- Postgres's own `is distinct from` correctly treats
+        // structurally identical jsonb as unchanged, so no SECOND audit
+        // row should exist.
         expect(events).toHaveLength(
-          0,
+          1,
         );
       },
     );
 
     it(
-      "leaves an ACTUAL-method determination alone -- this migration's content check is DEFAULT-only, ACTUAL integrity is emission_data's own anti-join's job",
+      "does not crash and attributes actor_type SYSTEM when a determination changes with no end-user session present (a service-role backfill/import/support script)",
       async () => {
-        const lineId =
-          await insertLine();
+        const { data: inserted, error: insertError } =
+          await serviceClient
+            .from("shipment_lines")
+            .insert(
+              {
+                shipment_id: shipmentId,
+                org_id: importerOrgId,
+                line_number: Math.floor(
+                  Math.random() * 1_000_000,
+                ),
+                cn_code: recordA.source_trade_code.replace(/\s+/g, ""),
+                cn_code_level: "CN8",
+                origin_country: "IN",
+                net_mass_tonnes: "10",
+                emission_determination: determinationFrom(recordA),
+              },
+            )
+            .select("id")
+            .single();
 
-        const { error } =
-          await clientMember
+        expect(insertError).toBeNull();
+
+        const { error: clearError } =
+          await serviceClient
             .from("shipment_lines")
             .update(
-              {
-                emission_determination: {
-                  method: "ACTUAL",
-                  emission_data_id: crypto.randomUUID(),
-                  snapshot: { anything: "goes-here-for-this-test" },
-                },
-              },
+              { emission_determination: null },
             )
             .eq(
               "id",
-              lineId,
+              inserted?.id as string,
             );
 
-        expect(error).toBeNull();
+        expect(clearError).toBeNull();
+
+        const { data: events } =
+          await serviceClient
+            .from("audit_events")
+            .select("actor_type, actor_user_id, payload")
+            .eq(
+              "aggregate_id",
+              inserted?.id as string,
+            )
+            .eq(
+              "event_type",
+              "shipment_line.updated",
+            )
+            .order(
+              "occurred_at",
+              { ascending: true },
+            );
+
+        expect(events).toHaveLength(
+          2,
+        );
+
+        expect(events?.every((e) => e.actor_type === "SYSTEM")).toBe(
+          true,
+        );
+
+        expect(events?.every((e) => e.actor_user_id === null)).toBe(
+          true,
+        );
+
+        expect(
+          (events?.[1]?.payload as { change_kind: string }).change_kind,
+        ).toBe(
+          "cleared",
+        );
       },
     );
   },

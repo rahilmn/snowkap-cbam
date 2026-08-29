@@ -167,7 +167,10 @@ function determinationFrom(
         total: { value: record.total_value, status: record.total_status, raw_source_value: record.total_value },
       },
       emission_unit: record.emission_unit,
-      trace: [],
+      // Non-empty per supabase/migrations/20260829530000 (P13 review
+      // iteration 2, finding F3) -- an empty trace is now rejected as
+      // an incomplete resolution narrative.
+      trace: [{ step: "EXACT_CN8_MATCH", outcome: "RESOLVED" }],
     },
   };
 }
