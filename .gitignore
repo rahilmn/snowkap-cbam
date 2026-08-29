@@ -21,6 +21,17 @@ next-env.d.ts
 # Supabase local state
 supabase/.temp/
 
+# P11 perf-verification scratch credentials -- seed-p11-perf-setup.ts
+# (scripts/perf/) writes the org id, user id, and a generated
+# email/password for its throwaway local-only perf-test user to this file
+# so the companion bulk-seed/measurement scripts can pick them up; see
+# that script's own header comment ("scratch/dev-only... deletes itself
+# when the run is done"). The password is synthetic and the target is
+# always local Postgres, not a real credential for a real account, but it
+# still has no business being swept into a commit by a future `git add
+# scripts/perf/` the way .env already can't be.
+scripts/perf/.p11-perf-context.json
+
 # Python
 __pycache__/
 *.py[cod]

@@ -1,11 +1,13 @@
 name: CI
 
 # Public PR gate: must pass with no secrets configured, on any fresh
-# clone/fork. Runs: install -> typecheck -> unit/integration tests
-# (Supabase-dependent suites self-skip, see
-# tests/integration/module-load.test.ts) -> build -> Playwright smoke
-# suite against that build (the health-check smoke test also self-skips
-# without credentials, see tests/e2e/shell.spec.ts) -> secret scan.
+# clone/fork. Runs: install -> typecheck -> start a local, disposable
+# Supabase stack (so the cross-org isolation suites run for real
+# instead of self-skipping -- see the "Start local Supabase" step's
+# own comment, P11 finding #11) -> unit/integration tests -> stop that
+# stack -> build -> Playwright smoke suite against that build (the
+# health-check smoke test also self-skips without credentials, see
+# tests/e2e/shell.spec.ts) -> secret scan.
 # pnpm regulatory:verify is NOT run here — it requires a Python
 # environment plus live database credentials (SUPABASE_DB_PASSWORD) and
 # remains a locally-run / manually-dispatched gate per
@@ -44,8 +46,52 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # 2026-08-29 (P11 mandatory security review, finding #11,
+      # SHOULD-FIX, confirmed live): the 89 tests every one of P11's
+      # own reviewers found skipped in `pnpm test` are precisely
+      # tests/integration/{organizations,shipments,sharing-grants,
+      # declarations,shared-data-*}-isolation.test.ts -- the standing
+      # regression coverage every prior phase's review wrote to lock
+      # in its own found-and-fixed cross-org bug (master plan §13:
+      # "a standing test, not an assumption... from P3 on every new
+      # port/policy"). They self-skip cleanly (describe.skipIf) when
+      # local Supabase isn't reachable at 127.0.0.1:54321, and this
+      # workflow deliberately provided none -- so nothing here would
+      # ever catch a regression of any P3/P4/P7/P9/P10/P11 isolation
+      # fix. `supabase` is already a package.json devDependency
+      # (`pnpm exec supabase`, no separate setup action needed);
+      # `start` applies every migration in supabase/migrations/ plus
+      # supabase/seed.sql (the local-only base-table grants, per that
+      # file's own header comment) against a fresh local Postgres --
+      # this needs no secrets: the isolation suites already default to
+      # the FIXED, publicly-documented local demo JWTs
+      # `supabase start` always prints for a fresh project (see e.g.
+      # organizations-isolation.test.ts's own header comment for why
+      # those are not secrets), so this stays a true "no secrets
+      # configured" public PR gate.
+      #
+      # The explicit health-check + `exit 1` below (rather than just
+      # trusting `supabase start`'s own exit code) closes the second
+      # half of this finding's suggested fix: if the stack ever fails
+      # to actually become reachable for any reason, this step fails
+      # LOUDLY, rather than the isolation suites silently skipping
+      # again and the job staying green regardless.
+      - name: Start local Supabase (so cross-org isolation suites run for real)
+        run: |
+          set -euo pipefail
+          pnpm exec supabase start
+          if ! curl -sf --max-time 5 http://127.0.0.1:54321/auth/v1/health >/dev/null; then
+            echo "::error::Local Supabase did not come up reachable at 127.0.0.1:54321 -- the cross-org isolation suites would silently self-skip instead of running. Failing the job rather than letting that happen quietly."
+            exit 1
+          fi
+          echo "Local Supabase is reachable -- cross-org isolation suites will run."
+
       - name: Test
         run: pnpm test
+
+      - name: Stop local Supabase
+        if: always()
+        run: pnpm exec supabase stop
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
@@ -71,6 +117,30 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+      # Dependency security audit -- master plan §31 CI/CD pipeline lists
+      # this exact stage, in this exact position (after the Playwright
+      # smoke suite, before the secret scan): "dependency audit (advisory
+      # -> blocking by P11)". We are at P11, so it is now the blocking
+      # form, not the advisory form: --audit-level high means pnpm still
+      # prints moderate/low/info advisories (so they stay visible in the
+      # log) but only exits non-zero -- failing this job -- on a HIGH or
+      # CRITICAL finding. Ratcheting the threshold down to moderate is a
+      # separate, deliberate decision for a later phase, not a side
+      # effect of adding this step.
+      #
+      # Known open finding as of 2026-08-29 (does not block: severity is
+      # moderate, below this gate's threshold): GHSA-w5hq-g745-h8pq (uuid
+      # <11.1.1, "missing buffer bounds check in v3/v5/v6 when buf is
+      # provided"), pulled in transitively via exceljs@4.4.0 -> uuid@8.3.2.
+      # exceljs 4.4.0 is itself the latest published release and still
+      # pins "uuid": "^8.3.0" -- there is no upstream exceljs release that
+      # clears this, and forcing a uuid bump via a pnpm override would
+      # pin exceljs to a uuid major it was never tested against, which is
+      # out of scope for a routine dependency-audit pass. Re-evaluate when
+      # exceljs ships a release that updates its uuid dependency.
+      - name: Dependency security audit (advisory -> blocking by P11)
+        run: pnpm audit --audit-level high
+
       - name: Scan for committed secrets
         run: |
           set -euo pipefail
@@ -82,13 +152,57 @@ jobs:
           # assignments. False positives are expected to be rare given the
           # project's env-indirection convention (see .env.example); a
           # true hit must fail the build.
-          PATTERN='eyJ[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|SUPABASE_(SERVICE_ROLE_KEY|DB_PASSWORD|ANON_KEY)\s*=\s*[^$[:space:]"'"'"']'
+          #
+          # P11 secrets-hygiene audit (docs/plans/MASTER_PLAN.md §11/§32/§41)
+          # tightened this beyond the original P4 version -- confirmed by
+          # constructing fake secret-shaped strings and checking them against
+          # the old pattern before changing it, per that audit's own bar:
+          #   - SUPABASE_(SERVICE_ROLE_KEY|DB_PASSWORD|ANON_KEY)=<value> only
+          #     matched an UNQUOTED literal ([^$[:space:]"'] excluded the
+          #     quote itself as the first character), so
+          #     SUPABASE_DB_PASSWORD="hunter2..." or a JSON
+          #     "SUPABASE_SERVICE_ROLE_KEY": "hunter2..." pair -- exactly the
+          #     shape a YAML/JSON config or a shell script would use -- sailed
+          #     through uncaught. Now an optional quote (after the name, and
+          #     before the value) and ':' as an alternative to '=' are both
+          #     accepted, so quoted and JSON/YAML-style assignments match too.
+          #   - Newer Supabase "publishable"/"secret" API keys (sb_publishable_*
+          #     / sb_secret_*, the replacement for the legacy anon/service_role
+          #     JWTs -- see .env.example's own "publishable" phrasing) had no
+          #     shape check at all; added one.
+          #   - A raw postgres://user:password@host connection string --
+          #     exactly what SUPABASE_DB_PASSWORD's value lives inside once
+          #     combined with supabase/.temp/pooler-url, the way
+          #     scripts/regulatory/verify-definitive-regulatory-data.py's
+          #     connect() does at runtime (passed to psycopg separately, never
+          #     concatenated into logged text there -- but nothing enforced
+          #     the same discipline for some future script or doc) -- was not
+          #     checked independently of the SUPABASE_DB_PASSWORD= name; added
+          #     a name-independent postgres(ql)://...:...@ check.
+          # Re-verified after the change that every one of the fake strings
+          # above now matches, and that the pattern still matches every case
+          # the original one did.
+          PATTERN='eyJ[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|sb_(publishable|secret)_[A-Za-z0-9_-]{10,}|SUPABASE_(SERVICE_ROLE_KEY|DB_PASSWORD|ANON_KEY)"?\s*[:=]\s*['"'"'"]?[^$[:space:]"'"'"']|postgres(ql)?://[^[:space:]"'"'"'/]+:[^[:space:]"'"'"'/@]{6,}@'
 
-          if git grep -InE "$PATTERN" -- . \
+          # The one intentional exception: the fixed local-only Supabase CLI
+          # demo JWTs (iss "supabase-demo") used as test fixtures in
+          # tests/integration/*-isolation.test.ts (see
+          # organizations-isolation.test.ts's header comment -- "the fixed
+          # local demo JWTs -- not secrets"). They are identical across every
+          # local Supabase install everywhere and are not derived from this
+          # project's own credentials, so they are allow-listed by this exact
+          # payload marker rather than by excluding the whole test directory
+          # (which would also hide a real secret accidentally added there).
+          KNOWN_SAFE_LOCAL_DEMO_JWT='eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6'
+
+          MATCHES="$(git grep -InE "$PATTERN" -- . \
               ':!pnpm-lock.yaml' \
               ':!*.md' \
-              ':!.github/workflows/ci.yml'
-          then
+              ':!.github/workflows/ci.yml' \
+            | grep -vF "$KNOWN_SAFE_LOCAL_DEMO_JWT" || true)"
+
+          if [ -n "$MATCHES" ]; then
+            echo "$MATCHES"
             echo "::error::Possible secret literal found in a tracked file (see matches above)."
             exit 1
           fi
