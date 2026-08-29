@@ -31,7 +31,7 @@ These are **protected**, per
   types)
 - `src/infrastructure/supabase/client.ts`
 - The five regulatory-foundation migrations, applied (**not** every file
-  matching `supabase/migrations/*.sql` — that glob now also matches ~35
+  matching `supabase/migrations/*.sql` — that glob now also matches ~39
   unrelated product-schema migrations from P3 onward, which are not
   protected):
   `20260826133116_create_regulatory_foundation.sql`,

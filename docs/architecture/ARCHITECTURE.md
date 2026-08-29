@@ -177,9 +177,20 @@ extension of the "folders, not packages" decision above: one
 `tsconfig.json`, one deploy unit, zero import churn in the protected
 regulatory files. Infrastructure modules that must never execute in a
 browser bundle are guarded with the `server-only` import (added when
-the Next.js app lands), and the layering test's infrastructure
-restriction already prevents `app/` code from reaching infrastructure
-directly — it goes through application services.
+the Next.js app lands). `app/**`/`components/**` reach
+`src/infrastructure/**` only through an application service, with two
+sanctioned, narrow exceptions the layering test explicitly allows
+rather than blocks: `app/api/**` route handlers (health checks,
+uploads/downloads, webhooks), and a fixed five-entry allowlist of
+infrastructure entry points Server Actions/Components may import
+directly (`UI_ALLOWED_INFRASTRUCTURE_IMPORTS` in
+`tests/architecture/layering-rules.ts`) —
+`src/infrastructure/supabase/{server-client,browser-client,admin-client}`,
+`src/infrastructure/regulatory/get-regulatory-repository`, and
+`src/infrastructure/rate-limit/rate-limiter`. See CLAUDE.md's
+Architecture section for the same list; this is sanctioned, existing
+practice (every `app/(auth)/actions.ts`-style Server Action uses it),
+not a gap.
 
 **If a different web stack were chosen instead** (the master plan
 also evaluated a Fastify API + separate SPA), nothing above this
@@ -247,7 +258,7 @@ actor, into an org they already belong to. Every read service that
 queries `audit_events` (`listSharedDataStatus`, `listAuditEvents`)
 still applies its own explicit `org_id` filter on top of this policy —
 Wall 1 (application) never depends on Wall 2 (RLS) alone, per
-`docs/plans/MASTER_PLAN.md` §126.
+`docs/plans/MASTER_PLAN.md` §13 ("Two walls, always both").
 
 **Event catalog.** Built by grepping every `recordAuditEvent` call site
 under `src/application/` plus every direct `audit_events` insert inside
@@ -408,8 +419,10 @@ is reported as found.
 - [`DOMAIN_MODEL.md`](./DOMAIN_MODEL.md) — the product domain model
   (aggregates, lifecycles, invariants), tenancy design, and the Phase 3
   DDL template.
-- [`DATABASE_SCHEMA.md`](./DATABASE_SCHEMA.md) — the regulatory schema
-  as it exists today.
+- [`DATABASE_SCHEMA.md`](./DATABASE_SCHEMA.md) — the full applied
+  schema, product and regulatory alike, table by table.
+- [`MIGRATION_LOG.md`](./MIGRATION_LOG.md) — every migration, in
+  order, one line each.
 - [`REGULATORY_RESOLUTION_RULES.md`](./REGULATORY_RESOLUTION_RULES.md) —
   the normative regulatory resolution rules (R1–R14) the resolver
   implements.

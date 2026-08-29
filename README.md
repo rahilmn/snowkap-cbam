@@ -16,8 +16,8 @@ both importer and producer/operator organizations (shipment intake and
 classification, regulatory resolution, calculation, "Why this number?"
 explainability, period reporting/export, declaration preparation
 through LOCK, installation/operator management, actual-emissions entry
-and verification, cross-org sharing) all exist, are backed by 39
-applied Supabase migrations, and are covered by 873 passing automated
+and verification, cross-org sharing) all exist, are backed by 44
+applied Supabase migrations, and are covered by 967 passing automated
 tests plus three full-journey Playwright E2E suites
 (`tests/e2e/{importer,producer,cross-org-sharing}-journey.spec.ts`) run
 against real local Supabase. See
@@ -33,12 +33,13 @@ explorer/batch-resolve UI (Phase 5's per-line "Why this number?" is
 real; the cross-shipment explorer view is not), real importer/producer
 dashboards (the post-sign-in landing page is still a Phase-2
 placeholder — every wired screen is reachable from the sidebar, just
-not summarized on one dashboard), org-capability enforcement at the
-service layer (role/tenancy isolation is enforced and tested; the
-IMPORTER_DECLARANT/PRODUCER_OPERATOR capability dimension is not — see
-`docs/architecture/AUTHORIZATION_MATRIX.md`), and the bootstrap-by-email
+not summarized on one dashboard), the bootstrap-by-email
 sharing invite does not actually send an email yet (see
-`docs/adr/ADR-0012-cross-organization-sharing-model.md`). Staging and
+`docs/adr/ADR-0012-cross-organization-sharing-model.md`), password
+reset, a user-profile screen, a 403 error page, an importer-side
+installations/operators screen, and a dedicated calculations screen
+(the capability exists inline in the shipment detail view; there is no
+separate route for it) — all five absent, not stubbed. Staging and
 production deployment are not live anywhere — no Railway or
 staging/production Supabase project has ever been connected to this
 environment (an owner-provided precondition); see
@@ -161,9 +162,20 @@ now.
   strategy, phase roadmap, and phase-by-phase contracts.
 - [`docs/architecture/`](docs/architecture/) — `ARCHITECTURE.md`
   (layering rules and conventions), `DOMAIN_MODEL.md` (aggregates,
-  tenancy, sharing), `DATABASE_SCHEMA.md` (the regulatory schema as
-  applied), `REGULATORY_RESOLUTION_RULES.md` (the normative rules the
-  resolver implements).
+  tenancy, sharing), `DATABASE_SCHEMA.md` (the full product + regulatory
+  schema as applied, 44 migrations), `AUTHORIZATION_MATRIX.md` (every
+  gated service, its role/capability gate, and its proof), `MIGRATION_LOG.md`
+  (every migration in order, one line each), `ENVIRONMENT.md` (every
+  environment variable the codebase actually reads), and
+  `REGULATORY_RESOLUTION_RULES.md` (the normative rules the resolver
+  implements).
 - [`docs/regulatory/SOURCE_REGISTER.md`](docs/regulatory/SOURCE_REGISTER.md)
-  — the legal/data source hierarchy and provenance rules.
+  — the legal/data source hierarchy and provenance rules — and
+  [`docs/regulatory/CALCULATION_RULE_REGISTER.md`](docs/regulatory/CALCULATION_RULE_REGISTER.md)
+  — every implemented calculation rule, its citation, and its
+  classification (regulatory fact / application design / future-deferred).
 - [`docs/adr/`](docs/adr/) — architecture decision records.
+- [`docs/runbooks/`](docs/runbooks/) — deployment, rollback, incident
+  response, backup/restore, secret rotation, operational diagnostics,
+  and support-access procedures (each states plainly what is locally
+  verified vs. still blocked on Railway/staging access).

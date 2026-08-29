@@ -57,16 +57,17 @@ against `.env.example`" below for what qualifies).
 | `NEXT_PUBLIC_SUPABASE_URL` | Build-time (inlined) | Client-exposed | `browser-client.ts:28`, `server-client.ts:36`, `proxy.ts:41` | none — must be set | **Must differ** (same value as `SUPABASE_URL` in whichever environment) |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Build-time (inlined) | Client-exposed (safe by design — RLS-enforced) | `browser-client.ts:31`, `server-client.ts:39`, `proxy.ts:44` | none — must be set | **Must differ** |
 | `APP_URL` | Runtime | Server-only | `app/team/actions.ts:147` | unset (falls back to trusted-local-host header detection) | **Must differ** (staging/production domains differ) |
-| `NODE_ENV` | Runtime (Next.js/Node-managed) | Server-only | `browser-client.ts:48`, `server-client.ts:67`, `proxy.ts:64`, `switch-org-action.ts:53` | `development` (set by `next dev`) | Safe to share — same value (`production`) in both |
+| `NODE_ENV` | Runtime (Next.js/Node-managed) | Server-only | `browser-client.ts:48`, `server-client.ts:67`, `proxy.ts:64`, `switch-org-action.ts:53`, `next.config.ts:6` (a fifth, distinct purpose — gates whether the CSP/security headers apply their stricter production shape, not the cookie-security purpose the other four share) | `development` (set by `next dev`) | Safe to share — same value (`production`) in both |
 | `GIT_SHA` | Build-time ARG, then baked as runtime `ENV` | Server-only | `next.config.ts:16`, `app/status/page.tsx:147`, `app/api/health/route.ts:63` | unset → `"dev"` | N/A — unique per deploy by nature (the commit SHA), not a shared/differ question |
 | `PORT` | Runtime (platform-managed) | Server-only | consumed by the Next standalone `server.js` itself, not application source | `3000` (Dockerfile `ENV PORT=3000`) | Safe to share |
 | `HOSTNAME` | Runtime (platform-managed) | Server-only | consumed by the Next standalone `server.js` itself | `0.0.0.0` (Dockerfile `ENV HOSTNAME=0.0.0.0`) | Safe to share |
 | `SUPABASE_LOCAL_URL` | Runtime, test-only | Server-only | 10 files: 4 `tests/integration/*-isolation.test.ts` + 3 other `tests/integration/*.test.ts` + 3 `scripts/perf/*.ts` (full list in §4 below) | `http://127.0.0.1:54321` | N/A — local/CI dev tooling only, never staging/production |
 | `SUPABASE_LOCAL_ANON_KEY` | Runtime, test-only | Server-only | 8 files: all 7 test files above, plus `scripts/perf/measure-p11-perf.ts` (a read-only perf pass — it does need the anon key; `seed-p11-perf-setup.ts`/`cleanup-p11-perf.ts` don't) | fixed public Supabase CLI demo JWT | N/A |
 | `SUPABASE_LOCAL_SERVICE_ROLE_KEY` | Runtime, test-only | Server-only | 9 files: all 7 test files above, plus `scripts/perf/{seed-p11-perf-setup,cleanup-p11-perf}.ts` (writes/teardown need it; `measure-p11-perf.ts` doesn't) | fixed public Supabase CLI demo JWT | N/A |
+| `SUPABASE_LOCAL_JWT_SECRET` | Runtime, test-only | Server-only | 1 file: `tests/integration/organizations-isolation.test.ts:61` (mints a raw session token directly, bypassing GoTrue's grant flow, for one email-confirmation test) | the fixed public Supabase CLI local `JWT_SECRET` (`supabase status` prints it verbatim for a fresh local project) | N/A — local/CI dev tooling only, never staging/production |
 | `CI` | Runtime, test-only | Server-only | `playwright.config.ts:18,19,47` | unset locally | N/A — set automatically by GitHub Actions, never configured by hand |
 
-That's **14** environment variables actually read by this codebase.
+That's **15** environment variables actually read by this codebase.
 `NEXT_PUBLIC_GIT_SHA` is a fifteenth name that appears in the code but
 is **produced**, not read — see "Declared but not independently read"
 below for why it's documented separately rather than counted here.
@@ -195,12 +196,17 @@ wrong environment.
 ### `NODE_ENV`
 
 Not application-specific — the standard Next.js/Node.js convention,
-read directly in four places, all for the identical purpose (gating the
+read directly in five places for two distinct purposes. Four gate the
 `secure` flag on a cookie so it isn't marked secure over plaintext
-`http://localhost` in dev, but is in a real deployment):
+`http://localhost` in dev, but is in a real deployment:
 `src/infrastructure/supabase/browser-client.ts:48`,
 `src/infrastructure/supabase/server-client.ts:67`, `proxy.ts:64`, and
-`components/shell/switch-org-action.ts:53`. Next.js itself sets this
+`components/shell/switch-org-action.ts:53`. A fifth,
+`next.config.ts:6`, gates a different concern entirely — whether the
+CSP/security-headers function applies its stricter production-only
+directives (e.g. `Strict-Transport-Security`) or the more permissive
+dev-mode CSP that tolerates Next's own dev-time inline scripts/HMR
+websocket. Next.js itself sets this
 automatically per command (`development` for `next dev`, `production`
 for `next build`/`next start`) — it is not something a developer
 usually sets by hand in `.env`, which is why it is absent from
@@ -294,6 +300,22 @@ instance only (the test files' own header comments are explicit that
 using the protected regulatory project or any hosted project for
 tenancy/RLS testing is forbidden).
 
+### `SUPABASE_LOCAL_JWT_SECRET`
+
+A fourth, narrower override in the same family as the three above —
+missed by an earlier pass of this document (found by the P13
+documentation-completeness audit) since it has exactly one consumer:
+`tests/integration/organizations-isolation.test.ts:61`, which mints a
+raw session token directly (via a hand-rolled HS256 JWT, not a GoTrue
+grant flow) for one test that specifically needs to simulate an
+unconfirmed-email session state GoTrue's own sign-in flow won't
+produce. Defaults to the same fixed public Supabase CLI local
+`JWT_SECRET` the other three variables' demo JWTs are themselves
+derived from (not a secret; see that test file's own header comment).
+
+**Differs by environment**: not applicable, same reasoning as the
+three variables above.
+
 ### `CI`
 
 Read in `playwright.config.ts:18,19,47` to toggle
@@ -323,17 +345,17 @@ available with no further plumbing.
 
 ## Cross-check against `.env.example`
 
-[`.env.example`](../../.env.example) documented 5 of the 14 variables
-above before this change: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+[`.env.example`](../../.env.example) documents 5 of the 15 variables
+above: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
 `SUPABASE_DB_PASSWORD`, `NEXT_PUBLIC_SUPABASE_URL`,
 `NEXT_PUBLIC_SUPABASE_ANON_KEY` — exactly the Supabase data-plane group
 above, already documented thoroughly.
 
-**Added by this change**: `APP_URL` (a real, currently-unset application
-runtime variable with security-relevant fallback behavior — see its
-section above) and the three `SUPABASE_LOCAL_*` test overrides (real,
-actually read by ten files, previously undocumented anywhere a
-developer would find them without reading test source directly).
+`APP_URL` (a real, currently-unset application runtime variable with
+security-relevant fallback behavior — see its section above) and all
+four `SUPABASE_LOCAL_*` test overrides (real, actually read across
+eleven files, not meant for `.env.example` — see each variable's own
+section for why) are accounted for here instead.
 
 **Deliberately left out of `.env.example`**, even though each is a real
 `process.env` read documented above:

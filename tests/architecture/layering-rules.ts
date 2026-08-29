@@ -63,11 +63,15 @@ function extractImportSpecifiers(
 }
 
 /**
- * Resolves a relative import specifier (e.g. "../../domain/regulatory/types.js")
- * against the importing file's own path, returning a repo-root-relative
- * path with the trailing ".js" stripped (NodeNext convention: sources
- * are .ts, imports use .js extensions). Returns null for a bare package
- * specifier (doesn't start with "." or "/").
+ * Resolves a relative import specifier against the importing file's own
+ * path, returning a repo-root-relative path. Strips a trailing ".js" if
+ * present, for defensiveness against ADR-0014's retracted NodeNext
+ * convention (sources .ts, imports .js) -- ADR-0014 moved this codebase
+ * to `moduleResolution: "bundler"` with no extension on relative
+ * imports; a fresh repo-wide check found zero remaining ".js"-suffixed
+ * relative imports, so this strip is a defensive no-op today, not an
+ * active convention. Returns null for a bare package specifier
+ * (doesn't start with "." or "/").
  */
 function resolveRelativeSpecifier(
   fromFilePath: string,

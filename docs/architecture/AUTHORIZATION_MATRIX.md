@@ -21,7 +21,7 @@ itself.
   active member — day-to-day data entry and reads, §14's default).
 - **Capability** — whether the service checks `org.capabilities`
   (`IMPORTER_DECLARANT` / `PRODUCER_OPERATOR`) before acting. Originally
-  **nothing did**; the P14 hardening pass closed this for every write
+  **nothing did**; the P13 hardening pass closed this for every write
   service named in the matrix below — see "Capability enforcement"
   below for the closure and what was deliberately left out.
 - **Enforcement point** — where in the code the role check actually
@@ -40,9 +40,9 @@ itself.
 |---|---|---|---|---|
 | `createShipment` | MEMBER+ | **IMPORTER_DECLARANT** | `hasCapability(context, "IMPORTER_DECLARANT")` in the service, before any DB read — `src/application/shipments/create-shipment.ts` | `create-shipment.test.ts` → describe `"capability gate"` |
 | `addLine` / `updateLine` / `removeLine` | MEMBER+ | **IMPORTER_DECLARANT** | `hasCapability(context, "IMPORTER_DECLARANT")` in each function, before any DB read — `src/application/shipments/manage-lines.ts` | `manage-lines.test.ts` → describe `"capability gate"` under each of `addLine`/`updateLine`/`removeLine` |
-| `transitionShipmentStatus` — `MARK_READY` / `REOPEN` / `VOID` / `LOCK` | MEMBER+ (LOCK: **ADMIN+**) | none checked — see the P14 capability-enforcement closure below for why this one was deliberately left out of that pass | org membership only (§14 names LOCK specifically as ADMIN-tier and says nothing narrowing the other three) | `src/application/shipments/transition-shipment.test.ts` → describe `"LOCK role gate"` → it `"does not require ADMIN+ for VOID..."` (`transition-shipment.test.ts:470`) |
+| `transitionShipmentStatus` — `MARK_READY` / `REOPEN` / `VOID` / `LOCK` | MEMBER+ (LOCK: **ADMIN+**) | none checked — see the P13 capability-enforcement closure below for why this one was deliberately left out of that pass | org membership only (§14 names LOCK specifically as ADMIN-tier and says nothing narrowing the other three) | `src/application/shipments/transition-shipment.test.ts` → describe `"LOCK role gate"` → it `"does not require ADMIN+ for VOID..."` (`transition-shipment.test.ts:470`) |
 | `transitionShipmentStatus` — `LOCK` | **ADMIN+** | none checked | `hasAdminAccess(context)` in the service, before any DB read — `src/application/shipments/transition-shipment.ts:87` | `transition-shipment.test.ts` → describe `"LOCK role gate"` (`transition-shipment.test.ts:372`) — MEMBER rejected `PERMISSION_DENIED` with zero DB calls; ADMIN and OWNER both succeed |
-| `listShipments` / `getShipmentDetail` | MEMBER+ | none checked (reads are out of this matrix's capability-gating scope — see the P14 section) | reads, org-scoped | `list-shipments.test.ts`, `get-shipment-detail.test.ts` |
+| `listShipments` / `getShipmentDetail` | MEMBER+ | none checked (reads are out of this matrix's capability-gating scope — see the P13 section) | reads, org-scoped | `list-shipments.test.ts`, `get-shipment-detail.test.ts` |
 
 **`transitionShipmentStatus`'s application-layer (Wall 1) LOCK gate was
 added by this audit; RLS (Wall 2) had already enforced it since P4** —
@@ -73,8 +73,8 @@ worth flagging, not changed" if this reading turns out to be wrong.
 | Service / action | Role | Capability | Enforcement point | Proof |
 |---|---|---|---|---|
 | `issueSharingGrant` | **ADMIN+** (grantor org) | **PRODUCER_OPERATOR** | `hasAdminAccess(context)` then `hasCapability(context, "PRODUCER_OPERATOR")`, both before any DB read — `manage-sharing-grants.ts:193` | `manage-sharing-grants.test.ts:327` (PERMISSION_DENIED) and the adjacent `"rejects CAPABILITY_NOT_HELD for an ADMIN whose org lacks PRODUCER_OPERATOR..."` case |
-| `revokeSharingGrant` | **ADMIN+** (grantor org) | none checked — deliberate, see the P14 capability-enforcement closure below | `hasAdminAccess(context)` — `manage-sharing-grants.ts:502` | `manage-sharing-grants.test.ts:816` (plain MEMBER denied); `:842` (an ADMIN of the *grantee* org — the wrong side — also denied) |
-| `acceptSharingGrant` | MEMBER+ (grantee org) — deliberate, not an oversight | none checked (deliberate — accepting is the receiving/cross-capability side, see the P14 section) | org/grantee-side ownership check only | `manage-sharing-grants.test.ts:601` (`granteeMemberContext`, role `MEMBER`, succeeds) |
+| `revokeSharingGrant` | **ADMIN+** (grantor org) | none checked — deliberate, see the P13 capability-enforcement closure below | `hasAdminAccess(context)` — `manage-sharing-grants.ts:502` | `manage-sharing-grants.test.ts:816` (plain MEMBER denied); `:842` (an ADMIN of the *grantee* org — the wrong side — also denied) |
+| `acceptSharingGrant` | MEMBER+ (grantee org) — deliberate, not an oversight | none checked (deliberate — accepting is the receiving/cross-capability side, see the P13 section) | org/grantee-side ownership check only | `manage-sharing-grants.test.ts:601` (`granteeMemberContext`, role `MEMBER`, succeeds) |
 | `acceptSharingGrantInvitation` | MEMBER+ (any member of the resolving org) | none checked (deliberate — same reasoning as `acceptSharingGrant`) | `accept_sharing_grant_invitation()` RPC re-verifies membership itself (`NOT_A_MEMBER`) | `tests/integration/sharing-grants-isolation.test.ts` |
 | `listSharingGrantsIssued` / `listSharingGrantsReceived` / `listMyPendingSharingGrantInvitations` | MEMBER+ | none checked | reads, org-scoped | `manage-sharing-grants.test.ts` |
 
@@ -97,7 +97,7 @@ worth flagging, not changed" if this reading turns out to be wrong.
 | `inviteMember` | **ADMIN/OWNER** | n/a | RLS only (`organization_invitations_insert_admin_or_owner`, `20260828130000`) | `organizations-isolation.test.ts:1783` ("a plain MEMBER cannot create or revoke an invitation; an ADMIN can do both") — **added by this audit; no test existed before** |
 | `revokeInvitation` | **ADMIN/OWNER** | n/a | RLS only (`organization_invitations_update_admin_or_owner`) | same test as above |
 | `acceptInvitation` | the invited person only (email match, via SECURITY DEFINER RPC) | n/a | `accept_organization_invitation()` RPC | `organizations-isolation.test.ts` (deactivation block, `:1677`) |
-| `updateOrganizationProfile` | **OWNER only** ("danger zone", §14/§27 screen 23) | n/a | `orgSummary.context.role !== "OWNER"` in the Server Action — `app/organization/actions.ts:90` — **not** in the application service, which applies no role check of its own | **none** — see "Findings — worth flagging, not changed" |
+| `updateOrganizationProfile` | **OWNER only** ("danger zone", §14/§27 screen 23) | n/a | `context.role !== "OWNER"` in the service itself — `organization-profile.ts` — plus the same check retained in the Server Action as a fast, DB-read-free path | `organization-profile.test.ts` → describe `"role gate"` — see finding #1 below (RESOLVED) |
 | `getOrganizationProfile` | MEMBER+ | n/a | read, org-scoped | `organization-profile.test.ts` |
 | `getCurrentOrgSummary` | any signed-in member | n/a | reads the caller's own memberships only | `get-current-org-context.test.ts` |
 
@@ -114,7 +114,7 @@ worth flagging, not changed" if this reading turns out to be wrong.
 | Service / action | Role | Capability | Enforcement point | Proof |
 |---|---|---|---|---|
 | `uploadEvidenceFile` / `removeEvidenceFile` | MEMBER+ | **PRODUCER_OPERATOR** | `hasCapability(context, "PRODUCER_OPERATOR")` in each function, before any DB read, plus org/record ownership check | `upload-evidence.test.ts` → describe `"capability gate"` under each of `uploadEvidenceFile`/`removeEvidenceFile` |
-| `getEvidenceDownloadUrl` / `listEvidenceFiles` | MEMBER+ | none checked (reads — out of this pass's scope, see the P14 section) | org/record ownership check | `upload-evidence.test.ts` |
+| `getEvidenceDownloadUrl` / `listEvidenceFiles` | MEMBER+ | none checked (reads — out of this pass's scope, see the P13 section) | org/record ownership check | `upload-evidence.test.ts` |
 
 ## Calculations
 
@@ -135,7 +135,14 @@ worth flagging, not changed" if this reading turns out to be wrong.
 ## Capability enforcement (master plan §14: "Every server action
 re-derives membership/role/capability server-side")
 
-**Finding: `org.capabilities` (`IMPORTER_DECLARANT` /
+**RESOLVED — see the "P13 closure" subsection below, which fixed
+every write-side gap this finding names.** Preserved here verbatim as
+the finding that motivated that pass, per this document's own
+"preserve the finding, mark it resolved" convention — do not read the
+paragraph below as describing the codebase's current state.
+
+**Finding (as originally written, now resolved): `org.capabilities`
+(`IMPORTER_DECLARANT` /
 `PRODUCER_OPERATOR`) is not checked anywhere at the service layer or in
 RLS. The only place it is consulted at all is
 `deriveExperience` in `components/shell/app-shell.tsx:49`, which picks
@@ -185,7 +192,7 @@ fixed. It is a strong candidate for the P10/P11 hardening pass — see
 master plan §38's "matrix is the permanent net" framing: the matrix
 above should grow a non-empty capability column once this lands.
 
-### P14 closure — the P10/P11 hardening-pass candidate above, done
+### P13 closure — the P10/P11 hardening-pass candidate above, done
 
 This section closes the finding above. Every write-side service the
 finding named, plus every other write-side service in the same
@@ -264,6 +271,25 @@ once the call sites were updated to the new signature, or, for the four
 functions with no signature change, the call falling through past the
 check straight into its normal DB/RPC path) before the corresponding
 `hasCapability` check was added, per this codebase's TDD discipline.
+
+**Known remaining gap, named rather than fixed here (P13 audit):**
+this closure is Wall 1 only. No RLS policy in this schema filters on
+`organizations.capabilities` — confirmed by exhaustive search, same
+methodology as the original finding above. A direct client call
+(bypassing every `app/**/actions.ts` Server Action and its
+`hasCapability` check entirely) can still write to a capability-gated
+table as long as the caller is a genuine member of the org with the
+right *role*, regardless of which capability that org actually holds.
+This does not cross tenant boundaries — the caller can still only
+touch their own org's rows — so it is narrower than a cross-org
+isolation gap, but it means "an org without `PRODUCER_OPERATOR` cannot
+have installations/emission_data" is an application-layer convention
+today, not a database-enforced invariant. Closing it means adding a
+capability predicate (via a small `app.org_has_capability(org_id,
+capability)` -style helper) to the WITH CHECK of every write policy on
+every capability-gated table — a schema-wide, cross-cutting change
+appropriately scoped to its own reviewed migration, not folded into
+this pass.
 Full test list: `create-shipment.test.ts`, `manage-lines.test.ts`,
 `calculate-line.test.ts`, `resolve-line-emissions.test.ts`,
 `determine-from-actual-data.test.ts`,
@@ -378,29 +404,21 @@ own "don't gate something that shouldn't be gated" instruction):**
 
 ## Findings — worth flagging, not changed
 
-1. **`updateOrganizationProfile`'s OWNER-only "danger zone" gate lives
-   only in a Next.js Server Action** (`app/organization/actions.ts:90`,
-   `orgSummary.context.role !== "OWNER"`), not inside the application
-   service (`organization-profile.ts`'s `updateOrganizationProfile`
-   takes a bare `orgId` and applies no role check at all). This is not
-   currently exploitable — the only caller in the codebase is that one
-   Server Action, and it does check correctly — but it is inconsistent
-   with every ADMIN+/OWNER-gated service elsewhere in this matrix
-   (declarations, sharing, emissions, and now `transitionShipmentStatus`
-   all check `hasAdminAccess`/role *inside* the service), and this
-   codebase has no unit tests anywhere for `app/**/actions.ts` files
-   (confirmed: zero `*actions.test.ts` in the repo), so **no test in
-   this repo proves the OWNER-only gate holds** at either layer. Not
-   fixed in this audit: doing so correctly means changing
-   `updateOrganizationProfile`'s signature to take an `OrgContext` (or a
-   role parameter) and updating its one caller and its existing unit
-   test file (`organization-profile.test.ts`, which currently tests only
-   the capability-union behavior) — a real but narrow-looking change
-   that this audit chose to name rather than make, since the task's own
-   instructions are to close *real* enforcement gaps, and this one does
-   not currently have an exploitable path. Recommended follow-up: add
-   the `hasAdminAccess`-style check to the service directly and a test
-   proving it, mirroring `verifyEmissionData`'s pattern.
+1. **RESOLVED (P13 audit follow-up).** `updateOrganizationProfile`'s
+   OWNER-only "danger zone" gate used to live only in the calling
+   Server Action (`app/organization/actions.ts`) — the application
+   service itself took a bare `orgId` and applied no role check of its
+   own, inconsistent with every other ADMIN+/OWNER-gated service in
+   this matrix. `updateOrganizationProfile` now takes a full
+   `OrgContext` and returns `PERMISSION_DENIED` for any non-OWNER
+   caller before touching the database; `organization-profile.test.ts`'s
+   `"role gate"` describe block proves ADMIN and MEMBER are both
+   rejected and OWNER still succeeds. (Note: the claim this finding
+   originally made, "this codebase has no unit tests anywhere for
+   `app/**/actions.ts` files," was already inaccurate by the time this
+   line was last read closely — several `*actions.test.ts` files exist
+   today; the substantive point, that no test proved *this specific*
+   gate, was the part that mattered and is what the fix above closes.)
 2. **`listDeclarations`/`getDeclarationDetail` are ADMIN+-gated only at
    the page-component level** (`app/(importer)/declarations/page.tsx:87`,
    `[id]/page.tsx:116`), not inside the application service, and
@@ -417,8 +435,8 @@ own "don't gate something that shouldn't be gated" instruction):**
    and the correct fix is a signature change this audit's scope asks to
    report rather than retrofit).
 3. **Capability enforcement** — see the dedicated section above.
-   Originally named here as unfixed; closed by the P14 pass documented
-   in that same section's "P14 closure" subsection.
+   Originally named here as unfixed; closed by the P13 pass documented
+   in that same section's "P13 closure" subsection.
 
 ## P10 review response (2026-08-29)
 
