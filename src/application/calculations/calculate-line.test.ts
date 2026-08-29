@@ -60,6 +60,11 @@ function mockRepository(
         [],
       ),
 
+    searchCbamGoodsByText: () =>
+      Promise.resolve(
+        [],
+      ),
+
     findProductionRoutes: () =>
       Promise.resolve(
         [],
@@ -510,6 +515,10 @@ describe(
               );
             },
             searchCbamGoodsByPrefix: () =>
+              Promise.resolve(
+                [],
+              ),
+            searchCbamGoodsByText: () =>
               Promise.resolve(
                 [],
               ),

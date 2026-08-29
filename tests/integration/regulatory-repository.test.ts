@@ -166,6 +166,86 @@ describe.skipIf(!hasSupabaseEnvironment)(
     );
 
     it(
+      "searches CBAM goods by free-form text -- a code-prefix query and a description-substring query both find real, canonical rows",
+      async () => {
+        const repository =
+          new SupabaseRegulatoryRepository();
+
+        const byCode =
+          await repository.searchCbamGoodsByText(
+            "2523",
+          );
+
+        expect(
+          byCode.length,
+        ).toBeGreaterThan(
+          0,
+        );
+
+        expect(
+          byCode.every(
+            (good) =>
+              good.trade_code.startsWith(
+                "2523",
+              ) &&
+              good.record_level === "TRADE_GOOD",
+          ),
+        ).toBe(
+          true,
+        );
+
+        const byDescription =
+          await repository.searchCbamGoodsByText(
+            "cement",
+          );
+
+        expect(
+          byDescription.length,
+        ).toBeGreaterThan(
+          0,
+        );
+
+        expect(
+          byDescription.every(
+            (good) =>
+              good.description.toLowerCase().includes(
+                "cement",
+              ) &&
+              good.record_level === "TRADE_GOOD",
+          ),
+        ).toBe(
+          true,
+        );
+      },
+    );
+
+    it(
+      "returns an empty array for searchCbamGoodsByText on a blank query, and on a query matching nothing real",
+      async () => {
+        const repository =
+          new SupabaseRegulatoryRepository();
+
+        const blank =
+          await repository.searchCbamGoodsByText(
+            "   ",
+          );
+
+        expect(blank).toEqual(
+          [],
+        );
+
+        const noMatch =
+          await repository.searchCbamGoodsByText(
+            "zzz-not-a-real-cbam-good-or-code-zzz",
+          );
+
+        expect(noMatch).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
       "finds production routes, optionally narrowed by sector",
       async () => {
         const repository =

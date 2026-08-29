@@ -41,6 +41,25 @@ export interface RegulatoryRepository {
   ): Promise<CbamGoodSummary[]>;
 
   /**
+   * TRADE_GOOD-level cbam_goods rows matching free-form `query` text
+   * against EITHER trade_code (prefix) OR description (substring,
+   * case-insensitive) -- the live-search backing for the classification
+   * combobox (§20: an "assistive searchable combobox over the 283
+   * goods"), distinct from searchCbamGoodsByPrefix above (code-only,
+   * used for post-rejection nearest-match assistance) because a user
+   * typing a live search query wants both "starts typing a code" and
+   * "starts typing a description" to work identically. Results are
+   * deduplicated by trade_code (a row matching both the code and
+   * description arms is never returned twice) and merged in the same
+   * trade_code order searchCbamGoodsByPrefix already uses. Canonical
+   * data only -- reads cbam_goods directly, never invents a candidate.
+   */
+  searchCbamGoodsByText(
+    query: string,
+    limit?: number,
+  ): Promise<CbamGoodSummary[]>;
+
+  /**
    * Active production routes, optionally narrowed to one sector -- for
    * the shipment line editor's route picker (§20).
    */

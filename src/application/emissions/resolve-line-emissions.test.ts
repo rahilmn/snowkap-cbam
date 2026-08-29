@@ -94,6 +94,11 @@ function mockRepository(
         [],
       ),
 
+    searchCbamGoodsByText: () =>
+      Promise.resolve(
+        [],
+      ),
+
     findProductionRoutes: () =>
       Promise.resolve(
         [],

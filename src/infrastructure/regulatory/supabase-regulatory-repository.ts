@@ -808,6 +808,126 @@ export class SupabaseRegulatoryRepository
   }
 
 
+  async searchCbamGoodsByText(
+    query: string,
+    limit = 20,
+  ): Promise<CbamGoodSummary[]> {
+    const supabase =
+      getSupabaseClient();
+
+    const trimmedQuery =
+      query.trim();
+
+    if (!trimmedQuery) {
+      return [];
+    }
+
+    // Two separate queries, not a single .or("trade_code.ilike...,
+    // description.ilike...") filter: PostgREST's .or() argument is
+    // itself a small filter-syntax DSL (commas/parens/dots are
+    // meaningful), and this method's `query` is raw, unsanitized user
+    // input from a live search box -- interpolating it into that DSL
+    // string would let a comma or parenthesis in someone's search text
+    // corrupt or widen the filter in ways that are hard to reason
+    // about. Two independent, safely-parameterized queries plus an
+    // application-side merge avoids that class of problem entirely,
+    // at the cost of a second round trip -- acceptable for a
+    // debounced, human-typed search, not a hot path.
+    const [codeMatches, descriptionMatches] =
+      await Promise.all(
+        [
+          supabase
+            .from(
+              "cbam_goods",
+            )
+            .select(
+              "trade_code, trade_code_type, record_level, sector, description, functional_unit",
+            )
+            .eq(
+              "record_level",
+              "TRADE_GOOD",
+            )
+            .like(
+              "trade_code",
+              `${normalizeCode(trimmedQuery)}%`,
+            )
+            .order(
+              "trade_code",
+            )
+            .limit(
+              limit,
+            ),
+
+          supabase
+            .from(
+              "cbam_goods",
+            )
+            .select(
+              "trade_code, trade_code_type, record_level, sector, description, functional_unit",
+            )
+            .eq(
+              "record_level",
+              "TRADE_GOOD",
+            )
+            .ilike(
+              "description",
+              `%${trimmedQuery}%`,
+            )
+            .order(
+              "trade_code",
+            )
+            .limit(
+              limit,
+            ),
+        ],
+      );
+
+    if (codeMatches.error) {
+      throw new Error(
+        `Failed to search CBAM goods by code: ${codeMatches.error.message}`,
+      );
+    }
+
+    if (descriptionMatches.error) {
+      throw new Error(
+        `Failed to search CBAM goods by description: ${descriptionMatches.error.message}`,
+      );
+    }
+
+    const seenTradeCodes =
+      new Set<string>();
+
+    const merged: CbamGoodSummary[] =
+      [];
+
+    for (
+      const row of [
+        ...(codeMatches.data ?? []),
+        ...(descriptionMatches.data ?? []),
+      ] as unknown as RegulatoryGoodSummaryRow[]
+    ) {
+      if (seenTradeCodes.has(row.trade_code)) {
+        continue;
+      }
+
+      seenTradeCodes.add(
+        row.trade_code,
+      );
+
+      merged.push(
+        mapGoodSummary(
+          row,
+        ),
+      );
+    }
+
+    return merged.slice(
+      0,
+      limit,
+    );
+  }
+
+
   async findProductionRoutes(
     sector?: string,
   ): Promise<ProductionRouteSummary[]> {
