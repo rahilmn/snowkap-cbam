@@ -213,6 +213,45 @@ const addLineSchema =
       z.string().optional(),
   });
 
+/**
+ * Live-search backing for the CN/TARIC classification combobox
+ * (cn-code-picker.tsx) -- read-only against the public regulatory
+ * cbam_goods reference data (already readable by any authenticated
+ * user via authenticated_read_regulatory_data's own SELECT policies,
+ * 20260828100000), so this deliberately does not gate on org context
+ * the way every mutation action in this file does: there is no
+ * org-scoped data here to leak, and the app's own auth-gated routing
+ * already keeps a signed-out visitor from reaching the page this is
+ * called from. Returns the canonical cbam_goods rows verbatim
+ * (searchCbamGoodsByText, src/infrastructure/regulatory/
+ * supabase-regulatory-repository.ts) -- never a synthesized or
+ * invented candidate. A short/blank query returns [] without a DB
+ * round trip, matching that method's own guard.
+ */
+export async function searchCbamGoodsAction(
+  query: string,
+): Promise<{ trade_code: string; trade_code_type: string; description: string }[]> {
+  if (query.trim().length < 2) {
+    return [];
+  }
+
+  const results =
+    await getRegulatoryRepository().searchCbamGoodsByText(
+      query,
+      20,
+    );
+
+  return results.map(
+    (good) => (
+      {
+        trade_code: good.trade_code,
+        trade_code_type: good.trade_code_type,
+        description: good.description,
+      }
+    ),
+  );
+}
+
 export async function addLineAction(
   _previousState: LineActionState,
   formData: FormData,
