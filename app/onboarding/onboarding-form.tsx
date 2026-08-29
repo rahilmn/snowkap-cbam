@@ -148,14 +148,14 @@ export function OnboardingForm() {
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="slug">
-          Organization URL
+          Organization identifier
         </Label>
 
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm text-[var(--text-tertiary)]">
-            snowkap.com/
-          </span>
+        <p className="text-xs text-[var(--text-tertiary)]">
+          A unique, URL-safe identifier for your organization.
+        </p>
 
+        <div className="flex items-center gap-1.5">
           <Input
             id="slug"
             name="slug"

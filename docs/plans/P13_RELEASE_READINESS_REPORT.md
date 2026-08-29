@@ -131,19 +131,24 @@ Screen-by-screen classification (verified against actual routes/code this
 session and in the immediately preceding documentation-completeness audit,
 not against documentation's own claims):
 
-**Fully implemented (21 of 35 master-plan §27 screens)**: sign in/up (not
-reset), onboarding, accept invitation, org switcher, System/status, 404/500
-error pages (no 403), shipments list/create/detail, line editor,
-classification, emissions (importer), suppliers, "Why this number?" panel,
-audit history, reports, declaration preparation, org settings, team,
-installations, emission data entry, evidence, verification actions,
-sharing, shared-data status.
+**Fully implemented (22 of 35 master-plan §27 screens)**: sign in/up/reset
+(forgot-password + reset-password landed in the blocker-remediation round,
+`7797e12` — see §16.6's S4 write-up; verified end-to-end against real local
+Supabase + Mailpit, not merely unit-tested), onboarding, accept invitation,
+org switcher, System/status, 404/500 error pages (no 403), shipments
+list/create/detail, line editor, classification, emissions (importer),
+suppliers, "Why this number?" panel, audit history, reports, declaration
+preparation, org settings, team, installations, emission data entry,
+evidence, verification actions, sharing, shared-data status.
 
-**Explicitly, honestly not built** (matches README's own disclosure): CSV/XLSX
-shipment import, a standalone resolution explorer/batch-resolve UI, real
-importer/producer dashboards (post-sign-in landing is still a Phase-2
-placeholder — every other screen is reachable via the sidebar), password
-reset, a user-profile screen, a 403 error page, an importer-side
+**Explicitly, honestly not built** (matches README's own disclosure):
+CSV/XLSX shipment import, a standalone resolution explorer/batch-resolve UI,
+real importer/producer dashboards (post-sign-in landing at `/` is still the
+literal Phase-2 placeholder page — `app/page.tsx`'s own comment still reads
+"Application shell walking skeleton (Phase 2). Product screens begin at
+Phase 4." — every other screen is reachable via the sidebar, not via this
+landing page; re-confirmed live in this round via a local browser check), a
+user-profile screen, a 403 error page, an importer-side
 installations/operators view, a dedicated calculations route (the capability
 exists inline in the shipment detail view).
 
@@ -1177,10 +1182,14 @@ directly-observed gaps.
   pass closed; ~20 stale file:line citations remain scattered across
   `AUTHORIZATION_MATRIX.md`; `CALCULATION_RULE_REGISTER.md` cites one
   fixture that doesn't exist.
-- CSV/XLSX shipment import, a resolution explorer, real dashboards,
-  password reset, a user-profile screen, a 403 page, an importer-side
-  installations view, and a dedicated calculations route are all
-  explicitly not built (§5) — disclosed, not hidden.
+- CSV/XLSX shipment import, a resolution explorer, real dashboards (the
+  post-sign-in landing page at `/` is still the literal Phase-2 placeholder
+  — confirmed live this round, §5), a user-profile screen, a 403 page, an
+  importer-side installations view, and a dedicated calculations route are
+  all explicitly not built (§5) — disclosed, not hidden. (Password reset
+  *was* in this list in an earlier revision of this report; it was fixed in
+  the blocker-remediation round, `7797e12`, and this section is corrected
+  accordingly — see §5, §16.6/S4.)
 
 ## 36. Railway-dependent items
 
