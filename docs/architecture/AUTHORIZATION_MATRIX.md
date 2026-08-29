@@ -360,3 +360,65 @@ as auditable as the original findings.
    could in principle render a future date. Not fixed: a `CHECK
    (deactivated_at <= now())` has its own clock-skew edge cases and
    this is cosmetic, not a security or data-integrity gap.
+
+## P11 review response (2026-08-29)
+
+Postdates this matrix's last edit (P10) by one full review cycle — this
+section closes that gap. The P11 mandatory security review
+(`4930269`) and this same day's independent P13 re-verification each
+found real authorization-relevant gaps, tracked here the same way §P10
+review response is.
+
+**Fixed, P11 mandatory review:**
+
+1. **`record_declaration_filed()`'s pre-authorization existence check
+   leaked a cross-org oracle** — a caller could distinguish "a real
+   declaration id belonging to another org" (`NOT_ADMIN`) from "no such
+   declaration at all" (`NOT_FOUND`) purely from the RPC's error
+   status, the exact class of finding this matrix exists to catch.
+   Closed in `20260829400000_p11_review_declaration_filed_membership_oracle_fix.sql`
+   by checking org membership before existence, so both cases now
+   return the identical, uninformative `NOT_FOUND`.
+2. **`audit_events` had no `event_type` CHECK constraint** — any
+   authenticated member could INSERT an arbitrary, unvalidated
+   `event_type`/`payload` combination into their own org's audit trail
+   via a bare client write (every plain `recordAuditEvent` call site
+   goes through RLS, not a `SECURITY DEFINER` RPC). Live-reproduced
+   during the review as a fabricated `declaration.filed` row carrying a
+   forged `filed_reference`. Closed in
+   `20260829430000_p11_review_audit_events_event_type_catalog.sql` with
+   a `WITH CHECK` allowlist of every real event type (see
+   `docs/architecture/ARCHITECTURE.md`'s event catalog, corrected the
+   same day this section was written).
+3. **`memberships.org_id` was not immutable** — the same class of gap
+   `20260829370000`'s `user_id` trigger closed for P10, but for
+   `org_id`. Closed in
+   `20260829420000_p11_review_membership_org_id_immutable.sql`,
+   mirroring that same precedent.
+
+**Fixed, P13 independent re-verification (this same day, later):**
+
+4. **`accept_organization_invitation()` and
+   `accept_sharing_grant_invitation()` had both silently lost P10's
+   deactivated-member checks** when the P11 mandatory review's own
+   `create or replace function` redefined each of them (for an
+   unrelated email-confirmation fix) from a function body that predated
+   `20260829360000`. A deactivated member could again accept a pending
+   org invitation (silently burning it as `ALREADY_MEMBER` instead of
+   `MEMBERSHIP_DEACTIVATED`) or bind their former org into a new
+   cross-org sharing grant on their own say-so. Found by finally
+   running the previously-skipped RLS integration suites for real
+   against local Supabase (this session's own P11 re-verification
+   work), independently confirmed by an adversarial Opus review before
+   being fixed, and fixed by restoring each function's deactivation
+   check in place. See commit `4930269`'s own message for the full
+   account — not repeated here, since this matrix's job is the
+   authorization-matrix entry, not the incident narrative.
+
+**Not yet re-audited against this matrix's own scope:** the P11
+migrations' other hardening (email-confirmation requirement, evidence
+storage path integrity, shipment_lines numeric format) touches
+authentication and data-integrity surfaces this matrix does not track
+(it scopes to role/capability/tenancy authorization specifically) — see
+`4930269`'s commit message and `docs/architecture/DATABASE_SCHEMA.md`
+for those.
