@@ -900,6 +900,32 @@ clean after each, each its own commit):
   re-grounding, given the scope); `BACKUP_RESTORE.md`'s drill-evidence
   function/trigger counts, now stale by the same 12 undocumented
   migrations.
+- **Route-level capability gate was UI/UX-only for reads, not
+  access-denial** (a follow-up round, after this subsection was first
+  written) — found live in the browser, distinct from and more specific
+  than §13's already-disclosed "no RLS wall for capability": navigating
+  directly to `/shipments` (an importer-only route) as a
+  producer-only-capability org rendered the full page shell (empty
+  list, a working "New shipment" button, a working form) rather than an
+  immediate "you don't have access" state — the sidebar correctly hid
+  the link, but the route itself had no server-side capability guard on
+  the read path. The write path itself was never a security hole
+  (submitting correctly returned "Your organization is not set up as a
+  CBAM importer/declarant" — Wall 1 held on the actual mutation), so
+  this was a confusing/wasteful UX gap, not a data-integrity or
+  authorization breach — **this distinction still stands**: fixing it
+  does not close §13/§35's separately-disclosed "capability enforcement
+  has no RLS wall" gap, which remains exactly as open as before (a
+  different wall, a different layer). Fixed by adding one `layout.tsx`
+  per route group (`app/(importer)`, `app/(producer)`) that checks the
+  capability once and renders a shared denial component
+  (`components/shell/capability-not-available.tsx`) instead of
+  `children` when missing — covers all 14 pages under both groups
+  without duplicating the check into each one. Verified live in both
+  directions (producer-only org denied on `/shipments`, still works on
+  `/installations`; a fresh importer-only org works on `/shipments` and
+  `/shipments/new`, denied on `/installations`) — not merely typechecked.
+  Commit `3b670df`.
 
 **Found and reported, not fixed this round** (concrete, real, but
 either non-trivial to fix correctly in the time available, or requiring
@@ -967,19 +993,6 @@ owner-level Railway access this session doesn't have):
   codebase's own TDD standard, is a substantial undertaking on its own)
   — flagged here as the next concrete regression-coverage work, ranked
   roughly by severity as listed.
-- **Route-level capability gate is UI/UX-only for reads, not
-  access-denial** — found live in the browser, distinct from and more
-  specific than §13's already-disclosed "no RLS wall for capability":
-  navigating directly to `/shipments` (an importer-only route) as a
-  producer-only-capability org renders the full page shell (empty list,
-  a working "New shipment" button, a working form) rather than an
-  immediate "you don't have access" state — the sidebar correctly hides
-  the link, but the route itself has no server-side capability guard on
-  the read path. Confirmed the write path itself is *not* a security
-  hole: submitting the form correctly returns "Your organization is not
-  set up as a CBAM importer/declarant" (Wall 1 holds on the actual
-  mutation) — this is a confusing/wasteful UX gap (fill out a whole form
-  before being told no), not a data-integrity or authorization breach.
 - **`BACKUP_RESTORE.md`'s own recommendation to re-run the drill
   verbatim before P13 sign-off** was not carried out in this round (it
   was flagged as stale, per the fix list above, but a fresh drill was
@@ -1006,7 +1019,100 @@ finding above. Railway itself was re-confirmed still down as part of
 this same session (§29's own "re-verified 2026-08-30" note), separately
 from this subsection.
 
-## 18. Upload / storage controls
+### 16.8 Third round: capability-gate hardening, test-coverage backfill, and a real E2E-suite methodology finding (2026-08-30)
+
+Continuing autonomously per explicit instruction, with both named
+blockers (§11, §29) still open and untouched:
+
+**Fixed**: the route-level capability-gate hardening described in
+§16.7's own updated first bullet (`3b670df`) — covered there in detail,
+not repeated here.
+
+**Test-coverage backfill, six files, 73 new tests** (`0ba80bf`) — closes
+every concrete gap §16.7 enumerated as "found and reported, not fixed
+this round": `app/(auth)/actions.ts` (`signInAction`/`signUpAction`'s
+validation, confirm-email, already-registered, check-email, and success
+branches), `app/accept-invitation/actions.ts` (both actions' full
+validation/unauthenticated/switch coverage), `app/team/actions.ts` (the
+`messageFor()` mapping, previously entirely unexercised, plus the three
+membership actions' own happy paths and `revokeInvitationAction`'s
+branches), `app/(producer)/sharing/actions.ts` (both actions'
+validation and REJECTED-reason mapping), `app/api/evidence/upload/route.ts`
+(the full REJECTED-reason-to-HTTP-status mapping, previously always
+mocked to `OK`), and `src/infrastructure/supabase/server-client.ts` (the
+cookies adapter's `getAll`/`setAll` wiring, including the documented
+Server-Component-cannot-set-cookies catch). Most notably,
+`app/api/reports/export/route.ts` gained a real regression test for its
+own regulated-numeric precision-preservation logic: it parses the
+*actual* returned XLSX buffer via `exceljs`, asserts the exact-value
+columns are `TEXT`/`numFmt '@'` and byte-identical to the source
+`DecimalString`, and — critically — this was verified to actually catch
+a regression, not just pass vacuously: the historical `Number()`-
+narrowing bug this route's own comment documents was temporarily
+reintroduced, the test was confirmed to fail (`expected 2 to be 3`), and
+the change was then reverted with a clean `git diff` afterward. Every
+file was independently confirmed passing on its own before being
+combined; the combination itself (`pnpm test`: 1106 passed, 14 skipped,
+up from 1033/14) and `pnpm typecheck` are both clean.
+
+**A real, previously-undiscovered E2E-suite methodology finding**: running
+`pnpm exec playwright test` as one batch (the default — `fullyParallel:
+true`, no worker cap, both `chromium` and `mobile-chromium` projects)
+against this session's dev server produced 11 failures, every one
+`expect(page).toHaveURL` timing out on `/sign-up` (not redirecting to
+`/onboarding`) or, in two cases, a create-shipment/start-declaration
+action's own redirect not completing within the test's 5-second
+assertion window. **Root-caused, not left ambiguous**: `signInAction`'s
+own `SIGN_UP_RATE_LIMIT` is `{limit: 5, windowMs: 10 minutes}`
+(`app/(auth)/actions.ts`) — every full-journey spec plus both auth-smoke
+specs signs up a fresh account, and the suite's own natural sign-up
+volume (7+ real sign-ups across its specs) exceeds that budget well
+within one 10-minute run, regardless of worker count, since the limiter
+is a single in-memory, per-process, per-IP counter and every local
+Playwright request comes from the same IP against the same dev-server
+process. Confirmed directly: `signUpAction`'s own dev-server log lines
+show execution times collapsing to 2-10ms (vs. 200-2000ms for a real
+Supabase round trip) exactly where the failures cluster — the
+unmistakable signature of the rate-limit short-circuit firing before
+Supabase is ever called, not a genuine slowdown or crash. The two
+create-shipment/start-declaration timeouts were a *separate*, lower-
+confidence cause (dev-server/Turbopack load from repeated back-to-back
+runs, not a rate limit — those actions' own limiters, 60/10min and
+30/10min respectively, were nowhere near exhausted) — and were laid to
+rest definitively, not assumed: every one of the 7 spec files was then
+re-run **individually** against a **fresh** dev-server process
+(`--workers=1 --project=chromium`, one spec or a small independent
+group at a time) and **every single one passed cleanly** — 5 full
+journeys (`importer-journey`, `cross-org-sharing-journey`,
+`producer-journey`, `importer-auth-smoke`, `producer-auth-smoke`) plus
+`topbar-tablet-responsive` and all of `shell.spec.ts`'s 12 sub-tests.
+This is direct, positive evidence that **none of this session's code
+changes (the capability-gate layouts, the team/actions.ts rate-limit
+fix, the onboarding text fix, or any of the six test-coverage files)
+introduced any E2E regression** — the batch-run failures were entirely
+a self-inflicted artifact of this session's own repeated testing (both
+manual browser sign-ups and multiple back-to-back Playwright runs)
+sharing one rate-limit window, which is the security control working
+exactly as designed, not a defect.
+
+**Left as a disclosed, unresolved operational finding, not fixed this
+round**: this means `pnpm exec playwright test` (the bare command
+documented in `README.md`/CI as "the" way to run this suite) **cannot
+reliably complete as a single batch locally** without risking exactly
+this collision, since the suite's own total sign-up volume can exceed
+`SIGN_UP_RATE_LIMIT`'s budget within one run. This is a real gap this
+report had not previously surfaced (the existing "CI stops local
+Supabase before running the Playwright E2E suite" limitation, §26/§35,
+is a *different* reason the suite has never gone green as one batch in
+CI — this rate-limit collision is an *additional*, independent reason
+it might not go green as one batch even if that CI gap were closed
+today, until one of: the rate limiter is bypassed/relaxed under a
+recognized test/CI signal — this codebase has no such mechanism today,
+and inventing one was out of scope for this pass and would itself need
+its own security review — or the suite's specs are run individually /
+with deliberate spacing / against a dev server restarted between
+batches, as this verification pass did to get a clean signal. Recorded
+here rather than worked around silently.
 
 Evidence upload (`app/api/evidence/upload/route.ts`) enforces MIME/extension
 allowlisting, size caps, org-scoped storage paths (with a database-level
@@ -1146,9 +1252,25 @@ regression test.
 
 Three full-journey Playwright specs (importer, producer, cross-org-sharing)
 plus smoke and topbar-responsive specs, established and passing earlier
-this overall effort against real local Supabase. Not re-run in this exact
-session (time-scoped decision; the manual browser pass in §6/§7 covers
-overlapping ground with fresh, live evidence instead). **CI caveat, found by
+this overall effort against real local Supabase. **Re-run in this session**
+(2026-08-30, §16.8 has the full narrative): a full-batch run
+(`pnpm exec playwright test`, default parallel settings) produced 11
+failures, all root-caused to a real but self-inflicted cause — this
+session's own cumulative sign-up volume (manual + automated) exceeding
+`signUpAction`'s `SIGN_UP_RATE_LIMIT` (5 per 10 minutes, in-memory,
+per-process) within one run — **not** a code regression. Every one of
+the 7 spec files was then confirmed passing individually against a
+fresh dev-server process: `importer-journey`, `producer-journey`,
+`cross-org-sharing-journey`, `importer-auth-smoke`, `producer-auth-smoke`,
+`topbar-tablet-responsive`, and all 12 of `shell.spec.ts`'s sub-tests.
+This is real, direct, positive evidence that this session's code changes
+(capability-gate route hardening, `team/actions.ts` rate limiting, the
+onboarding text fix, and the six test-coverage-backfill files) introduced
+no E2E regression — not merely an assumption carried forward. **New,
+disclosed operational finding** (§16.8): `pnpm exec playwright test` run
+as one bare batch — the way `README.md`/CI document running it — cannot
+reliably complete locally without risking this same rate-limit collision,
+independently of the pre-existing CI caveat below. **CI caveat, found by
 this session's documentation audit and not yet fixed**: `ci.yml` stops local
 Supabase *before* running the Playwright suite, and the E2E specs neither
 skip nor tolerate its absence — meaning these three journey specs are
@@ -1331,6 +1453,13 @@ directly-observed gaps.
 - CI stops local Supabase before running the Playwright E2E suite (§26) —
   those three journey specs are locally-verified only, never actually green
   in CI as currently configured.
+- Running the full local E2E suite as one bare `pnpm exec playwright test`
+  batch risks a self-inflicted `SIGN_UP_RATE_LIMIT` collision (§16.8, §26)
+  — the suite's own natural sign-up volume can exceed the 5-per-10-minute
+  budget within a single run, independent of the CI gap above. Every spec
+  passes cleanly when run individually against a fresh dev server; no fix
+  (a test/CI rate-limit bypass mechanism) exists yet, and none was added
+  this round.
 - No reusable data-table component; command palette is a disabled stub;
   zero site-wide `aria-live` beyond this session's one addition; no
   automated accessibility scan (§21).
