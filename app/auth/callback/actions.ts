@@ -63,3 +63,52 @@ export async function establishSessionAction(
     };
   }
 }
+
+/**
+ * The PKCE counterpart to establishSessionAction above -- for the
+ * `?code=...` query-param shape (live-confirmed via a real Mailpit-
+ * captured email + network trace, P13 release-blocker remediation,
+ * finding S4): app/(auth)/forgot-password/actions.ts's
+ * resetPasswordForEmail call uses @supabase/ssr's PKCE flow by
+ * default, which redirects here with a one-time authorization `code`
+ * in the URL's QUERY STRING, not the access_token/refresh_token PAIR
+ * in a HASH FRAGMENT that admin.inviteUserByEmail()'s fully server-
+ * generated links produce. A query string, unlike a hash fragment, IS
+ * sent to the server -- app/auth/callback/page.tsx reads it via
+ * useSearchParams() and calls this action instead of
+ * establishSessionAction when `code` is present.
+ *
+ * exchangeCodeForSession() needs the matching code_verifier
+ * @supabase/ssr's SAME server client wrote as a cookie when
+ * resetPasswordForEmail() originally ran (getServerSupabaseClient()
+ * reads/writes the real request's cookie store either way) -- calling
+ * it on this same server client, in the same browser session that
+ * requested the reset, is what makes the exchange succeed.
+ */
+export async function exchangeCodeForSessionAction(
+  code: string,
+): Promise<EstablishSessionResult> {
+  try {
+    const supabase =
+      await getServerSupabaseClient();
+
+    const { error } =
+      await supabase.auth.exchangeCodeForSession(
+        code,
+      );
+
+    if (error) {
+      return {
+        status: "error",
+      };
+    }
+
+    return {
+      status: "ok",
+    };
+  } catch {
+    return {
+      status: "error",
+    };
+  }
+}

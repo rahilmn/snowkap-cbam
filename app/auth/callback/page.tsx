@@ -13,6 +13,7 @@ import {
 
 import {
   establishSessionAction,
+  exchangeCodeForSessionAction,
 } from "./actions";
 
 import {
@@ -21,25 +22,33 @@ import {
 
 /**
  * Landing target for Supabase Auth email links (invite, magic link,
- * password reset) that deliver a session via an implicit-flow hash
- * fragment (#access_token=...&refresh_token=...&type=...) rather than
- * a server-verifiable ?token_hash= query param.
+ * password reset). Two distinct delivery shapes reach here, confirmed
+ * by inspecting real emails captured by local Mailpit:
  *
- * This is the ONLY shape that actually applies to the Team screen's
- * invite flow: admin.inviteUserByEmail() generates the token entirely
- * server-side (there is no browser-originated PKCE code_verifier to
- * exchange), so GoTrue's own /auth/v1/verify redirects here with the
- * session in the URL fragment -- confirmed by inspecting the real
- * email captured by local Mailpit. Hash fragments are never sent to
- * the server, so this must be a client component: a Server Component
- * at this URL would never see the tokens at all.
+ *   1. An implicit-flow HASH FRAGMENT
+ *      (#access_token=...&refresh_token=...&type=...) --
+ *      admin.inviteUserByEmail()'s own links (Team screen invites):
+ *      the token is generated entirely server-side, with no browser-
+ *      originated PKCE code_verifier to exchange, so GoTrue's
+ *      /auth/v1/verify redirects here with the session already in the
+ *      fragment. Hash fragments are never sent to the server, so
+ *      reading them requires this to be a client component.
  *
- * The tokens are read here (client-side, since only the browser can
- * see the hash fragment) but the session itself is established by
- * establishSessionAction on the SERVER client, not a client-side
- * setSession() call -- see that action's own doc comment for why
- * (P13 adversarial audit: a client-side setSession() silently fails to
- * update an existing httpOnly session cookie).
+ *   2. A PKCE QUERY PARAM (?code=...) -- resetPasswordForEmail()'s own
+ *      links (app/(auth)/forgot-password/actions.ts), which
+ *      @supabase/ssr uses PKCE flow for by default. Unlike a hash
+ *      fragment, a query param IS sent to the server, but it still
+ *      needs exchanging for a session via exchangeCodeForSessionAction
+ *      (P13 release-blocker remediation, finding S4, live-confirmed:
+ *      the original implementation only handled shape 1 and rejected
+ *      every real password-reset link as "invalid or expired").
+ *
+ * Either way, the session itself is established by a Server Action on
+ * the SERVER client, never a client-side setSession()/
+ * exchangeCodeForSession() call -- see establishSessionAction's own
+ * doc comment for why (P13 adversarial audit: a client-side
+ * setSession() silently fails to update an existing httpOnly session
+ * cookie).
  */
 export default function AuthCallbackPage() {
   return (
@@ -68,24 +77,6 @@ function AuthCallback() {
 
   useEffect(
     () => {
-      const hashParams =
-        new URLSearchParams(
-          window.location.hash.replace(
-            /^#/,
-            "",
-          ),
-        );
-
-      const accessToken =
-        hashParams.get(
-          "access_token",
-        );
-
-      const refreshToken =
-        hashParams.get(
-          "refresh_token",
-        );
-
       const requestedNext =
         searchParams.get(
           "next",
@@ -103,7 +94,51 @@ function AuthCallback() {
           ? requestedNext
           : "/accept-invitation";
 
-      if (!accessToken || !refreshToken) {
+      // Shape 2 (PKCE `?code=`, see this file's own header comment) --
+      // checked first since it is a query param, cheaper and more
+      // direct to read than parsing the hash fragment, and the two
+      // shapes are mutually exclusive in practice (GoTrue never
+      // produces both for the same link).
+      const code =
+        searchParams.get(
+          "code",
+        );
+
+      const sessionPromise =
+        code
+          ? exchangeCodeForSessionAction(
+              code,
+            )
+          : (() => {
+              const hashParams =
+                new URLSearchParams(
+                  window.location.hash.replace(
+                    /^#/,
+                    "",
+                  ),
+                );
+
+              const accessToken =
+                hashParams.get(
+                  "access_token",
+                );
+
+              const refreshToken =
+                hashParams.get(
+                  "refresh_token",
+                );
+
+              if (!accessToken || !refreshToken) {
+                return null;
+              }
+
+              return establishSessionAction(
+                accessToken,
+                refreshToken,
+              );
+            })();
+
+      if (!sessionPromise) {
         setError(
           "This link is invalid or has expired.",
         );
@@ -111,10 +146,7 @@ function AuthCallback() {
         return;
       }
 
-      establishSessionAction(
-        accessToken,
-        refreshToken,
-      )
+      sessionPromise
         .then(
           (result) => {
             if (result.status === "error") {

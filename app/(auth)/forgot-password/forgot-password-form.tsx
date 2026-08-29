@@ -7,6 +7,10 @@ import {
 import Link from "next/link";
 
 import {
+  MailCheck,
+} from "lucide-react";
+
+import {
   Button,
 } from "../../../components/ui/button";
 
@@ -23,23 +27,39 @@ import {
 } from "../../../components/ui/label";
 
 import {
-  signInAction,
-} from "../actions";
+  requestPasswordResetAction,
+} from "./actions";
 
 import {
   initialAuthActionState,
 } from "../action-state";
 
-export function SignInForm() {
+export function ForgotPasswordForm() {
   const [
     state,
     formAction,
     pending,
   ] =
     useActionState(
-      signInAction,
+      requestPasswordResetAction,
       initialAuthActionState,
     );
+
+  if (state.status === "check-email") {
+    return (
+      <div className="flex flex-col items-center gap-3 py-2 text-center">
+        <MailCheck
+          className="size-8 text-[var(--accent-interactive)]"
+          aria-hidden="true"
+        />
+
+        <p className="text-sm text-[var(--text-primary)]">
+          If an account exists for that email, a password reset link
+          has been sent. Check your inbox.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <form
@@ -61,30 +81,6 @@ export function SignInForm() {
         />
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between">
-          <Label htmlFor="password">
-            Password
-          </Label>
-
-          <Link
-            href="/forgot-password"
-            className="text-xs font-medium text-[var(--accent-interactive)] hover:text-[var(--accent-interactive-hover)]"
-          >
-            Forgot password?
-          </Link>
-        </div>
-
-        <Input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          invalid={state.status === "error"}
-        />
-      </div>
-
       <FieldError>
         {state.status === "error" ? state.message : null}
       </FieldError>
@@ -94,16 +90,16 @@ export function SignInForm() {
         loading={pending}
         className="mt-1"
       >
-        Sign in
+        Send reset link
       </Button>
 
       <p className="text-center text-sm text-[var(--text-secondary)]">
-        Don&apos;t have an account?{" "}
+        Remembered your password?{" "}
         <Link
-          href="/sign-up"
+          href="/sign-in"
           className="font-medium text-[var(--accent-interactive)] hover:text-[var(--accent-interactive-hover)]"
         >
-          Sign up
+          Sign in
         </Link>
       </p>
     </form>
