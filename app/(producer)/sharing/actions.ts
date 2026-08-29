@@ -37,11 +37,24 @@ import type {
 /**
  * 2026-08-29 (P11 mandatory security review, N4, SHOULD-FIX): master
  * plan §28 names "sharing endpoints" by name; neither action in this
- * file was rate-limited. inviteByEmailAction sends a real email (the
- * bootstrap-invite path, mirroring inviteMemberAction's own risk --
- * see app/team/actions.ts's matching comment) to an attacker-chosen
- * address; revokeSharingGrantAction is a mutation endpoint. Same IP-
- * keyed pattern as every other limiter in this codebase.
+ * file was rate-limited. inviteByEmailAction writes a real
+ * sharing_grants row keyed on an attacker-chosen invited_email (the
+ * bootstrap-invite path, mirroring inviteMemberAction's own abuse risk
+ * -- see app/team/actions.ts's matching comment), so it's rate-limited
+ * the same way; revokeSharingGrantAction is a mutation endpoint. Same
+ * IP-keyed pattern as every other limiter in this codebase.
+ *
+ * CORRECTION, 2026-08-29 (P13 audit finding): this comment previously
+ * stated inviteByEmailAction "sends a real email" -- confirmed false.
+ * issueSharingGrant (manage-sharing-grants.ts) only inserts the
+ * sharing_grants row; nothing in this codebase sends mail for the
+ * sharing-grant bootstrap path (contrast app/team/actions.ts's
+ * inviteMemberAction, which genuinely does call
+ * getSupabaseAdminClient().auth.admin.inviteUserByEmail()). An invited
+ * person with no existing Snowkap account today has no way to learn a
+ * grant is pending for them -- a real, open product gap (ADR-0012 names
+ * "an email carrying a signed, expiring token" as the intended
+ * mechanism), tracked for a follow-up, not fixed here.
  */
 const INVITE_BY_EMAIL_RATE_LIMIT: RateLimitConfig =
   {
