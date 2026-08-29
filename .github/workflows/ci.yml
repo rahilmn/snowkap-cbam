@@ -184,22 +184,43 @@ jobs:
           # the original one did.
           PATTERN='eyJ[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|sb_(publishable|secret)_[A-Za-z0-9_-]{10,}|SUPABASE_(SERVICE_ROLE_KEY|DB_PASSWORD|ANON_KEY)"?\s*[:=]\s*['"'"'"]?[^$[:space:]"'"'"']|postgres(ql)?://[^[:space:]"'"'"'/]+:[^[:space:]"'"'"'/@]{6,}@'
 
-          # The one intentional exception: the fixed local-only Supabase CLI
-          # demo JWTs (iss "supabase-demo") used as test fixtures in
-          # tests/integration/*-isolation.test.ts (see
-          # organizations-isolation.test.ts's header comment -- "the fixed
-          # local demo JWTs -- not secrets"). They are identical across every
-          # local Supabase install everywhere and are not derived from this
-          # project's own credentials, so they are allow-listed by this exact
-          # payload marker rather than by excluding the whole test directory
-          # (which would also hide a real secret accidentally added there).
+          # Two intentional exceptions, both allow-listed by their exact,
+          # fixed, local-only payload -- never by excluding a whole file
+          # class, which would also hide a real secret accidentally added
+          # there. 2026-08-29 (P13 audit finding): this scan previously
+          # excluded ':!*.md' -- ALL 36 tracked Markdown files repo-wide,
+          # not just README.md -- including docs/runbooks/SECRET_ROTATION.md,
+          # BACKUP_RESTORE.md, SUPPORT_ACCESS.md, and DEPLOYMENT.md, i.e.
+          # precisely the documents whose subject matter is credentials and
+          # that this project's own convention fills with real command
+          # transcripts. Confirmed removing it surfaces exactly one
+          # legitimate false positive (the local Postgres connection string
+          # below), not a flood -- so a second narrow allow-list entry, not
+          # a broad exclusion, is what the false-positive-suppression goal
+          # actually needed.
+          #
+          # 1. The fixed local-only Supabase CLI demo JWTs (iss
+          #    "supabase-demo") used as test fixtures in
+          #    tests/integration/*-isolation.test.ts (see
+          #    organizations-isolation.test.ts's header comment -- "the
+          #    fixed local demo JWTs -- not secrets"). Identical across
+          #    every local Supabase install everywhere, not derived from
+          #    this project's own credentials.
           KNOWN_SAFE_LOCAL_DEMO_JWT='eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6'
+
+          # 2. The fixed local Supabase Postgres connection string
+          #    (username "postgres", password "postgres", 127.0.0.1:54322)
+          #    -- Supabase CLI's own hardcoded local default, identical on
+          #    every machine that has ever run `supabase start`, quoted
+          #    verbatim in docs/runbooks/BACKUP_RESTORE.md's real drill
+          #    transcript.
+          KNOWN_SAFE_LOCAL_PG_URL='postgres:postgres@127.0.0.1'
 
           MATCHES="$(git grep -InE "$PATTERN" -- . \
               ':!pnpm-lock.yaml' \
-              ':!*.md' \
               ':!.github/workflows/ci.yml' \
-            | grep -vF "$KNOWN_SAFE_LOCAL_DEMO_JWT" || true)"
+            | grep -vF "$KNOWN_SAFE_LOCAL_DEMO_JWT" \
+            | grep -vF "$KNOWN_SAFE_LOCAL_PG_URL" || true)"
 
           if [ -n "$MATCHES" ]; then
             echo "$MATCHES"
