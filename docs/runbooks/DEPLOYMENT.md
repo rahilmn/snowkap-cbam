@@ -331,12 +331,21 @@ docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t snowkap-cbam:l
 docker run --rm -p 3000:3000 --env-file .env snowkap-cbam:local
 ```
 
-**Local Docker build validation is a genuinely open P12 item — not
-satisfied, and not something any session this phase has been able to
-safely re-run.** Three separate checks, across separate sessions the
-same day, all trace to the same root cause and are recorded here
-without smoothing over the fact that they don't describe identical
-symptoms:
+**Update, 2026-08-29 (later the same day): re-confirmed for real, after
+the disk-exhaustion blocker below was resolved (C: freed to ~38 GB).**
+A real `docker build` (against the fixed Dockerfile — §3's
+`NEXT_PUBLIC_SUPABASE_*` build-arg update) completed successfully,
+producing a 391 MB `snowkap-cbam:p12-local` image. The container was
+run, `GET /api/health` returned
+`{"status":"ok","git_sha":"<HEAD short SHA>","checks":{"database":"ok","active_regulatory_dataset":"ok"}}`,
+and `docker exec ... whoami` confirmed the process runs as the
+non-root `nextjs` user (uid 1001), not root. This closes the local
+half of "Local Docker build validation" as a genuinely re-verified,
+current fact — not the historical README claim below, and not
+something still open. What follows is preserved as the honest record
+of the three earlier same-day failures that blocked this before the
+disk was freed, since the root cause (and the general lesson about
+this host's disk-space fragility) remains worth keeping:
 
 1. An earlier P12 Docker-validation pass *did* attempt a real
    `docker build` — it ran through `corepack enable`, created the
@@ -377,14 +386,12 @@ same-day precedent (`BACKUP_RESTORE.md`'s handoff: `C:` measured at
 risks driving `C:` to literal zero, a host-stability risk out of
 proportion to what a documentation-validation task should take on.
 
-**Treat the README's "verified to build" claim as a fact from an
-earlier, separate session — not something any P12 session has been
-able to re-confirm this phase.** Local Docker build validation stays
-open until either this host has several GB of real headroom on `C:` (or
-Docker's data root is moved off `C:` entirely — see Docker Desktop's
-"Resources" settings) or the build is run on a machine/CI runner with
-adequate disk; only then does re-running the build-and-serve check
-above actually prove anything about current Dockerfile correctness.
+**Resolution:** once `C:` had real headroom again (freed to ~38 GB
+free, per the same day's later work), the build-and-serve check above
+was re-run for real and passed — see the "Update" note at the top of
+this section. The three failures below were a genuine, real host-disk
+blocker, not a Dockerfile defect, and are kept here as the record of
+that — not as a currently-open item.
 
 ## Related documents
 
