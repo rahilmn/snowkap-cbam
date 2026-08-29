@@ -205,6 +205,7 @@ describe.skipIf(!localSupabaseReachable)(
 
     let recordA: RealRecord;
     let recordB: RealRecord;
+    let recordWithRoute: RealRecord;
     let realEmissionData: RealEmissionData;
     let installationId: string;
     let producerOrgId: string;
@@ -350,6 +351,65 @@ describe.skipIf(!localSupabaseReachable)(
         toRealRecord(
           secondRaw,
         );
+
+      // A real, distinct, PRODUCTION-ROUTE-SPECIFIC candidate -- for
+      // the finding-F1-style route-binding regression test (P13 review
+      // iteration 6): recordA/recordB are both deliberately
+      // route-less (is("production_route_id", null) above), so a
+      // route-specific record needs its own fetch.
+      const { data: routeCandidates, error: routeCandidatesError } =
+        await serviceClient
+          .from("default_emission_values")
+          .select(
+            "dataset_id, source_sheet, source_row, source_trade_code, total_value, total_status, direct_value, direct_status, indirect_value, indirect_status, emission_unit, countries!inner(name, iso2), regulatory_datasets!inner(version), production_routes!inner(source_route_indicator)",
+          )
+          .eq(
+            "total_status",
+            "AVAILABLE",
+          )
+          .not(
+            "production_route_id",
+            "is",
+            null,
+          )
+          .limit(1);
+
+      if (routeCandidatesError || !routeCandidates || routeCandidates.length < 1) {
+        throw new Error(
+          `Failed to fetch a real route-specific regulatory candidate: ${routeCandidatesError?.message}`,
+        );
+      }
+
+      const routeRow =
+        routeCandidates[0]!;
+
+      const routeCountry =
+        routeRow.countries as unknown as { name: string; iso2: string };
+
+      const routeDataset =
+        routeRow.regulatory_datasets as unknown as { version: string };
+
+      const productionRoute =
+        routeRow.production_routes as unknown as { source_route_indicator: string };
+
+      recordWithRoute =
+        {
+          dataset_id: routeRow.dataset_id,
+          dataset_version: routeDataset.version,
+          source_sheet: routeRow.source_sheet,
+          source_row: routeRow.source_row,
+          source_trade_code: routeRow.source_trade_code,
+          origin_country_name: routeCountry.name,
+          origin_country_iso2: routeCountry.iso2,
+          source_production_route_code: productionRoute.source_route_indicator,
+          emission_unit: routeRow.emission_unit,
+          direct_value: routeRow.direct_value,
+          direct_status: routeRow.direct_status,
+          indirect_value: routeRow.indirect_value,
+          indirect_status: routeRow.indirect_status,
+          total_value: routeRow.total_value,
+          total_status: routeRow.total_status,
+        };
 
       const { data: importerOrg, error: importerOrgError } =
         await serviceClient
@@ -871,6 +931,72 @@ describe.skipIf(!localSupabaseReachable)(
         expect(error?.code).toBe(
           "42501",
         );
+      },
+    );
+
+    it(
+      "rejects a real, genuinely-matching route-specific record attached to a line that declares NO production route at all (P13 review iteration 6) -- self-discovered while re-reviewing finding F1's own cn_code/origin_country fix, the identical forgery shape for production_route_indicator: a route-specific default value can differ substantially from a route-independent one for the same good/country, and nothing previously tied the claimed route to what the line itself declares",
+      async () => {
+        const lineId =
+          await insertLine(
+            {
+              cn_code: recordWithRoute.source_trade_code.replace(/\s+/g, ""),
+              cn_code_level:
+                recordWithRoute.source_trade_code.replace(/\s+/g, "").length > 8
+                  ? "TARIC10"
+                  : "CN8",
+              origin_country: recordWithRoute.origin_country_iso2,
+              production_route_indicator: null,
+            },
+          );
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: determinationFrom(recordWithRoute) },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "accepts the same route-specific record when the line genuinely declares that same route (P13 review iteration 6, positive control)",
+      async () => {
+        const lineId =
+          await insertLine(
+            {
+              cn_code: recordWithRoute.source_trade_code.replace(/\s+/g, ""),
+              cn_code_level:
+                recordWithRoute.source_trade_code.replace(/\s+/g, "").length > 8
+                  ? "TARIC10"
+                  : "CN8",
+              origin_country: recordWithRoute.origin_country_iso2,
+              production_route_indicator: recordWithRoute.source_production_route_code,
+              production_route_name: "Test Route",
+            },
+          );
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: determinationFrom(recordWithRoute) },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).toBeNull();
       },
     );
 
