@@ -32,6 +32,14 @@ import {
   formatReportingPeriod,
 } from "../../../../src/domain/shared/reporting-period";
 
+import {
+  createInMemoryRateLimiter,
+} from "../../../../src/infrastructure/rate-limit/rate-limiter";
+
+import {
+  getClientIp,
+} from "../../../../components/shell/get-client-ip";
+
 export const dynamic =
   "force-dynamic";
 
@@ -42,6 +50,30 @@ interface ExportErrorBody {
 
 const XLSX_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/**
+ * 2026-08-29 (P11 mandatory security review, N4, SHOULD-FIX): master
+ * plan §28's rate-limiting scope names "mutation, import, and sharing
+ * endpoints" but the mandatory reviewer flagged this GET as the
+ * heaviest unbounded path in the app regardless -- a full-period
+ * aggregation (buildPeriodExportRows) plus building an in-memory
+ * exceljs workbook, per request, with no cap. 10 requests per 5
+ * minutes per IP is generous for genuine repeated use (re-exporting
+ * after fixing a line, checking a few periods in a row) while bounding
+ * a script hammering this route. Checked before ANY of the work below
+ * -- same "reject before I/O" ordering as every other limiter in this
+ * codebase.
+ */
+const REPORT_EXPORT_RATE_LIMIT =
+  {
+    limit: 10,
+    windowMs: 5 * 60 * 1000,
+  };
+
+const reportExportLimiter =
+  createInMemoryRateLimiter(
+    REPORT_EXPORT_RATE_LIMIT,
+  );
 
 /**
  * GET -- the XLSX counterpart to ExportPeriodCsvButton
@@ -69,6 +101,19 @@ const XLSX_CONTENT_TYPE =
 export async function GET(
   request: Request,
 ): Promise<NextResponse<ExportErrorBody> | Response> {
+  const rateLimitResult =
+    reportExportLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json(
+      { success: false, reason: "RATE_LIMITED" },
+      { status: 429 },
+    );
+  }
+
   const url =
     new URL(
       request.url,

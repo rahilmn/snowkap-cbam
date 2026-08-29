@@ -69,6 +69,9 @@ function uploadErrorMessageFor(
     case "NO_ORGANIZATION":
       return "You must be signed in to a valid organization to upload evidence.";
 
+    case "RATE_LIMITED":
+      return "Too many uploads in a short time. Please wait a moment and try again.";
+
     default:
       return "Upload failed. Please try again.";
   }

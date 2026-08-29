@@ -698,6 +698,45 @@ describe(
     );
 
     it(
+      // 2026-08-29 (P11 finding #5, live-reproduced against local
+      // Postgres): this exact CAS UPDATE used to accept a grant whose
+      // expires_at had lapsed 400 days ago. The domain-level check
+      // (transitionSharingGrant, grant-lifecycle.ts) now rejects
+      // BEFORE any UPDATE is even attempted -- asserted here via
+      // fromCalls staying empty (no db round trip for the update).
+      "rejects GRANT_EXPIRED when the grant's expires_at has already lapsed, without ever attempting the UPDATE",
+      async () => {
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await acceptSharingGrant(
+            makeMockSupabase(
+              {
+                sharing_grants: {
+                  data: { ...baseRow, expires_at: "2025-07-25T00:00:00Z" },
+                  error: null,
+                },
+              },
+              recorder,
+            ),
+            granteeMemberContext,
+            "grant-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "GRANT_EXPIRED" },
+        );
+
+        expect(
+          recorder.ops.some((op) => op.op === "update"),
+        ).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
       "rejects GRANT_NOT_INVITED when the grant isn't INVITED",
       async () => {
         const result =

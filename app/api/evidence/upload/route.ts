@@ -24,6 +24,18 @@ import {
   uploadEvidenceFile,
 } from "../../../../src/application/evidence/upload-evidence";
 
+import {
+  MAX_EVIDENCE_FILE_SIZE_BYTES,
+} from "../../../../src/domain/evidence/validate-evidence-upload";
+
+import {
+  createInMemoryRateLimiter,
+} from "../../../../src/infrastructure/rate-limit/rate-limiter";
+
+import {
+  getClientIp,
+} from "../../../../components/shell/get-client-ip";
+
 export const dynamic =
   "force-dynamic";
 
@@ -31,7 +43,59 @@ interface UploadEvidenceResponseBody {
   success: boolean;
   reason?: string;
   fileId?: string;
+  retryAfterSeconds?: number;
 }
+
+/**
+ * Uploads are heavier than a form POST -- each attempt streams a file
+ * body, runs upload-evidence.ts's own validation (size/MIME/extension
+ * checks) against the real bytes, and on success writes to Supabase
+ * Storage plus a DB row -- so this is deliberately tighter than the
+ * sign-up limit above it in cost-per-attempt terms, but still needs
+ * enough headroom for a real producer attaching several evidence
+ * files to one emission-data record in a single sitting (see
+ * evidence-section.tsx's own multi-file upload flow). 20 uploads per
+ * 5 minutes per IP.
+ *
+ * Checked here, before getServerSupabaseClient()/getUser() below --
+ * same "reject before any I/O" ordering as
+ * app/(auth)/actions.ts and app/accept-invitation/actions.ts use, so
+ * a rate-limited caller never reaches Supabase, let alone Storage.
+ * Keyed on IP alone (not IP+user) for that same reason: the caller's
+ * identity isn't known yet at the point this check has to run.
+ */
+const EVIDENCE_UPLOAD_RATE_LIMIT =
+  {
+    limit: 20,
+    windowMs: 5 * 60 * 1000,
+  };
+
+const evidenceUploadLimiter =
+  createInMemoryRateLimiter(
+    EVIDENCE_UPLOAD_RATE_LIMIT,
+  );
+
+/**
+ * 2026-08-29 (P11 mandatory security review, finding #13, SHOULD-FIX,
+ * confirmed live): request.formData() (further below) fully buffers
+ * the ENTIRE request body -- multipart framing plus the file itself
+ * -- into memory before validateEvidenceUpload ever sees
+ * fileBytes.byteLength. Route Handlers carry no default body-size cap
+ * the way Next's serverActions.bodySizeLimit does for Server Actions
+ * (node_modules/next/dist/docs/.../serverActions.md's own scope note
+ * -- confirmed by reading it, not assumed), and next.config.ts sets
+ * none either. Live repro: a 2 GB POST body is fully read into memory
+ * before this handler ever returns 413. A small overhead allowance
+ * above the real file-size cap accounts for multipart boundary/header
+ * framing around the file part -- generous enough to never reject a
+ * legitimately-sized upload, nowhere near enough to matter for the
+ * attack this closes (a multi-hundred-MB-to-GB body).
+ */
+const MULTIPART_FRAMING_OVERHEAD_BYTES =
+  64 * 1024;
+
+const MAX_ACCEPTABLE_CONTENT_LENGTH_BYTES =
+  MAX_EVIDENCE_FILE_SIZE_BYTES + MULTIPART_FRAMING_OVERHEAD_BYTES;
 
 /**
  * HTTP status for each application-layer rejection reason -- 4xx for
@@ -57,6 +121,13 @@ function statusForUploadRejection(
 
     case "EMPTY_FILE":
       return 400;
+
+    // Not an upload-evidence.ts application-layer reason (those are
+    // all handled above) -- this route's own rate-limit rejection,
+    // mapped here anyway so every non-2xx status this handler can
+    // return has exactly one place computing it.
+    case "RATE_LIMITED":
+      return 429;
 
     default:
       return 500;
@@ -84,6 +155,24 @@ function statusForUploadRejection(
 export async function POST(
   request: Request,
 ): Promise<NextResponse<UploadEvidenceResponseBody>> {
+  const rateLimitResult =
+    evidenceUploadLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json(
+      {
+        success: false,
+        reason: "RATE_LIMITED",
+        retryAfterSeconds:
+          Math.ceil(rateLimitResult.retryAfterMs / 1000),
+      },
+      { status: statusForUploadRejection("RATE_LIMITED") },
+    );
+  }
+
   const supabase =
     await getServerSupabaseClient();
 
@@ -109,6 +198,35 @@ export async function POST(
       { success: false, reason: "NO_ORGANIZATION" },
       { status: 403 },
     );
+  }
+
+  // 2026-08-29 (P11 finding #13): reject on Content-Length BEFORE
+  // request.formData() below ever buffers a single byte of the body
+  // -- see MAX_ACCEPTABLE_CONTENT_LENGTH_BYTES's own comment. Only
+  // guards the common case where the client sends Content-Length at
+  // all (every real browser fetch()/FormData upload does, since the
+  // File's size is known synchronously) -- a request using chunked
+  // transfer-encoding with no Content-Length still falls through to
+  // the existing post-buffer FILE_TOO_LARGE check below, which is a
+  // real but narrower residual than the one this closes.
+  const contentLengthHeader =
+    request.headers.get(
+      "content-length",
+    );
+
+  if (contentLengthHeader) {
+    const contentLength =
+      Number(contentLengthHeader);
+
+    if (
+      Number.isFinite(contentLength) &&
+      contentLength > MAX_ACCEPTABLE_CONTENT_LENGTH_BYTES
+    ) {
+      return NextResponse.json(
+        { success: false, reason: "FILE_TOO_LARGE" },
+        { status: statusForUploadRejection("FILE_TOO_LARGE") },
+      );
+    }
   }
 
   let formData: FormData;

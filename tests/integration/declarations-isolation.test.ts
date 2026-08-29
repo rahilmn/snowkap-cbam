@@ -873,7 +873,17 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
-      "an ADMIN of an unrelated org cannot file this org's declaration",
+      // 2026-08-29 (P11 mandatory security review, finding #3): an
+      // unrelated org's OWNER supplying a REAL declaration id from a
+      // different org must get the SAME NOT_FOUND a nonexistent id
+      // would produce -- NOT the more specific NOT_ADMIN, which would
+      // let any authenticated caller with no relationship to this org
+      // at all use this RPC as a real/fake existence oracle for
+      // declaration ids across every organization on the platform.
+      // This is a STRICTER assertion than the pre-fix NOT_ADMIN this
+      // test used to check, per the review's own fix-scope note --
+      // never weakened.
+      "an OWNER of an unrelated org (no membership here at all) cannot even learn this declaration exists -- NOT_FOUND, not NOT_ADMIN",
       async () => {
         const { data } =
           await clientOwnerB.rpc(
@@ -888,7 +898,7 @@ describe.skipIf(!localSupabaseReachable)(
           (data as RpcResultRow[] | null)?.[0];
 
         expect(row).toEqual(
-          { result_status: "NOT_ADMIN", result_declaration_id: null },
+          { result_status: "NOT_FOUND", result_declaration_id: null },
         );
       },
     );

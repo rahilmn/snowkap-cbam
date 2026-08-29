@@ -419,7 +419,16 @@ export async function acceptSharingGrant(
   const transition =
     transitionSharingGrant(
       fetched.grant,
-      { action: "ACCEPT", granteeOrgId: context.org_id },
+      {
+        action: "ACCEPT",
+        granteeOrgId: context.org_id,
+        // 2026-08-29 (P11 finding #5): the real wall-clock instant,
+        // not a stale value cached anywhere -- transitionSharingGrant
+        // now refuses (GRANT_EXPIRED) a grant whose expires_at has
+        // already lapsed, closing the gap where this bare CAS UPDATE
+        // used to accept a grant expired 400 days ago, silently.
+        now: new Date().toISOString() as IsoTimestamp,
+      },
     );
 
   if (transition.status === "REJECTED") {
@@ -435,6 +444,14 @@ export async function acceptSharingGrant(
   // record a sharing_grant.accepted audit event for an accept that never
   // actually happened (found in P7's mandatory review; same CAS shape
   // determine-from-actual-data.ts's performDetermination already uses).
+  //
+  // 2026-08-29 (P11 finding #5, second layer -- defense in depth
+  // alongside the domain-level check above): sharing_grants_update_grantee_accept's
+  // own USING clause (this migration) now ALSO requires
+  // `expires_at is null or expires_at > now()`, so even a caller
+  // bypassing this application function entirely (a raw
+  // supabase.from("sharing_grants").update() call) cannot accept an
+  // expired grant -- the CAS below would simply match zero rows.
   const { data, error } =
     await supabase
       .from("sharing_grants")

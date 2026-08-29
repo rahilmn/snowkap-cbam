@@ -19,6 +19,15 @@ import {
 } from "../../components/shell/get-preferred-org-id";
 
 import {
+  getClientIp,
+} from "../../components/shell/get-client-ip";
+
+import {
+  createInMemoryRateLimiter,
+  type RateLimitConfig,
+} from "../../src/infrastructure/rate-limit/rate-limiter";
+
+import {
   acceptInvitation,
 } from "../../src/application/organizations/invitations";
 
@@ -30,6 +39,80 @@ import type {
   AcceptInvitationActionState,
 } from "./action-state";
 
+/**
+ * Both invitationId and grantId are opaque, high-entropy identifiers
+ * (see acceptInvitation/acceptSharingGrantInvitation's own callers --
+ * these are never sequential or guessable in one try), but each
+ * action here surfaces a DIFFERENT message per outcome (EXPIRED vs
+ * EMAIL_MISMATCH vs NOT_PENDING vs "not found," see the switch
+ * statements below) -- exactly the kind of existence oracle that
+ * turns "cannot be guessed in one try" into "can be swept for hits
+ * across many tries," which is what master plan §28's "sharing
+ * endpoints" callout for rate limiting exists to bound. Both actions
+ * read the caller's Supabase user only AFTER this check (getUser() is
+ * itself a real Supabase Auth round-trip -- see proxy.ts's own doc
+ * comment on why getUser(), never getSession(), is used for anything
+ * authorization-relevant), so keying on IP (read from headers(), no
+ * Supabase call needed) rather than the not-yet-known user lets a
+ * rejected request short-circuit before any I/O at all, the same
+ * ordering app/(auth)/actions.ts's SIGN_IN/SIGN_UP limiters use.
+ */
+function tooManyAttemptsState(
+  retryAfterMs: number,
+): AcceptInvitationActionState {
+  const retryAfterSeconds =
+    Math.ceil(retryAfterMs / 1000);
+
+  return {
+    status: "error",
+    message:
+      `Too many attempts. Try again in ${retryAfterSeconds} ` +
+      `${retryAfterSeconds === 1 ? "second" : "seconds"}.`,
+  };
+}
+
+/**
+ * ACCEPT_INVITATION: a real user clicks one link from one email and
+ * submits this once (see acceptInvitationAction's own redirect() on
+ * every non-error outcome, which leaves the page entirely -- there is
+ * no legitimate "submit many times in a row" flow here the way
+ * ACCEPT_SHARING_GRANT below has). 20 attempts per 10 minutes per IP
+ * is generous headroom over that single expected submission while
+ * still keeping an automated sweep of many invitationId guesses from
+ * the same IP down to roughly one every 30 seconds.
+ */
+const ACCEPT_INVITATION_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 20,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const acceptInvitationLimiter =
+  createInMemoryRateLimiter(
+    ACCEPT_INVITATION_RATE_LIMIT,
+  );
+
+/**
+ * ACCEPT_SHARING_GRANT: unlike ACCEPT_INVITATION above, this action's
+ * own doc comment explains it deliberately does NOT redirect on
+ * success, specifically so one visit can accept a whole stack of
+ * pending grants back-to-back (a producer may invite the same
+ * importer to several installations). A slightly higher ceiling --
+ * 30 per 10 minutes per IP -- covers that legitimate multi-accept
+ * flow with room to spare while still bounding an automated grantId
+ * sweep to the same rough order of magnitude as ACCEPT_INVITATION's.
+ */
+const ACCEPT_SHARING_GRANT_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const acceptSharingGrantLimiter =
+  createInMemoryRateLimiter(
+    ACCEPT_SHARING_GRANT_RATE_LIMIT,
+  );
+
 const acceptInvitationSchema =
   z.object({
     invitationId:
@@ -40,6 +123,18 @@ export async function acceptInvitationAction(
   _previousState: AcceptInvitationActionState,
   formData: FormData,
 ): Promise<AcceptInvitationActionState> {
+  const acceptInvitationRateLimitResult =
+    acceptInvitationLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!acceptInvitationRateLimitResult.allowed) {
+    return tooManyAttemptsState(
+      acceptInvitationRateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     acceptInvitationSchema.safeParse(
       {
@@ -144,6 +239,18 @@ export async function acceptSharingGrantInvitationAction(
   _previousState: AcceptInvitationActionState,
   formData: FormData,
 ): Promise<AcceptInvitationActionState> {
+  const acceptSharingGrantRateLimitResult =
+    acceptSharingGrantLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!acceptSharingGrantRateLimitResult.allowed) {
+    return tooManyAttemptsState(
+      acceptSharingGrantRateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     acceptSharingGrantInvitationSchema.safeParse(
       {

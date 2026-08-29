@@ -51,10 +51,65 @@ async function isLocalSupabaseReachable(): Promise<boolean> {
   }
 }
 
+/**
+ * 2026-08-29 (P11 mandatory security review, finding #11 CI change --
+ * discovered while wiring `supabase start` into CI for the cross-org
+ * isolation suites, .github/workflows/ci.yml): reachability alone is
+ * NOT sufficient for THIS file, unlike every isolation suite --
+ * `supabase start`/`supabase db reset` applies migrations only,
+ * leaving countries/cbam_goods/default_emission_values/
+ * regulatory_datasets/production_routes genuinely empty until the
+ * Python pipeline (scripts/regulatory/, `pnpm regulatory:verify`'s own
+ * prerequisite) has separately loaded the real dataset -- this file's
+ * own header comment already says as much ("loaded with the real
+ * dataset ... see this migration's own commit message for how").
+ * Wiring that full offline Python pipeline into a public, no-secrets
+ * CI job is a materially larger change than this review's own scope
+ * (it needs its own investigation: ordered script sequence, a local
+ * DB connection string distinct from the hosted project's
+ * SUPABASE_DB_PASSWORD, `pip install -r requirements.txt`) --
+ * deliberately NOT attempted here. Without this extra check, enabling
+ * Supabase in CI for the isolation suites would make THIS file start
+ * running too (same reachability gate) and fail on every
+ * `length > 0` assertion below, for a reason that has nothing to do
+ * with what this file actually tests. Checking for at least one
+ * `countries` row (service-role, bypasses RLS) is a cheap, honest way
+ * to keep this suite skipping-not-failing in exactly that situation,
+ * on any local Supabase instance -- CI's or a developer's own -- that
+ * hasn't run the regulatory pipeline, while still running for real
+ * wherever it has (unchanged from before this comment).
+ */
+async function isLocalRegulatoryDataSeeded(): Promise<boolean> {
+  try {
+    const probeClient =
+      createClient(
+        LOCAL_API_URL,
+        LOCAL_SERVICE_ROLE_KEY,
+        {
+          auth: { persistSession: false },
+        },
+      );
+
+    const { data, error } =
+      await probeClient
+        .from("countries")
+        .select("id")
+        .limit(1);
+
+    return !error && !!data && data.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 const localSupabaseReachable =
   await isLocalSupabaseReachable();
 
-describe.skipIf(!localSupabaseReachable)(
+const localRegulatoryDataSeeded =
+  localSupabaseReachable &&
+  (await isLocalRegulatoryDataSeeded());
+
+describe.skipIf(!localRegulatoryDataSeeded)(
   "regulatory tables -- authenticated read access (local Supabase only)",
   () => {
     const runId =

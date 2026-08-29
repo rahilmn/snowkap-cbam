@@ -8,9 +8,88 @@ import {
   getServerSupabaseClient,
 } from "../../src/infrastructure/supabase/server-client";
 
+import {
+  createInMemoryRateLimiter,
+  type RateLimitConfig,
+} from "../../src/infrastructure/rate-limit/rate-limiter";
+
+import {
+  getClientIp,
+} from "../../components/shell/get-client-ip";
+
 import type {
   AuthActionState,
 } from "./action-state";
+
+/**
+ * "Too many attempts" for a rejected sign-in/sign-up, in the same
+ * generic-message spirit as signInAction's own "Incorrect email or
+ * password" comment above -- the retry-after seconds are the only
+ * caller-specific detail exposed, never which limiter or key rejected
+ * the request.
+ */
+function tooManyAttemptsState(
+  retryAfterMs: number,
+): AuthActionState {
+  const retryAfterSeconds =
+    Math.ceil(retryAfterMs / 1000);
+
+  return {
+    status: "error",
+    message:
+      `Too many attempts. Try again in ${retryAfterSeconds} ` +
+      `${retryAfterSeconds === 1 ? "second" : "seconds"}.`,
+  };
+}
+
+/**
+ * Module-scope singletons -- one process-lifetime InMemoryRateLimiter
+ * per action, per rate-limiter.ts's own header comment ("single-
+ * process, in-memory... does NOT survive a process restart"). Keyed
+ * by caller IP alone (getClientIp(), read before any Supabase call):
+ * neither action has an authenticated identity to key on yet, and
+ * signInAction's whole point is to never reveal which email exists,
+ * so keying on the submitted email would itself leak a signal this
+ * action deliberately avoids everywhere else.
+ *
+ * SIGN_IN: a genuine person mistyping a password twice in a row is
+ * common and must not be blocked (see this file's own "Incorrect
+ * email or password" comment on treating users kindly around auth
+ * errors) -- 10 attempts per 5 minutes comfortably covers a slow
+ * typist or a shared office NAT with several people signing in
+ * around the same time, while still capping a credential-stuffing
+ * script at a low, effectively useless rate (worst case ~1 guess per
+ * 30s, sustained).
+ */
+const SIGN_IN_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 10,
+    windowMs: 5 * 60 * 1000,
+  };
+
+const signInLimiter =
+  createInMemoryRateLimiter(
+    SIGN_IN_RATE_LIMIT,
+  );
+
+/**
+ * SIGN_UP: legitimate resubmission is rarer than for sign-in (mostly
+ * "fix a validation error and resubmit," a handful of times at
+ * most), but each attempt is a real Supabase Auth account-creation
+ * call, so this is deliberately tighter than SIGN_IN to bound
+ * automated mass-account-creation -- 5 attempts per 10 minutes per
+ * IP.
+ */
+const SIGN_UP_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 5,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const signUpLimiter =
+  createInMemoryRateLimiter(
+    SIGN_UP_RATE_LIMIT,
+  );
 
 const signInSchema = z.object({
   email: z.string().email("Enter a valid email address."),
@@ -27,6 +106,18 @@ export async function signInAction(
   _previousState: AuthActionState,
   formData: FormData,
 ): Promise<AuthActionState> {
+  const signInRateLimitResult =
+    signInLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!signInRateLimitResult.allowed) {
+    return tooManyAttemptsState(
+      signInRateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     signInSchema.safeParse(
       {
@@ -85,6 +176,18 @@ export async function signUpAction(
   _previousState: AuthActionState,
   formData: FormData,
 ): Promise<AuthActionState> {
+  const signUpRateLimitResult =
+    signUpLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!signUpRateLimitResult.allowed) {
+    return tooManyAttemptsState(
+      signUpRateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     signUpSchema.safeParse(
       {

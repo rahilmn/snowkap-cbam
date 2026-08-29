@@ -534,8 +534,18 @@ describe.skipIf(!localSupabaseReachable)(
         );
       }
 
+      // service role, not clientImporterMember: sharing_grants_update_grantee_accept
+      // (20260829390000, P11 finding #5) now correctly requires
+      // expires_at > now() in its USING clause, so the grantee's own
+      // authenticated client can no longer activate an already-expired
+      // grant -- exactly the bug that policy exists to prevent. This
+      // fixture needs an ACTIVE-but-already-expired row anyway, to
+      // prove the READ side (app.user_shared_installation_ids()) still
+      // honors expiry regardless of status, so it constructs that state
+      // directly via service role, the same way this file's other
+      // fixtures bypass RLS for setup.
       const { error: acceptExpiredError } =
-        await clientImporterMember
+        await serviceClient
           .from("sharing_grants")
           .update(
             { status: "ACTIVE" },

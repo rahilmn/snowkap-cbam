@@ -150,6 +150,22 @@ port = 54324
 # does not exist in this environment. Staging/production (real
 # Supabase-hosted Storage) will apply Part 5 literally and should be
 # spot-checked there before relying on it end-to-end.
+#
+# Re-attempted a third time 2026-08-29 (P11 re-verification, after a
+# disk-full incident was resolved and Docker Desktop was freshly
+# restarted -- a materially different environment than either prior
+# attempt, so this was a genuine re-test, not a rubber-stamp): `supabase
+# stop` + flip this to true + `supabase start` reproduces the identical
+# failure -- `LegacyHealthCheckTimeoutError: supabase_storage_snowkap-cbam
+# container is not ready: unhealthy`, whole stack torn down again. This
+# is confirmed independent of the disk-space issue (that was a separate,
+# already-resolved problem) -- a genuine image/Node incompatibility on
+# this host. Reverted to disabled and the stack recovered cleanly
+# (`supabase stop` preserves the data volume as a backup; "Starting
+# database from backup" on the next `start` confirmed no data loss).
+# 20260829410000's storage.objects policies remain shim-verified only
+# (see that migration file's own header comment) -- real Storage-backed
+# verification still needs staging or production, not local.
 [storage]
 enabled = false
 # The maximum file size allowed (e.g. "5MB", "500KB").
