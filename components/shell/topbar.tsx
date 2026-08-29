@@ -47,12 +47,12 @@ export function Topbar(
 ) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--border-default)] bg-[var(--surface-raised)] px-4">
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         <Wordmark />
 
         {organizationName && currentOrgId && organizations ? (
           <>
-            <div className="hidden h-5 w-px bg-[var(--border-default)] sm:block" />
+            <div className="hidden h-5 w-px shrink-0 bg-[var(--border-default)] sm:block" />
 
             <OrgSwitcher
               currentOrgId={currentOrgId}

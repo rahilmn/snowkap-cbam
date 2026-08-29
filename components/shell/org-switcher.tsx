@@ -39,12 +39,24 @@ export function OrgSwitcher(
       <button
         type="button"
         disabled
-        className="hidden items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-sm text-[var(--text-secondary)] disabled:cursor-not-allowed sm:flex"
+        // 2026-08-29 (P13 audit finding, reproduced live at 768px):
+        // with no width cap or truncation, a moderately long org name
+        // wrapped to multiple lines inside the fixed h-14 header and
+        // spilled into the breadcrumb row underneath. min-w-0 lets
+        // this flex child shrink below its content's natural width
+        // (required for truncate to do anything in a flex row);
+        // max-w-[10rem]/[14rem] cap it before wrap ever triggers.
+        className="hidden min-w-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-sm text-[var(--text-secondary)] disabled:cursor-not-allowed sm:flex"
       >
-        {organizations[0]?.organizationName ?? ""}
+        <span
+          className="max-w-[10rem] truncate md:max-w-[14rem]"
+          title={organizations[0]?.organizationName ?? ""}
+        >
+          {organizations[0]?.organizationName ?? ""}
+        </span>
 
         <ChevronsUpDown
-          className="size-3.5 text-[var(--text-tertiary)]"
+          className="size-3.5 shrink-0 text-[var(--text-tertiary)]"
           aria-hidden="true"
         />
       </button>
@@ -61,7 +73,11 @@ export function OrgSwitcher(
             event.target.form?.requestSubmit()
         }
         aria-label="Switch organization"
-        className="hidden h-7 rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-transparent px-2 text-sm text-[var(--text-secondary)] sm:block"
+        // Same 2026-08-29 finding as the single-org button above --
+        // the select itself gets the same width cap so a long option
+        // label can't force the control (and the row around it) wider
+        // than the header has room for.
+        className="hidden h-7 max-w-[10rem] rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-transparent px-2 text-sm text-[var(--text-secondary)] sm:block md:max-w-[14rem]"
       >
         {organizations.map(
           (org) => (
