@@ -4,11 +4,17 @@
 > banner: "`docs/architecture/` ... living documents (`ARCHITECTURE.md`,
 > `DOMAIN_MODEL.md`, `DATABASE_SCHEMA.md`) that get updated as each phase
 > lands"), this file tracks the schema **as it actually exists**, not a
-> point-in-time snapshot of one phase. It was last regrounded against the
-> applied schema on **2026-08-29**, through migration
+> point-in-time snapshot of one phase. The body below was regrounded
+> against the applied schema on 2026-08-29 through migration
 > `20260829440000_p11_review_shipment_lines_numeric_format_ck.sql`
-> (39 migrations applied). Update it as new migrations land — do not let it
-> drift back into describing an earlier phase as if it were current.
+> (39 migrations); **the "P13 additions" section near the end of this
+> document covers the five migrations applied since**
+> (`20260829450000`–`20260829490000`, 44 migrations total as of this
+> update — see [`MIGRATION_LOG.md`](./MIGRATION_LOG.md) for the full
+> ordered list). Read both: the body for the schema's shape, the P13
+> section for what changed on top of it. Update this document as new
+> migrations land — do not let it drift back into describing an earlier
+> phase as if it were current.
 
 This document covers the **entire** applied `public` schema: the protected
 regulatory foundation (6 tables) and the full product schema (15 tables + 1
@@ -1183,3 +1189,52 @@ schema as a whole once P3 landed.
 - `import_batches` has no UPDATE policy — the CSV import parse/validate/commit
   pipeline that would move it through its own status lifecycle has not
   been built yet; only the identity/status columns are reserved.
+
+## P13 additions (on top of everything above)
+
+Five migrations landed after this document's last full regrounding
+(`20260829440000`). Rather than rewriting the sections above, this
+lists what each one actually changed — see
+[`MIGRATION_LOG.md`](./MIGRATION_LOG.md) for the one-line purpose of
+each, and the migration files themselves for the full SQL.
+
+- **`20260829450000`** — `memberships_update_admin_or_owner`'s `WITH CHECK`
+  is redefined: granting `role = 'OWNER'` now additionally requires
+  `app.user_is_owner_of(org_id)` (a new helper function), not merely
+  ADMIN-or-OWNER. Before this, any ADMIN could promote another member
+  (or themselves) to OWNER.
+- **`20260829460000`** — `create_organization_with_owner()` is
+  redefined to require `app.user_confirmed_email()` before it will
+  create an organization.
+- **`20260829470000`** — `record_declaration_filed()`'s
+  `member_line_counts` CTE gains an `uncalculated_count` filter that
+  also catches `c.determination is distinct from ml.emission_determination`
+  (a line redetermined after its last calculation ran), not only a
+  genuinely missing calculation row.
+- **`20260829480000`** — three changes on `emission_data`: (1)
+  `emission_data_update_own_org`'s `WITH CHECK` gains an anti-join
+  requiring every `evidence_file_ids` element to name a real,
+  same-record, same-org `evidence_files` row; (2) a new
+  `BEFORE UPDATE` trigger, `app.enforce_emission_data_activation_gate()`,
+  blocks a direct client write of `status = 'ACTIVE'` outside the
+  `activateEmissionData` RPC path; (3)
+  `app.enforce_emission_data_verification_gate()` is redefined to
+  force-overwrite `verifier_user_id := auth.uid()` on any transition
+  into `VERIFIED`, and to reject any OTHER attempted change to
+  `verifier_user_id`/`rejection_reason` (previously mutable after the
+  fact by a plain MEMBER with no ADMIN gate and no audit trail).
+- **`20260829490000`** — `emission_data_update_own_org`'s new
+  `evidence_file_ids` anti-join (added by `20260829480000`, above) had
+  its bare `claimed.evidence_file_id::uuid` cast replaced with
+  `app.try_cast_uuid(...)` — the bare cast raised a raw Postgres
+  `22P02` on a malformed array entry instead of a clean policy
+  rejection, live-reproduced and closed by this migration; same defect
+  class and fix as `20260829410000`'s `storage.objects` hardening,
+  narrower blast radius (one row's own future `UPDATE`s, not a
+  whole-table outage).
+
+None of the five touch the protected regulatory zone (ADR-0005) or add
+a new table — all five are policy/trigger/function redefinitions on
+already-documented tables, via this codebase's established
+drop-and-recreate-in-a-new-migration pattern (see this document's own
+"forward-only" framing above).
