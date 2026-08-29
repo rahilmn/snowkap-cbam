@@ -2093,24 +2093,9 @@ describe.skipIf(!localSupabaseReachable)(
         );
 
         it(
-          "a deactivated ADMIN loses app.user_is_admin_or_owner_of() authority over the organization and over memberships",
+          "a deactivated ADMIN loses app.user_is_admin_or_owner_of() authority over memberships",
           async () => {
-            const originalName =
-              `Deactivation Org ${runId}`;
-
-            // --- baseline: an active ADMIN holds both powers ---
-            const { data: renameBefore, error: renameBeforeError } =
-              await clientAdmin
-                .from("organizations")
-                .update(
-                  { name: `${originalName} (admin renamed)` },
-                )
-                .eq("id", deactOrgId)
-                .select("id");
-
-            expect(renameBeforeError).toBeNull();
-            expect(renameBefore).toHaveLength(1);
-
+            // --- baseline: an active ADMIN holds this power ---
             const { data: promoteBefore, error: promoteBeforeError } =
               await clientAdmin
                 .from("memberships")
@@ -2129,36 +2114,7 @@ describe.skipIf(!localSupabaseReachable)(
               new Date().toISOString(),
             );
 
-            // organizations_update_admin_or_owner: before
-            // 20260829360000 this policy inlined its own memberships
-            // subquery instead of calling the helper, so a deactivated
-            // OWNER/ADMIN kept the ability to rename the org and edit
-            // its EORI and CBAM declarant status. This assertion is the
-            // one that would have caught that.
-            const { data: renameAfter, error: renameAfterError } =
-              await clientAdmin
-                .from("organizations")
-                .update(
-                  { name: "Renamed by a deactivated admin" },
-                )
-                .eq("id", deactOrgId)
-                .select("id");
-
-            expect(renameAfterError).toBeNull();
-            expect(renameAfter).toHaveLength(0);
-
-            const { data: orgRow } =
-              await serviceClient
-                .from("organizations")
-                .select("name")
-                .eq("id", deactOrgId)
-                .single();
-
-            expect(orgRow?.name).toBe(
-              `${originalName} (admin renamed)`,
-            );
-
-            // memberships_update_admin_or_owner, via the same helper.
+            // memberships_update_admin_or_owner, via app.user_is_admin_or_owner_of().
             const { data: demoteAfter, error: demoteAfterError } =
               await clientAdmin
                 .from("memberships")
@@ -2187,22 +2143,11 @@ describe.skipIf(!localSupabaseReachable)(
             expect(selfRestoreError).toBeNull();
             expect(selfRestore).toHaveLength(0);
 
-            // --- reactivate: both powers return ---
+            // --- reactivate: the power returns ---
             await setDeactivatedAt(
               adminMembershipId,
               null,
             );
-
-            const { data: renameRestored } =
-              await clientAdmin
-                .from("organizations")
-                .update(
-                  { name: originalName },
-                )
-                .eq("id", deactOrgId)
-                .select("id");
-
-            expect(renameRestored).toHaveLength(1);
 
             const { data: demoteRestored } =
               await clientAdmin
@@ -2214,6 +2159,46 @@ describe.skipIf(!localSupabaseReachable)(
                 .select("id");
 
             expect(demoteRestored).toHaveLength(1);
+          },
+        );
+
+        it(
+          "an ACTIVE ADMIN cannot update the organization row -- org profile (name, EORI, declarant status, capabilities) is OWNER-only per the master plan's role matrix (section 14: 'OWNER -- org profile/danger zone'), enforced at the application layer since the P13 audit (organization-profile.ts's own role check) but, until 20260829550000, still ADMIN-or-OWNER at the RLS level -- a gap this closes so a direct PostgREST write can never do what updateOrganizationProfile's own guard already refuses",
+          async () => {
+            const { data: adminAttempt, error: adminAttemptError } =
+              await clientAdmin
+                .from("organizations")
+                .update(
+                  { name: "Renamed by an active (non-deactivated) admin" },
+                )
+                .eq("id", deactOrgId)
+                .select("id");
+
+            expect(adminAttemptError).toBeNull();
+            expect(adminAttempt).toHaveLength(0);
+
+            const { data: orgRow } =
+              await serviceClient
+                .from("organizations")
+                .select("name")
+                .eq("id", deactOrgId)
+                .single();
+
+            expect(orgRow?.name).toBe(
+              `Deactivation Org ${runId}`,
+            );
+
+            const { data: ownerAttempt, error: ownerAttemptError } =
+              await clientOwner
+                .from("organizations")
+                .update(
+                  { name: `Deactivation Org ${runId}` },
+                )
+                .eq("id", deactOrgId)
+                .select("id");
+
+            expect(ownerAttemptError).toBeNull();
+            expect(ownerAttempt).toHaveLength(1);
           },
         );
 
