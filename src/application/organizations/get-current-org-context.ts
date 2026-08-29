@@ -49,6 +49,27 @@ export interface CurrentOrgSummary {
  *
  * Returns null when signed out, or when signed in but not yet a
  * member of any organization (the onboarding case).
+ *
+ * Revocation-on-role-change (P10 session hardening, master plan §14):
+ * this function is what makes it true by construction, with nothing to
+ * invalidate. There is no caching layer anywhere in this path --
+ * `getServerSupabaseClient()` (src/infrastructure/supabase/server-
+ * client.ts) is deliberately un-memoized per-request, the `memberships`
+ * query above runs live against Postgres on every single call (no
+ * `unstable_cache`/`React.cache()` wraps it or this function -- checked
+ * across every call site: components/shell/app-shell.tsx and every
+ * `app/**\/page.tsx`/`actions.ts` that imports it), and role/
+ * capabilities are never baked into a custom JWT claim (`supabase/
+ * config.toml`'s `[auth.hook.custom_access_token]` is disabled) that
+ * could keep asserting a stale role until the token itself expires. So
+ * an ADMIN demoted to MEMBER (or removed from the org entirely, which
+ * just drops their row out of `memberships` and this function's
+ * returned `summaries`) has that reflected on their very next request
+ * -- the next Server Component render or server action, not "after the
+ * access token expires." Guard this invariant if a caching layer is
+ * ever introduced here: it would need to key on more than `user_id`
+ * (a role change doesn't rotate the session) or be invalidated
+ * explicitly on every membership write.
  */
 export async function getCurrentOrgSummary(
   supabase: SupabaseClient,

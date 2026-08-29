@@ -205,6 +205,22 @@ site_url = "http://127.0.0.1:3000"
 # email-link flow aren't silently dropped back to the bare site_url.
 additional_redirect_urls = ["http://127.0.0.1:3000/**", "http://localhost:3000/**", "https://127.0.0.1:3000/**"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
+# Left at the stock 1-hour default (P10 session hardening review,
+# 2026-08-29). Note this number is unrelated to how fast a role change
+# takes effect -- role/capabilities are never baked into the JWT itself
+# (no `[auth.hook.custom_access_token]` hook is configured below) and
+# are instead re-derived from a live `memberships` query on every
+# request (see get-current-org-context.ts's doc comment), so that's
+# already as fresh as a request can be, independent of this value. What
+# `jwt_expiry` actually bounds is the more conventional thing: how long
+# a given access token stays independently presentable to Auth (e.g. if
+# leaked) before a refresh is required. 1 hour is GoTrue's own stock
+# default and no evidenced reason to tighten it has come up -- not
+# changed just to have changed something. Production JWT/session
+# lifetime is a hosted-Supabase-project Auth setting (this
+# `config.toml` only governs `supabase start` locally) -- an
+# owner/environment-level decision, not a code-level one, same posture
+# as docs/plans/MASTER_PLAN.md §41's Open Decisions table.
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
 # jwt_issuer = ""
