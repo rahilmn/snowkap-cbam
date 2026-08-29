@@ -509,3 +509,312 @@ describe(
     );
   },
 );
+
+// 2026-08-30: the P13 final audit round above added rate-limit-rejection
+// coverage for all five actions but only one happy-path assertion
+// (changeRoleAction, "as a representative case"). removeMemberAction,
+// deactivateMemberAction, and reactivateMemberAction's own calls into
+// their respective mocked application functions were never actually
+// exercised on the allowed-through path.
+describe(
+  "membership mutation actions (happy path, limiter allows)",
+  () => {
+    it(
+      "removeMemberAction calls removeMember and returns idle",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        removeMemberMock.mockResolvedValueOnce(
+          { status: "OK" },
+        );
+
+        const result =
+          await removeMemberAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          { status: "idle" },
+        );
+
+        expect(removeMemberMock).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it(
+      "deactivateMemberAction calls deactivateMember and returns idle",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        deactivateMemberMock.mockResolvedValueOnce(
+          { status: "OK" },
+        );
+
+        const result =
+          await deactivateMemberAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          { status: "idle" },
+        );
+
+        expect(deactivateMemberMock).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it(
+      "reactivateMemberAction calls reactivateMember and returns idle",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        reactivateMemberMock.mockResolvedValueOnce(
+          { status: "OK" },
+        );
+
+        const result =
+          await reactivateMemberAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          { status: "idle" },
+        );
+
+        expect(reactivateMemberMock).toHaveBeenCalledTimes(1);
+      },
+    );
+  },
+);
+
+// 2026-08-30: messageFor() (app/team/actions.ts) maps each REJECTED
+// result's `reason` to a user-facing message, but no existing test ever
+// drove any action down its REJECTED branch -- every prior test either
+// hit the rate limiter or the OK path. One test per action below,
+// each with a reason relevant to that action's own invariant, asserting
+// the exact message string messageFor() returns for it.
+describe(
+  "REJECTED result -> messageFor() message mapping",
+  () => {
+    it(
+      "changeRoleAction surfaces the ONLY_OWNER_CAN_GRANT_OWNERSHIP message",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        changeMemberRoleMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "ONLY_OWNER_CAN_GRANT_OWNERSHIP" },
+        );
+
+        const result =
+          await changeRoleAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1", role: "OWNER" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Only an OWNER can grant OWNER to another member.",
+          },
+        );
+      },
+    );
+
+    it(
+      "removeMemberAction surfaces the LAST_OWNER message",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        removeMemberMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "LAST_OWNER" },
+        );
+
+        const result =
+          await removeMemberAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "This organization must always have at least one OWNER.",
+          },
+        );
+      },
+    );
+
+    it(
+      "deactivateMemberAction surfaces the LAST_OWNER message",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        deactivateMemberMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "LAST_OWNER" },
+        );
+
+        const result =
+          await deactivateMemberAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "This organization must always have at least one OWNER.",
+          },
+        );
+      },
+    );
+
+    it(
+      "reactivateMemberAction surfaces the NOT_DEACTIVATED message",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        reactivateMemberMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "NOT_DEACTIVATED" },
+        );
+
+        const result =
+          await reactivateMemberAction(
+            { status: "idle" },
+            formData(
+              { membershipId: "membership-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "That member is already active.",
+          },
+        );
+      },
+    );
+  },
+);
+
+// 2026-08-30: revokeInvitationAction's own error handling doesn't go
+// through messageFor() at all -- it checks result.status ===
+// "PERSIST_FAILED" directly (see app/team/actions.ts) -- and neither
+// that branch nor its own OK/happy path had ever been exercised.
+describe(
+  "revokeInvitationAction",
+  () => {
+    it(
+      "returns a generic error message when revokeInvitation reports PERSIST_FAILED",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        revokeInvitationMock.mockResolvedValueOnce(
+          { status: "PERSIST_FAILED" },
+        );
+
+        const result =
+          await revokeInvitationAction(
+            { status: "idle" },
+            formData(
+              { invitationId: "invitation-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Something went wrong. Please try again.",
+          },
+        );
+
+        expect(revokeInvitationMock).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it(
+      "calls revokeInvitation and returns idle when it succeeds",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        revokeInvitationMock.mockResolvedValueOnce(
+          { status: "OK" },
+        );
+
+        const result =
+          await revokeInvitationAction(
+            { status: "idle" },
+            formData(
+              { invitationId: "invitation-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          { status: "idle" },
+        );
+
+        expect(revokeInvitationMock).toHaveBeenCalledTimes(1);
+      },
+    );
+  },
+);

@@ -235,3 +235,358 @@ describe(
     );
   },
 );
+
+// 2026-08-30 (test-coverage audit): the tests above only exercise the
+// rate-limit short-circuit and the OK happy path for each action.
+// Untested: the zod validation-failure branch for both actions,
+// requireOrgContext's "not a member of an organization" branch, and
+// the full REJECTED-reason message mapping each action's
+// switch/if-chain applies. These tests close that gap; they don't
+// touch any test above.
+describe(
+  "inviteByEmailAction validation",
+  () => {
+    it(
+      "returns the schema's email message when the email fails validation",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        const result =
+          await inviteByEmailAction(
+            { status: "idle" },
+            formData(
+              { installationId: "installation-1", email: "not-an-email" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Enter a valid email address.",
+          },
+        );
+
+        expect(getServerSupabaseClientMock).not.toHaveBeenCalled();
+        expect(issueSharingGrantMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "returns the schema's installationId message when installationId is empty",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        const result =
+          await inviteByEmailAction(
+            { status: "idle" },
+            formData(
+              { installationId: "", email: "buyer@example.com" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Choose an installation.",
+          },
+        );
+
+        expect(getServerSupabaseClientMock).not.toHaveBeenCalled();
+        expect(issueSharingGrantMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "returns the not-a-member error when the caller has no current org context",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          null,
+        );
+
+        const result =
+          await inviteByEmailAction(
+            { status: "idle" },
+            formData(
+              { installationId: "installation-1", email: "buyer@example.com" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "You are not a member of an organization.",
+          },
+        );
+
+        expect(issueSharingGrantMock).not.toHaveBeenCalled();
+      },
+    );
+  },
+);
+
+describe(
+  "inviteByEmailAction REJECTED-reason mapping",
+  () => {
+    it(
+      "maps PERMISSION_DENIED to the ADMIN/OWNER message",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        issueSharingGrantMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "PERMISSION_DENIED" },
+        );
+
+        const result =
+          await inviteByEmailAction(
+            { status: "idle" },
+            formData(
+              { installationId: "installation-1", email: "buyer@example.com" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Only an ADMIN or OWNER can share data.",
+          },
+        );
+      },
+    );
+
+    it(
+      "maps CAPABILITY_NOT_HELD to the not-a-producer message",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        issueSharingGrantMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+        );
+
+        const result =
+          await inviteByEmailAction(
+            { status: "idle" },
+            formData(
+              { installationId: "installation-1", email: "buyer@example.com" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Your organization is not set up as a CBAM producer/operator.",
+          },
+        );
+      },
+    );
+
+    it(
+      "maps INSTALLATION_NOT_FOUND to the choose-a-valid-installation message",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        issueSharingGrantMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "INSTALLATION_NOT_FOUND" },
+        );
+
+        const result =
+          await inviteByEmailAction(
+            { status: "idle" },
+            formData(
+              { installationId: "installation-1", email: "buyer@example.com" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Choose a valid installation.",
+          },
+        );
+      },
+    );
+
+    it(
+      "maps INVALID_INPUT to the valid-email message",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        issueSharingGrantMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "INVALID_INPUT" },
+        );
+
+        const result =
+          await inviteByEmailAction(
+            { status: "idle" },
+            formData(
+              { installationId: "installation-1", email: "buyer@example.com" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Enter a valid email address.",
+          },
+        );
+      },
+    );
+
+    it(
+      "falls back to the generic error message for an unmapped REJECTED reason",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        issueSharingGrantMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "SOME_UNMAPPED_REASON" },
+        );
+
+        const result =
+          await inviteByEmailAction(
+            { status: "idle" },
+            formData(
+              { installationId: "installation-1", email: "buyer@example.com" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Something went wrong. Please try again.",
+          },
+        );
+      },
+    );
+  },
+);
+
+describe(
+  "revokeSharingGrantAction validation",
+  () => {
+    it(
+      "returns a generic invalid-request error when grantId is empty",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        const result =
+          await revokeSharingGrantAction(
+            { status: "idle" },
+            formData(
+              { grantId: "" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Invalid request.",
+          },
+        );
+
+        expect(getServerSupabaseClientMock).not.toHaveBeenCalled();
+        expect(revokeSharingGrantMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "returns the not-a-member error when the caller has no current org context",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          undefined,
+        );
+
+        const result =
+          await revokeSharingGrantAction(
+            { status: "idle" },
+            formData(
+              { grantId: "grant-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "You are not a member of an organization.",
+          },
+        );
+
+        expect(revokeSharingGrantMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "returns the generic error message when revokeSharingGrant rejects",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        revokeSharingGrantMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "PERMISSION_DENIED" },
+        );
+
+        const result =
+          await revokeSharingGrantAction(
+            { status: "idle" },
+            formData(
+              { grantId: "grant-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Something went wrong. Please try again.",
+          },
+        );
+      },
+    );
+  },
+);

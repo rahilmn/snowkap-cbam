@@ -313,5 +313,322 @@ describe(
         expect(uploadEvidenceFileMock).toHaveBeenCalledTimes(1);
       },
     );
+
+    it(
+      "returns 403 NO_ORGANIZATION when the caller has no active org",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getUserMock.mockResolvedValueOnce(
+          { data: { user: { id: "user-1" } } },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          null,
+        );
+
+        const {
+          httpStatus,
+          body,
+        } = await bodyOf(
+          await POST(
+            uploadRequest(),
+          ),
+        );
+
+        expect(httpStatus).toBe(403);
+        expect(body).toEqual(
+          { success: false, reason: "NO_ORGANIZATION" },
+        );
+        expect(uploadEvidenceFileMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      // Simulates request.formData() throwing (e.g. a client that
+      // aborts mid-upload, or malformed multipart framing) -- only
+      // request.headers.get(...) and request.formData() are used by
+      // the route before this point, so a minimal object exposing just
+      // those two is enough to stand in for a real Request here.
+      "returns 400 INVALID_REQUEST when request.formData() itself throws",
+      async () => {
+        primeAuthenticatedOrgContext();
+
+        const throwingRequest =
+          {
+            headers: new Headers(),
+            formData: () => Promise.reject(new Error("stream error")),
+          } as unknown as Request;
+
+        const {
+          httpStatus,
+          body,
+        } = await bodyOf(
+          await POST(
+            throwingRequest,
+          ),
+        );
+
+        expect(httpStatus).toBe(400);
+        expect(body).toEqual(
+          { success: false, reason: "INVALID_REQUEST" },
+        );
+        expect(uploadEvidenceFileMock).not.toHaveBeenCalled();
+      },
+    );
+
+    describe(
+      "malformed FormData -> INVALID_REQUEST",
+      () => {
+        function formDataRequest(
+          formData: FormData,
+        ): Request {
+          return new Request(
+            "http://localhost/api/evidence/upload",
+            {
+              method: "POST",
+              body: formData,
+            },
+          );
+        }
+
+        it(
+          "returns 400 when emissionDataId is missing",
+          async () => {
+            primeAuthenticatedOrgContext();
+
+            const formData =
+              new FormData();
+
+            formData.set(
+              "file",
+              new File(
+                ["contents"],
+                "evidence.pdf",
+                { type: "application/pdf" },
+              ),
+            );
+
+            const {
+              httpStatus,
+              body,
+            } = await bodyOf(
+              await POST(
+                formDataRequest(formData),
+              ),
+            );
+
+            expect(httpStatus).toBe(400);
+            expect(body).toEqual(
+              { success: false, reason: "INVALID_REQUEST" },
+            );
+            expect(uploadEvidenceFileMock).not.toHaveBeenCalled();
+          },
+        );
+
+        it(
+          "returns 400 when emissionDataId is an empty string",
+          async () => {
+            primeAuthenticatedOrgContext();
+
+            const formData =
+              new FormData();
+
+            formData.set(
+              "emissionDataId",
+              "",
+            );
+
+            formData.set(
+              "file",
+              new File(
+                ["contents"],
+                "evidence.pdf",
+                { type: "application/pdf" },
+              ),
+            );
+
+            const {
+              httpStatus,
+              body,
+            } = await bodyOf(
+              await POST(
+                formDataRequest(formData),
+              ),
+            );
+
+            expect(httpStatus).toBe(400);
+            expect(body).toEqual(
+              { success: false, reason: "INVALID_REQUEST" },
+            );
+            expect(uploadEvidenceFileMock).not.toHaveBeenCalled();
+          },
+        );
+
+        it(
+          "returns 400 when emissionDataId is not a string (e.g. a File under that field name)",
+          async () => {
+            primeAuthenticatedOrgContext();
+
+            const formData =
+              new FormData();
+
+            formData.set(
+              "emissionDataId",
+              new File(
+                ["not-a-string"],
+                "id.txt",
+              ),
+            );
+
+            formData.set(
+              "file",
+              new File(
+                ["contents"],
+                "evidence.pdf",
+                { type: "application/pdf" },
+              ),
+            );
+
+            const {
+              httpStatus,
+              body,
+            } = await bodyOf(
+              await POST(
+                formDataRequest(formData),
+              ),
+            );
+
+            expect(httpStatus).toBe(400);
+            expect(body).toEqual(
+              { success: false, reason: "INVALID_REQUEST" },
+            );
+            expect(uploadEvidenceFileMock).not.toHaveBeenCalled();
+          },
+        );
+
+        it(
+          "returns 400 when the file field is missing",
+          async () => {
+            primeAuthenticatedOrgContext();
+
+            const formData =
+              new FormData();
+
+            formData.set(
+              "emissionDataId",
+              "emission-data-1",
+            );
+
+            const {
+              httpStatus,
+              body,
+            } = await bodyOf(
+              await POST(
+                formDataRequest(formData),
+              ),
+            );
+
+            expect(httpStatus).toBe(400);
+            expect(body).toEqual(
+              { success: false, reason: "INVALID_REQUEST" },
+            );
+            expect(uploadEvidenceFileMock).not.toHaveBeenCalled();
+          },
+        );
+
+        it(
+          "returns 400 when the file field is not a File (e.g. a plain string)",
+          async () => {
+            primeAuthenticatedOrgContext();
+
+            const formData =
+              new FormData();
+
+            formData.set(
+              "emissionDataId",
+              "emission-data-1",
+            );
+
+            formData.set(
+              "file",
+              "not-a-file",
+            );
+
+            const {
+              httpStatus,
+              body,
+            } = await bodyOf(
+              await POST(
+                formDataRequest(formData),
+              ),
+            );
+
+            expect(httpStatus).toBe(400);
+            expect(body).toEqual(
+              { success: false, reason: "INVALID_REQUEST" },
+            );
+            expect(uploadEvidenceFileMock).not.toHaveBeenCalled();
+          },
+        );
+      },
+    );
+
+    describe(
+      // Every existing test above mocks uploadEvidenceFile to resolve
+      // OK, so statusForUploadRejection's own switch (route.ts) has
+      // never been exercised for any of ITS cases until now -- these
+      // drive every REJECTED reason uploadEvidenceFile (and its own
+      // validateEvidenceUpload) can actually return, per
+      // src/application/evidence/upload-evidence.ts's UploadEvidenceResult
+      // and src/domain/evidence/validate-evidence-upload.ts's
+      // EvidenceUploadRejectionReason.
+      "statusForUploadRejection mapping for uploadEvidenceFile's REJECTED reasons",
+      () => {
+        it.each(
+          [
+            ["EMISSION_DATA_NOT_FOUND", 404],
+            ["CAPABILITY_NOT_HELD", 403],
+            ["FILE_TOO_LARGE", 413],
+            ["DISALLOWED_MIME_TYPE", 415],
+            ["DISALLOWED_EXTENSION", 415],
+            ["MIME_EXTENSION_MISMATCH", 415],
+            ["EXECUTABLE_EXTENSION", 415],
+            ["EMPTY_FILE", 400],
+            // Not handled by an explicit case in statusForUploadRejection
+            // -- both fall through to its `default: return 500` branch,
+            // which is itself a real case of that function worth
+            // covering, not just the named cases above it.
+            ["UPLOAD_FAILED", 500],
+            ["PERSIST_FAILED", 500],
+          ] as const,
+        )(
+          "maps REJECTED reason %s to HTTP %i",
+          async (reason, expectedStatus) => {
+            primeAuthenticatedOrgContext();
+
+            uploadEvidenceFileMock.mockResolvedValueOnce(
+              { status: "REJECTED", reason },
+            );
+
+            const {
+              httpStatus,
+              body,
+            } = await bodyOf(
+              await POST(
+                uploadRequest(),
+              ),
+            );
+
+            expect(httpStatus).toBe(expectedStatus);
+            expect(body).toEqual(
+              { success: false, reason },
+            );
+          },
+        );
+      },
+    );
   },
 );

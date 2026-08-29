@@ -175,6 +175,112 @@ describe(
         expect(signInWithPasswordMock).toHaveBeenCalledTimes(1);
       },
     );
+
+    it(
+      "returns the zod validation message and never calls Supabase, for an invalid email or an empty password",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        const invalidEmailResult =
+          await signInAction(
+            { status: "idle" },
+            formData(
+              { email: "not-an-email", password: "correct-horse" },
+            ),
+          );
+
+        expect(invalidEmailResult).toEqual(
+          {
+            status: "error",
+            message: "Enter a valid email address.",
+          },
+        );
+
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        const emptyPasswordResult =
+          await signInAction(
+            { status: "idle" },
+            formData(
+              { email: "buyer@example.com", password: "" },
+            ),
+          );
+
+        expect(emptyPasswordResult).toEqual(
+          {
+            status: "error",
+            message: "Enter your password.",
+          },
+        );
+
+        expect(getServerSupabaseClientMock).not.toHaveBeenCalled();
+        expect(signInWithPasswordMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "returns the confirm-your-email message when Supabase reports the account is unconfirmed",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        signInWithPasswordMock.mockResolvedValueOnce(
+          { error: { message: "Email not confirmed" } },
+        );
+
+        const result =
+          await signInAction(
+            { status: "idle" },
+            formData(
+              { email: "buyer@example.com", password: "correct-horse" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message:
+              "Confirm your email address before signing in -- check your inbox for the confirmation link.",
+          },
+        );
+
+        expect(signInWithPasswordMock).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it(
+      "calls signInWithPassword and then redirects to / on success",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        signInWithPasswordMock.mockResolvedValueOnce(
+          { error: null },
+        );
+
+        await expect(
+          signInAction(
+            { status: "idle" },
+            formData(
+              { email: "buyer@example.com", password: "correct-horse" },
+            ),
+          ),
+        ).rejects.toBe(
+          REDIRECT_SENTINEL,
+        );
+
+        expect(signInWithPasswordMock).toHaveBeenCalledTimes(1);
+        expect(redirectMock).toHaveBeenCalledWith(
+          "/",
+        );
+      },
+    );
   },
 );
 
@@ -205,6 +311,162 @@ describe(
 
         expect(getServerSupabaseClientMock).not.toHaveBeenCalled();
         expect(signUpMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "returns the zod validation message and never calls Supabase, when the password is under 8 characters",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        const result =
+          await signUpAction(
+            { status: "idle" },
+            formData(
+              { email: "buyer@example.com", password: "short1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Password must be at least 8 characters.",
+          },
+        );
+
+        expect(getServerSupabaseClientMock).not.toHaveBeenCalled();
+        expect(signUpMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "returns the generic account-exists message when Supabase reports the email is already registered",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        signUpMock.mockResolvedValueOnce(
+          {
+            data: { session: null },
+            error: { message: "User already registered" },
+          },
+        );
+
+        const result =
+          await signUpAction(
+            { status: "idle" },
+            formData(
+              { email: "buyer@example.com", password: "correct-horse-battery" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message:
+              "Something went wrong creating your account. If you already have one, try signing in instead.",
+          },
+        );
+
+        expect(signUpMock).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it(
+      "returns the generic failure message for an unrelated Supabase error",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        signUpMock.mockResolvedValueOnce(
+          {
+            data: { session: null },
+            error: { message: "Unexpected error" },
+          },
+        );
+
+        const result =
+          await signUpAction(
+            { status: "idle" },
+            formData(
+              { email: "buyer@example.com", password: "correct-horse-battery" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Something went wrong creating your account. Please try again.",
+          },
+        );
+
+        expect(signUpMock).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it(
+      "returns check-email status when sign-up succeeds but Supabase returns no session (email confirmation pending)",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        signUpMock.mockResolvedValueOnce(
+          {
+            data: { session: null },
+            error: null,
+          },
+        );
+
+        const result =
+          await signUpAction(
+            { status: "idle" },
+            formData(
+              { email: "buyer@example.com", password: "correct-horse-battery" },
+            ),
+          );
+
+        expect(result).toEqual(
+          { status: "check-email" },
+        );
+
+        expect(redirectMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "calls signUp and then redirects to /onboarding when a session comes back immediately",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        signUpMock.mockResolvedValueOnce(
+          {
+            data: { session: { access_token: "token" } },
+            error: null,
+          },
+        );
+
+        await expect(
+          signUpAction(
+            { status: "idle" },
+            formData(
+              { email: "buyer@example.com", password: "correct-horse-battery" },
+            ),
+          ),
+        ).rejects.toBe(
+          REDIRECT_SENTINEL,
+        );
+
+        expect(signUpMock).toHaveBeenCalledTimes(1);
+        expect(redirectMock).toHaveBeenCalledWith(
+          "/onboarding",
+        );
       },
     );
   },
