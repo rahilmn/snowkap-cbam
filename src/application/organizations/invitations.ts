@@ -132,12 +132,22 @@ export type RevokeInvitationResult =
  * transition to REVOKED -- this filters to status=PENDING app-side too
  * so revoking an already-ACCEPTED/EXPIRED row is a clean no-op rather
  * than a surprising status flip.
+ *
+ * .select("id") + the zero-rows check (P10 review, NIT #7, 2026-08-29):
+ * PostgREST reports no error for an UPDATE that RLS, or the
+ * .eq("status", "PENDING") filter above, silently matches to zero rows
+ * -- so without reading the affected row back, a plain MEMBER (or a
+ * revoke of an already-non-PENDING row) got {status:"OK"} for a write
+ * that never happened. This function writes no audit event either way,
+ * so the prior gap was a misleading UI only, not a false log entry like
+ * manage-membership.ts's siblings -- but the fix is the same shape, for
+ * the same reason, and worth keeping consistent.
  */
 export async function revokeInvitation(
   supabase: SupabaseClient,
   invitationId: InvitationId,
 ): Promise<RevokeInvitationResult> {
-  const { error } =
+  const { data: updated, error } =
     await supabase
       .from("organization_invitations")
       .update(
@@ -150,9 +160,10 @@ export async function revokeInvitation(
       .eq(
         "status",
         "PENDING",
-      );
+      )
+      .select("id");
 
-  if (error) {
+  if (error || !updated || updated.length === 0) {
     return {
       status: "PERSIST_FAILED",
     };
@@ -166,6 +177,7 @@ export async function revokeInvitation(
 export type AcceptInvitationResult =
   | { status: "OK"; orgId: OrganizationId }
   | { status: "ALREADY_MEMBER"; orgId: OrganizationId }
+  | { status: "MEMBERSHIP_DEACTIVATED"; orgId: OrganizationId }
   | { status: "EXPIRED" }
   | { status: "EMAIL_MISMATCH" }
   | { status: "NOT_PENDING" }
@@ -181,6 +193,17 @@ interface AcceptInvitationRpcRow {
  * SECURITY DEFINER RPC (20260828130000_organization_invitations.sql) --
  * the only way an invitation becomes a membership; see that migration
  * for why this can't be a plain client-side insert.
+ *
+ * MEMBERSHIP_DEACTIVATED is distinct from ALREADY_MEMBER on purpose
+ * (20260829360000): both mean a memberships row already exists for this
+ * person in this org, but a deactivated one confers no access at all,
+ * so treating it as ALREADY_MEMBER would consume the invitation and
+ * drop them back into a Snowkap they still cannot see anything in.
+ * Reactivation is an explicit admin action (reactivateMember,
+ * manage-membership.ts), not something accepting an invite may perform
+ * on itself -- the invite carries a role and the dormant row carries
+ * another, and silently picking either one is a privilege change nobody
+ * requested.
  */
 export async function acceptInvitation(
   supabase: SupabaseClient,
@@ -204,6 +227,7 @@ export async function acceptInvitation(
   switch (row.result_status) {
     case "OK":
     case "ALREADY_MEMBER":
+    case "MEMBERSHIP_DEACTIVATED":
       return {
         status: row.result_status,
         orgId: row.result_org_id as OrganizationId,

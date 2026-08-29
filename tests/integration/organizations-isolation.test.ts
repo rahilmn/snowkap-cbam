@@ -11,6 +11,12 @@ import {
   type SupabaseClient,
 } from "@supabase/supabase-js";
 
+import {
+  changeMemberRole,
+  reactivateMember,
+  removeMember,
+} from "../../src/application/organizations/manage-membership";
+
 // Standing two-org isolation suite (docs/plans/MASTER_PLAN.md §13: "a
 // standing test, not an assumption... from P3 on every new port/policy").
 // Runs against a LOCAL, disposable Supabase instance (`supabase start`
@@ -946,6 +952,19 @@ describe.skipIf(!localSupabaseReachable)(
                 );
 
               expect(strangerListError).not.toBeNull();
+
+              // list_org_members' shape gained deactivated_at
+              // (20260829360000) -- null for everyone here, since
+              // nobody in this org is deactivated. Asserted so the
+              // column's absence would fail loudly rather than
+              // silently rendering every member as "active" on the
+              // Team screen.
+              expect(
+                memberList?.every(
+                  (row: { deactivated_at: string | null }) =>
+                    row.deactivated_at === null,
+                ),
+              ).toBe(true);
             } finally {
               await serviceClient
                 .from("memberships")
@@ -968,6 +987,1327 @@ describe.skipIf(!localSupabaseReachable)(
               await serviceClient.auth.admin.deleteUser(
                 plainMember.user.id,
               );
+            }
+          },
+        );
+      },
+    );
+
+    // P10 review response (2026-08-29): BLOCKING finding #1 (both the
+    // correctness review and this phase's own mandatory authorization
+    // review, each independently reproduced live) and its SHOULD-FIX
+    // sibling. changeMemberRole, removeMember, and reactivateMember all
+    // used to report {status:"OK"} -- plus, for the two that write one,
+    // a FABRICATED audit event -- when RLS silently filtered their
+    // UPDATE/DELETE to zero rows because the caller wasn't ADMIN/OWNER.
+    // The block above already proves RLS itself denies the write; this
+    // block proves the thing neither review found any existing test
+    // covering: that the *application service functions* -- the actual
+    // code every Server Action in app/team/actions.ts calls -- now
+    // notice the denial and refuse, rather than lying about it.
+    describe(
+      "membership service-layer CAS guards against RLS-blocked writes (P10 review response)",
+      () => {
+        it(
+          "changeMemberRole/removeMember/reactivateMember report a rejection and write no audit event when an unauthorized caller's write is silently filtered to zero rows -- and the legitimate OWNER path still works",
+          async () => {
+            const password =
+              `isolation-test-password-${runId}!`;
+
+            const { data: freshOrg, error: freshOrgError } =
+              await serviceClient
+                .from("organizations")
+                .insert(
+                  {
+                    name: `CAS Guard Org ${runId}`,
+                    slug: `cas-guard-org-${runId}`,
+                    capabilities: ["IMPORTER_DECLARANT"],
+                  },
+                )
+                .select("id")
+                .single();
+
+            if (freshOrgError || !freshOrg) {
+              throw new Error(
+                `Failed to create fresh org: ${freshOrgError?.message}`,
+              );
+            }
+
+            const freshOrgId =
+              freshOrg.id;
+
+            const { data: ownerUser, error: ownerUserError } =
+              await serviceClient.auth.admin.createUser(
+                {
+                  email: `cas-owner-${runId}@example.com`,
+                  password,
+                  email_confirm: true,
+                },
+              );
+
+            const { data: targetUser, error: targetUserError } =
+              await serviceClient.auth.admin.createUser(
+                {
+                  email: `cas-target-${runId}@example.com`,
+                  password,
+                  email_confirm: true,
+                },
+              );
+
+            const { data: deactivatedAdminUser, error: deactivatedAdminUserError } =
+              await serviceClient.auth.admin.createUser(
+                {
+                  email: `cas-deactivated-admin-${runId}@example.com`,
+                  password,
+                  email_confirm: true,
+                },
+              );
+
+            const { data: attackerUser, error: attackerUserError } =
+              await serviceClient.auth.admin.createUser(
+                {
+                  email: `cas-attacker-${runId}@example.com`,
+                  password,
+                  email_confirm: true,
+                },
+              );
+
+            if (
+              ownerUserError || !ownerUser.user ||
+              targetUserError || !targetUser.user ||
+              deactivatedAdminUserError || !deactivatedAdminUser.user ||
+              attackerUserError || !attackerUser.user
+            ) {
+              throw new Error(
+                `Failed to create CAS-guard test users: ${ownerUserError?.message ?? targetUserError?.message ?? deactivatedAdminUserError?.message ?? attackerUserError?.message}`,
+              );
+            }
+
+            // deactivated_at is set directly on insert (service-role,
+            // bypasses RLS) rather than via deactivateMember -- this
+            // test is about changeMemberRole/removeMember/
+            // reactivateMember, not about how a row GOT deactivated.
+            const { error: membershipInsertError } =
+              await serviceClient
+                .from("memberships")
+                .insert(
+                  [
+                    {
+                      org_id: freshOrgId,
+                      user_id: ownerUser.user.id,
+                      role: "OWNER",
+                    },
+                    {
+                      org_id: freshOrgId,
+                      user_id: targetUser.user.id,
+                      role: "MEMBER",
+                    },
+                    {
+                      org_id: freshOrgId,
+                      user_id: deactivatedAdminUser.user.id,
+                      role: "ADMIN",
+                      deactivated_at: new Date().toISOString(),
+                    },
+                    {
+                      org_id: freshOrgId,
+                      user_id: attackerUser.user.id,
+                      role: "MEMBER",
+                    },
+                  ],
+                );
+
+            if (membershipInsertError) {
+              throw new Error(
+                `Failed to create memberships: ${membershipInsertError.message}`,
+              );
+            }
+
+            const { data: membershipRows, error: membershipRowsError } =
+              await serviceClient
+                .from("memberships")
+                .select("id, user_id, role, deactivated_at")
+                .eq("org_id", freshOrgId);
+
+            if (membershipRowsError || !membershipRows) {
+              throw new Error(
+                `Failed to look up membership rows: ${membershipRowsError?.message}`,
+              );
+            }
+
+            const targetMembershipId =
+              membershipRows.find(
+                (row) => row.user_id === targetUser.user.id,
+              )?.id;
+
+            const deactivatedAdminMembershipId =
+              membershipRows.find(
+                (row) => row.user_id === deactivatedAdminUser.user.id,
+              )?.id;
+
+            if (!targetMembershipId || !deactivatedAdminMembershipId) {
+              throw new Error(
+                "Failed to resolve membership row ids for the CAS-guard test.",
+              );
+            }
+
+            try {
+              const clientAttacker =
+                await signInAnonClient(
+                  `cas-attacker-${runId}@example.com`,
+                  password,
+                );
+
+              // changeMemberRole: manage-membership.ts:121-134 before
+              // this fix.
+              const changeRoleResult =
+                await changeMemberRole(
+                  clientAttacker,
+                  freshOrgId as never,
+                  targetMembershipId as never,
+                  "ADMIN",
+                );
+
+              expect(changeRoleResult).toEqual(
+                { status: "REJECTED", reason: "PERSIST_FAILED" },
+              );
+
+              const { data: targetAfterRoleAttempt } =
+                await serviceClient
+                  .from("memberships")
+                  .select("role")
+                  .eq("id", targetMembershipId)
+                  .single();
+
+              expect(targetAfterRoleAttempt?.role).toBe(
+                "MEMBER",
+              );
+
+              // removeMember: manage-membership.ts:209-220 before this
+              // fix.
+              const removeResult =
+                await removeMember(
+                  clientAttacker,
+                  freshOrgId as never,
+                  targetMembershipId as never,
+                );
+
+              expect(removeResult).toEqual(
+                { status: "REJECTED", reason: "PERSIST_FAILED" },
+              );
+
+              const { data: targetStillExists } =
+                await serviceClient
+                  .from("memberships")
+                  .select("id")
+                  .eq("id", targetMembershipId)
+                  .maybeSingle();
+
+              expect(targetStillExists?.id).toBe(
+                targetMembershipId,
+              );
+
+              // reactivateMember: BLOCKING finding #1 --
+              // manage-membership.ts:420-433 before this fix.
+              const reactivateResult =
+                await reactivateMember(
+                  clientAttacker,
+                  freshOrgId as never,
+                  deactivatedAdminMembershipId as never,
+                );
+
+              expect(reactivateResult).toEqual(
+                { status: "REJECTED", reason: "NOT_DEACTIVATED" },
+              );
+
+              const { data: adminAfterReactivateAttempt } =
+                await serviceClient
+                  .from("memberships")
+                  .select("deactivated_at")
+                  .eq("id", deactivatedAdminMembershipId)
+                  .single();
+
+              expect(adminAfterReactivateAttempt?.deactivated_at).not.toBeNull();
+
+              // None of the three attempted writes above may have left
+              // a trace in the audit log -- the whole point of this fix
+              // is that a blocked write records nothing claiming
+              // otherwise.
+              const { data: auditEvents, error: auditEventsError } =
+                await serviceClient
+                  .from("audit_events")
+                  .select("event_type")
+                  .eq("org_id", freshOrgId)
+                  .in(
+                    "event_type",
+                    [
+                      "membership.role_changed",
+                      "membership.removed",
+                      "membership.reactivated",
+                    ],
+                  );
+
+              expect(auditEventsError).toBeNull();
+              expect(auditEvents).toHaveLength(0);
+
+              // Sanity check the fix didn't also break the legitimate
+              // path: the real OWNER reactivating the same ADMIN still
+              // succeeds, and DOES record its audit event.
+              const clientOwner =
+                await signInAnonClient(
+                  `cas-owner-${runId}@example.com`,
+                  password,
+                );
+
+              const ownerReactivateResult =
+                await reactivateMember(
+                  clientOwner,
+                  freshOrgId as never,
+                  deactivatedAdminMembershipId as never,
+                );
+
+              expect(ownerReactivateResult).toEqual(
+                { status: "OK" },
+              );
+
+              const { data: adminAfterOwnerReactivate } =
+                await serviceClient
+                  .from("memberships")
+                  .select("deactivated_at")
+                  .eq("id", deactivatedAdminMembershipId)
+                  .single();
+
+              expect(adminAfterOwnerReactivate?.deactivated_at).toBeNull();
+
+              const { data: reactivatedAuditEvents, error: reactivatedAuditEventsError } =
+                await serviceClient
+                  .from("audit_events")
+                  .select("event_type")
+                  .eq("org_id", freshOrgId)
+                  .eq("event_type", "membership.reactivated");
+
+              expect(reactivatedAuditEventsError).toBeNull();
+              expect(reactivatedAuditEvents).toHaveLength(1);
+            } finally {
+              await serviceClient
+                .from("memberships")
+                .delete()
+                .eq("org_id", freshOrgId);
+
+              await serviceClient
+                .from("organizations")
+                .delete()
+                .eq("id", freshOrgId);
+
+              await serviceClient.auth.admin.deleteUser(
+                ownerUser.user.id,
+              );
+
+              await serviceClient.auth.admin.deleteUser(
+                targetUser.user.id,
+              );
+
+              await serviceClient.auth.admin.deleteUser(
+                deactivatedAdminUser.user.id,
+              );
+
+              await serviceClient.auth.admin.deleteUser(
+                attackerUser.user.id,
+              );
+            }
+          },
+        );
+      },
+    );
+
+    // Master plan §14's deactivation lifecycle, live against real
+    // Postgres. The claim under test is not "one table's policy
+    // changed" but "app.user_org_ids() and
+    // app.user_is_admin_or_owner_of() changed, and everything built on
+    // them inherited it" -- so each probe below deliberately reaches a
+    // DIFFERENT policy or function that consults one of the two
+    // helpers, rather than exercising memberships (or any single
+    // table) repeatedly:
+    //
+    //   app.user_org_ids()             -- organizations_select_own_org,
+    //                                     memberships_select_own_org,
+    //                                     audit_events_select_own_org,
+    //                                     shipments_select_own_org,
+    //                                     shipments_insert_own_org (a
+    //                                     WRITE, not just a read), and
+    //                                     public.list_org_members
+    //   app.user_is_admin_or_owner_of()-- organizations_update_admin_or_owner
+    //                                     and memberships_update_admin_or_owner
+    //
+    // list_org_members is the closest thing to a direct call available
+    // here: supabase/config.toml exposes only the `public` and
+    // `graphql_public` schemas to PostgREST, so `app.user_org_ids()`
+    // itself is not reachable over the Data API at all, and widening
+    // that config to reach it in a test would be a real expansion of
+    // the product's public API surface. Since 20260829360000 that RPC's
+    // caller gate IS a call to app.user_org_ids() and nothing else, so
+    // its "Not a member of this organization." is the helper's own
+    // answer with one function call in between.
+    describe(
+      "membership deactivation (20260829360000)",
+      () => {
+        const password =
+          `isolation-test-password-${runId}!`;
+
+        const ownerEmail =
+          `deact-owner-${runId}@example.com`;
+
+        const adminEmail =
+          `deact-admin-${runId}@example.com`;
+
+        const memberEmail =
+          `deact-member-${runId}@example.com`;
+
+        const spareEmail =
+          `deact-spare-${runId}@example.com`;
+
+        let deactOrgId: string;
+
+        let ownerUserId: string;
+        let adminUserId: string;
+        let memberUserId: string;
+        let spareUserId: string;
+
+        let adminMembershipId: string;
+        let memberMembershipId: string;
+        let spareMembershipId: string;
+
+        let clientOwner: SupabaseClient;
+        let clientAdmin: SupabaseClient;
+        let clientMember: SupabaseClient;
+
+        let seedShipmentId: string;
+
+        async function createUser(
+          email: string,
+        ): Promise<string> {
+          const { data, error } =
+            await serviceClient.auth.admin.createUser(
+              {
+                email,
+                password,
+                email_confirm: true,
+              },
+            );
+
+          if (error || !data.user) {
+            throw new Error(
+              `Failed to create ${email}: ${error?.message}`,
+            );
+          }
+
+          return data.user.id;
+        }
+
+        /**
+         * Deactivation and reactivation both go through the OWNER's own
+         * session, never the service role: that is itself part of what
+         * is under test. 20260829360000 deliberately adds NO new
+         * memberships UPDATE policy, on the argument that
+         * memberships_update_admin_or_owner (20260828110000) is a
+         * whole-row policy and already covers a column added later. If
+         * that argument were wrong these calls would affect zero rows.
+         */
+        async function setDeactivatedAt(
+          membershipId: string,
+          value: string | null,
+        ): Promise<void> {
+          const { data, error } =
+            await clientOwner
+              .from("memberships")
+              .update(
+                { deactivated_at: value },
+              )
+              .eq("id", membershipId)
+              .select("id, deactivated_at");
+
+          expect(error).toBeNull();
+          expect(data).toHaveLength(1);
+
+          if (value === null) {
+            expect(data?.[0].deactivated_at).toBeNull();
+          } else {
+            // Compared as instants, not strings: Postgres renders
+            // timestamptz with a +00:00 offset where Date#toISOString
+            // renders Z, so a string comparison fails on spelling
+            // alone.
+            expect(
+              new Date(
+                data![0].deactivated_at as string,
+              ).toISOString(),
+            ).toBe(
+              value,
+            );
+          }
+        }
+
+        beforeAll(async () => {
+          const { data: org, error: orgError } =
+            await serviceClient
+              .from("organizations")
+              .insert(
+                {
+                  name: `Deactivation Org ${runId}`,
+                  slug: `deactivation-org-${runId}`,
+                  capabilities: ["IMPORTER_DECLARANT"],
+                },
+              )
+              .select("id")
+              .single();
+
+          if (orgError || !org) {
+            throw new Error(
+              `Failed to create deactivation org: ${orgError?.message}`,
+            );
+          }
+
+          deactOrgId = org.id;
+
+          ownerUserId = await createUser(ownerEmail);
+          adminUserId = await createUser(adminEmail);
+          memberUserId = await createUser(memberEmail);
+          spareUserId = await createUser(spareEmail);
+
+          const { data: membershipRows, error: membershipError } =
+            await serviceClient
+              .from("memberships")
+              .insert(
+                [
+                  {
+                    org_id: deactOrgId,
+                    user_id: ownerUserId,
+                    role: "OWNER",
+                  },
+                  {
+                    org_id: deactOrgId,
+                    user_id: adminUserId,
+                    role: "ADMIN",
+                  },
+                  {
+                    org_id: deactOrgId,
+                    user_id: memberUserId,
+                    role: "MEMBER",
+                  },
+                  {
+                    org_id: deactOrgId,
+                    user_id: spareUserId,
+                    role: "MEMBER",
+                  },
+                ],
+              )
+              .select("id, user_id");
+
+          if (membershipError || !membershipRows) {
+            throw new Error(
+              `Failed to create deactivation memberships: ${membershipError?.message}`,
+            );
+          }
+
+          adminMembershipId =
+            membershipRows.find(
+              (row) => row.user_id === adminUserId,
+            )!.id;
+
+          memberMembershipId =
+            membershipRows.find(
+              (row) => row.user_id === memberUserId,
+            )!.id;
+
+          spareMembershipId =
+            membershipRows.find(
+              (row) => row.user_id === spareUserId,
+            )!.id;
+
+          // Something for each read probe to find (and then fail to
+          // find): one shipment and one audit event in this org.
+          const { data: shipment, error: shipmentError } =
+            await serviceClient
+              .from("shipments")
+              .insert(
+                {
+                  org_id: deactOrgId,
+                  reference: `SHIP-DEACT-${runId}`,
+                  release_date: "2026-03-15",
+                  reporting_period_kind: "ANNUAL",
+                  reporting_period_year: 2026,
+                  status: "DRAFT",
+                },
+              )
+              .select("id")
+              .single();
+
+          if (shipmentError || !shipment) {
+            throw new Error(
+              `Failed to create deactivation shipment: ${shipmentError?.message}`,
+            );
+          }
+
+          seedShipmentId = shipment.id;
+
+          const { error: auditError } =
+            await serviceClient
+              .from("audit_events")
+              .insert(
+                {
+                  org_id: deactOrgId,
+                  actor_type: "SYSTEM",
+                  event_type: "deactivation_test.fixture_created",
+                  aggregate_type: "ORGANIZATION",
+                  aggregate_id: deactOrgId,
+                  payload: {},
+                },
+              );
+
+          if (auditError) {
+            throw new Error(
+              `Failed to create deactivation audit event: ${auditError.message}`,
+            );
+          }
+
+          clientOwner =
+            await signInAnonClient(
+              ownerEmail,
+              password,
+            );
+
+          clientAdmin =
+            await signInAnonClient(
+              adminEmail,
+              password,
+            );
+
+          clientMember =
+            await signInAnonClient(
+              memberEmail,
+              password,
+            );
+        });
+
+        afterAll(async () => {
+          await serviceClient
+            .from("organization_invitations")
+            .delete()
+            .eq("org_id", deactOrgId);
+
+          await serviceClient
+            .from("audit_events")
+            .delete()
+            .eq("org_id", deactOrgId);
+
+          await serviceClient
+            .from("shipments")
+            .delete()
+            .eq("org_id", deactOrgId);
+
+          await serviceClient
+            .from("memberships")
+            .delete()
+            .eq("org_id", deactOrgId);
+
+          await serviceClient
+            .from("organizations")
+            .delete()
+            .eq("id", deactOrgId);
+
+          for (
+            const id of [ownerUserId, adminUserId, memberUserId, spareUserId]
+          ) {
+            await serviceClient.auth.admin.deleteUser(
+              id,
+            );
+          }
+        });
+
+        it(
+          "a deactivated member loses every read and write app.user_org_ids() gates, and reactivation restores them",
+          async () => {
+            // --- baseline: an active MEMBER can reach all of it ---
+            const { data: orgsBefore } =
+              await clientMember
+                .from("organizations")
+                .select("id")
+                .eq("id", deactOrgId);
+
+            expect(orgsBefore).toHaveLength(1);
+
+            const { data: membershipsBefore } =
+              await clientMember
+                .from("memberships")
+                .select("id")
+                .eq("org_id", deactOrgId);
+
+            expect(
+              (membershipsBefore?.length ?? 0) > 0,
+            ).toBe(true);
+
+            const { data: auditBefore } =
+              await clientMember
+                .from("audit_events")
+                .select("id")
+                .eq("org_id", deactOrgId);
+
+            expect(
+              (auditBefore?.length ?? 0) > 0,
+            ).toBe(true);
+
+            const { data: shipmentsBefore } =
+              await clientMember
+                .from("shipments")
+                .select("id")
+                .eq("id", seedShipmentId);
+
+            expect(shipmentsBefore).toHaveLength(1);
+
+            const { error: listBeforeError } =
+              await clientMember.rpc(
+                "list_org_members",
+                { p_org_id: deactOrgId },
+              );
+
+            expect(listBeforeError).toBeNull();
+
+            const { data: writeBefore, error: writeBeforeError } =
+              await clientMember
+                .from("shipments")
+                .insert(
+                  {
+                    org_id: deactOrgId,
+                    reference: `SHIP-DEACT-BEFORE-${runId}`,
+                    release_date: "2026-04-15",
+                    reporting_period_kind: "ANNUAL",
+                    reporting_period_year: 2026,
+                    status: "DRAFT",
+                  },
+                )
+                .select("id");
+
+            expect(writeBeforeError).toBeNull();
+            expect(writeBefore).toHaveLength(1);
+
+            // --- deactivate, through the OWNER's own session ---
+            await setDeactivatedAt(
+              memberMembershipId,
+              new Date().toISOString(),
+            );
+
+            // --- every one of those doors is now shut ---
+            const { data: orgsAfter, error: orgsAfterError } =
+              await clientMember
+                .from("organizations")
+                .select("id")
+                .eq("id", deactOrgId);
+
+            expect(orgsAfterError).toBeNull();
+            expect(orgsAfter).toHaveLength(0);
+
+            // Including their OWN membership row: the row still exists
+            // (that is the entire point of deactivation over deletion)
+            // and an active admin can still see it -- asserted below --
+            // but its holder cannot, because memberships_select_own_org
+            // is itself written in terms of app.user_org_ids().
+            const { data: membershipsAfter, error: membershipsAfterError } =
+              await clientMember
+                .from("memberships")
+                .select("id");
+
+            expect(membershipsAfterError).toBeNull();
+            expect(membershipsAfter).toHaveLength(0);
+
+            const { data: auditAfter, error: auditAfterError } =
+              await clientMember
+                .from("audit_events")
+                .select("id");
+
+            expect(auditAfterError).toBeNull();
+            expect(auditAfter).toHaveLength(0);
+
+            const { data: shipmentsAfter, error: shipmentsAfterError } =
+              await clientMember
+                .from("shipments")
+                .select("id");
+
+            expect(shipmentsAfterError).toBeNull();
+            expect(shipmentsAfter).toHaveLength(0);
+
+            // The write path, not just reads: shipments_insert_own_org's
+            // WITH CHECK consults the same helper, so this is refused
+            // outright rather than filtered to zero rows.
+            const { error: writeAfterError } =
+              await clientMember
+                .from("shipments")
+                .insert(
+                  {
+                    org_id: deactOrgId,
+                    reference: `SHIP-DEACT-AFTER-${runId}`,
+                    release_date: "2026-04-16",
+                    reporting_period_kind: "ANNUAL",
+                    reporting_period_year: 2026,
+                    status: "DRAFT",
+                  },
+                );
+
+            expect(writeAfterError).not.toBeNull();
+
+            // The helper itself, one function call away: list_org_members
+            // raises rather than returning an empty list, so this
+            // distinguishes "the helper excluded them" from "a policy
+            // filtered the rows".
+            const { error: listAfterError } =
+              await clientMember.rpc(
+                "list_org_members",
+                { p_org_id: deactOrgId },
+              );
+
+            expect(listAfterError).not.toBeNull();
+
+            // Nothing leaked sideways: the shipment they inserted while
+            // active is still there, and the org still has its rows --
+            // deactivation removed this person's access, not the data.
+            const { data: stillThere } =
+              await serviceClient
+                .from("shipments")
+                .select("id")
+                .eq("org_id", deactOrgId);
+
+            expect(
+              (stillThere?.length ?? 0),
+            ).toBe(2);
+
+            // --- reactivate: everything comes back ---
+            await setDeactivatedAt(
+              memberMembershipId,
+              null,
+            );
+
+            const { data: orgsRestored } =
+              await clientMember
+                .from("organizations")
+                .select("id")
+                .eq("id", deactOrgId);
+
+            expect(orgsRestored).toHaveLength(1);
+
+            const { data: shipmentsRestored } =
+              await clientMember
+                .from("shipments")
+                .select("id");
+
+            expect(shipmentsRestored).toHaveLength(2);
+
+            const { error: listRestoredError } =
+              await clientMember.rpc(
+                "list_org_members",
+                { p_org_id: deactOrgId },
+              );
+
+            expect(listRestoredError).toBeNull();
+
+            const { data: auditRestored } =
+              await clientMember
+                .from("audit_events")
+                .select("id");
+
+            expect(
+              (auditRestored?.length ?? 0) > 0,
+            ).toBe(true);
+
+            await serviceClient
+              .from("shipments")
+              .delete()
+              .eq("id", writeBefore![0].id);
+          },
+        );
+
+        it(
+          "a deactivated ADMIN loses app.user_is_admin_or_owner_of() authority over the organization and over memberships",
+          async () => {
+            const originalName =
+              `Deactivation Org ${runId}`;
+
+            // --- baseline: an active ADMIN holds both powers ---
+            const { data: renameBefore, error: renameBeforeError } =
+              await clientAdmin
+                .from("organizations")
+                .update(
+                  { name: `${originalName} (admin renamed)` },
+                )
+                .eq("id", deactOrgId)
+                .select("id");
+
+            expect(renameBeforeError).toBeNull();
+            expect(renameBefore).toHaveLength(1);
+
+            const { data: promoteBefore, error: promoteBeforeError } =
+              await clientAdmin
+                .from("memberships")
+                .update(
+                  { role: "ADMIN" },
+                )
+                .eq("id", spareMembershipId)
+                .select("id");
+
+            expect(promoteBeforeError).toBeNull();
+            expect(promoteBefore).toHaveLength(1);
+
+            // --- deactivate the ADMIN ---
+            await setDeactivatedAt(
+              adminMembershipId,
+              new Date().toISOString(),
+            );
+
+            // organizations_update_admin_or_owner: before
+            // 20260829360000 this policy inlined its own memberships
+            // subquery instead of calling the helper, so a deactivated
+            // OWNER/ADMIN kept the ability to rename the org and edit
+            // its EORI and CBAM declarant status. This assertion is the
+            // one that would have caught that.
+            const { data: renameAfter, error: renameAfterError } =
+              await clientAdmin
+                .from("organizations")
+                .update(
+                  { name: "Renamed by a deactivated admin" },
+                )
+                .eq("id", deactOrgId)
+                .select("id");
+
+            expect(renameAfterError).toBeNull();
+            expect(renameAfter).toHaveLength(0);
+
+            const { data: orgRow } =
+              await serviceClient
+                .from("organizations")
+                .select("name")
+                .eq("id", deactOrgId)
+                .single();
+
+            expect(orgRow?.name).toBe(
+              `${originalName} (admin renamed)`,
+            );
+
+            // memberships_update_admin_or_owner, via the same helper.
+            const { data: demoteAfter, error: demoteAfterError } =
+              await clientAdmin
+                .from("memberships")
+                .update(
+                  { role: "MEMBER" },
+                )
+                .eq("id", spareMembershipId)
+                .select("id");
+
+            expect(demoteAfterError).toBeNull();
+            expect(demoteAfter).toHaveLength(0);
+
+            // Which includes un-deactivating themselves: the deactivated
+            // admin cannot clear their own deactivated_at, or the state
+            // would be trivially reversible by the person it was applied
+            // to.
+            const { data: selfRestore, error: selfRestoreError } =
+              await clientAdmin
+                .from("memberships")
+                .update(
+                  { deactivated_at: null },
+                )
+                .eq("id", adminMembershipId)
+                .select("id");
+
+            expect(selfRestoreError).toBeNull();
+            expect(selfRestore).toHaveLength(0);
+
+            // --- reactivate: both powers return ---
+            await setDeactivatedAt(
+              adminMembershipId,
+              null,
+            );
+
+            const { data: renameRestored } =
+              await clientAdmin
+                .from("organizations")
+                .update(
+                  { name: originalName },
+                )
+                .eq("id", deactOrgId)
+                .select("id");
+
+            expect(renameRestored).toHaveLength(1);
+
+            const { data: demoteRestored } =
+              await clientAdmin
+                .from("memberships")
+                .update(
+                  { role: "MEMBER" },
+                )
+                .eq("id", spareMembershipId)
+                .select("id");
+
+            expect(demoteRestored).toHaveLength(1);
+          },
+        );
+
+        it(
+          "a deactivated member stays visible to the org's active members, with deactivated_at set",
+          async () => {
+            // The deliberate asymmetry: only the two authorization
+            // helpers exclude deactivated rows. SELECT is untouched, so
+            // the Team screen can render "deactivated" and offer
+            // reactivation, and the Audit screen can keep resolving a
+            // departed actor's events to a person instead of a bare
+            // uuid.
+            const deactivatedAt =
+              new Date().toISOString();
+
+            await setDeactivatedAt(
+              memberMembershipId,
+              deactivatedAt,
+            );
+
+            const { data: rowFromOwner, error: rowFromOwnerError } =
+              await clientOwner
+                .from("memberships")
+                .select("id, role, deactivated_at")
+                .eq("id", memberMembershipId)
+                .single();
+
+            expect(rowFromOwnerError).toBeNull();
+            expect(rowFromOwner?.role).toBe("MEMBER");
+            expect(rowFromOwner?.deactivated_at).not.toBeNull();
+
+            const { data: memberList, error: memberListError } =
+              await clientOwner.rpc(
+                "list_org_members",
+                { p_org_id: deactOrgId },
+              );
+
+            expect(memberListError).toBeNull();
+
+            const listedMember =
+              (memberList ?? []).find(
+                (row: { email: string }) => row.email === memberEmail,
+              );
+
+            expect(listedMember).toBeDefined();
+            expect(listedMember.deactivated_at).not.toBeNull();
+
+            const listedOwner =
+              (memberList ?? []).find(
+                (row: { email: string }) => row.email === ownerEmail,
+              );
+
+            expect(listedOwner.deactivated_at).toBeNull();
+
+            await setDeactivatedAt(
+              memberMembershipId,
+              null,
+            );
+          },
+        );
+
+        it(
+          "accepting an invitation while deactivated reports MEMBERSHIP_DEACTIVATED and leaves the invitation PENDING",
+          async () => {
+            const { data: invitation, error: invitationError } =
+              await serviceClient
+                .from("organization_invitations")
+                .insert(
+                  {
+                    org_id: deactOrgId,
+                    email: memberEmail,
+                    role: "MEMBER",
+                    invited_by: ownerUserId,
+                  },
+                )
+                .select("id")
+                .single();
+
+            if (invitationError || !invitation) {
+              throw new Error(
+                `Failed to create invitation: ${invitationError?.message}`,
+              );
+            }
+
+            await setDeactivatedAt(
+              memberMembershipId,
+              new Date().toISOString(),
+            );
+
+            const { data: deactivatedAccept, error: deactivatedAcceptError } =
+              await clientMember.rpc(
+                "accept_organization_invitation",
+                { p_invitation_id: invitation.id },
+              );
+
+            expect(deactivatedAcceptError).toBeNull();
+            expect(
+              deactivatedAccept?.[0]?.result_status,
+            ).toBe(
+              "MEMBERSHIP_DEACTIVATED",
+            );
+
+            // The invitation is NOT consumed. Before 20260829360000 the
+            // `exists (...)` guard classified this as ALREADY_MEMBER and
+            // marked the row ACCEPTED, burning a valid invitation to
+            // return someone to a Snowkap they still could not see
+            // anything in.
+            const { data: stillPending } =
+              await serviceClient
+                .from("organization_invitations")
+                .select("status, accepted_at, accepted_by")
+                .eq("id", invitation.id)
+                .single();
+
+            expect(stillPending?.status).toBe("PENDING");
+            expect(stillPending?.accepted_at).toBeNull();
+            expect(stillPending?.accepted_by).toBeNull();
+
+            // And no second membership row was smuggled in alongside
+            // the dormant one (memberships_org_user_uq would have
+            // raised 23505 if the RPC had reached its INSERT).
+            const { data: membershipRows } =
+              await serviceClient
+                .from("memberships")
+                .select("id")
+                .eq("org_id", deactOrgId)
+                .eq("user_id", memberUserId);
+
+            expect(membershipRows).toHaveLength(1);
+
+            // Once an admin reactivates them, the invitation they still
+            // hold resolves the ordinary way.
+            await setDeactivatedAt(
+              memberMembershipId,
+              null,
+            );
+
+            const { data: reactivatedAccept } =
+              await clientMember.rpc(
+                "accept_organization_invitation",
+                { p_invitation_id: invitation.id },
+              );
+
+            expect(
+              reactivatedAccept?.[0]?.result_status,
+            ).toBe(
+              "ALREADY_MEMBER",
+            );
+          },
+        );
+      },
+    );
+
+    // P10 capability-matrix audit: inviteMember/revokeInvitation
+    // (src/application/organizations/invitations.ts) carry no
+    // application-layer role check of their own -- both functions'
+    // own doc comments say enforcement is RLS-only
+    // (organization_invitations_insert_admin_or_owner /
+    // _update_admin_or_owner, 20260828130000), matching
+    // manage-membership.ts's identical RLS-only posture. That RLS-only
+    // claim had no standing test anywhere in this repo proving it
+    // actually holds -- this closes that gap, live against real
+    // Postgres, the same way "membership management" above proves
+    // memberships_update_admin_or_owner/_delete_admin_or_owner.
+    describe(
+      "organization invitations (20260828130000)",
+      () => {
+        it(
+          "a plain MEMBER cannot create or revoke an invitation; an ADMIN can do both",
+          async () => {
+            const password =
+              `isolation-test-password-${runId}!`;
+
+            const { data: inviteOrg, error: inviteOrgError } =
+              await serviceClient
+                .from("organizations")
+                .insert(
+                  {
+                    name: `Invitations Org ${runId}`,
+                    slug: `invitations-org-${runId}`,
+                    capabilities: ["IMPORTER_DECLARANT"],
+                  },
+                )
+                .select("id")
+                .single();
+
+            if (inviteOrgError || !inviteOrg) {
+              throw new Error(
+                `Failed to create invitations org: ${inviteOrgError?.message}`,
+              );
+            }
+
+            const inviteOrgId =
+              inviteOrg.id;
+
+            const { data: ownerUser, error: ownerUserError } =
+              await serviceClient.auth.admin.createUser(
+                {
+                  email: `invite-owner-${runId}@example.com`,
+                  password,
+                  email_confirm: true,
+                },
+              );
+
+            const { data: adminUser, error: adminUserError } =
+              await serviceClient.auth.admin.createUser(
+                {
+                  email: `invite-admin-${runId}@example.com`,
+                  password,
+                  email_confirm: true,
+                },
+              );
+
+            const { data: memberUser, error: memberUserError } =
+              await serviceClient.auth.admin.createUser(
+                {
+                  email: `invite-member-${runId}@example.com`,
+                  password,
+                  email_confirm: true,
+                },
+              );
+
+            if (
+              ownerUserError || !ownerUser.user ||
+              adminUserError || !adminUser.user ||
+              memberUserError || !memberUser.user
+            ) {
+              throw new Error(
+                `Failed to create invitations-test users: ${ownerUserError?.message ?? adminUserError?.message ?? memberUserError?.message}`,
+              );
+            }
+
+            const { error: membershipError } =
+              await serviceClient
+                .from("memberships")
+                .insert(
+                  [
+                    { org_id: inviteOrgId, user_id: ownerUser.user.id, role: "OWNER" },
+                    { org_id: inviteOrgId, user_id: adminUser.user.id, role: "ADMIN" },
+                    { org_id: inviteOrgId, user_id: memberUser.user.id, role: "MEMBER" },
+                  ],
+                );
+
+            if (membershipError) {
+              throw new Error(
+                `Failed to create invitations-test memberships: ${membershipError.message}`,
+              );
+            }
+
+            try {
+              const clientAdmin =
+                await signInAnonClient(
+                  `invite-admin-${runId}@example.com`,
+                  password,
+                );
+
+              const clientMember =
+                await signInAnonClient(
+                  `invite-member-${runId}@example.com`,
+                  password,
+                );
+
+              // A plain MEMBER cannot INSERT an invitation -- unlike an
+              // UPDATE/DELETE's USING clause (which silently filters to
+              // zero affected rows), a failing INSERT WITH CHECK is a
+              // hard Postgres error (42501), so this is a thrown/
+              // returned error, not an empty result.
+              const { error: memberInsertError } =
+                await clientMember
+                  .from("organization_invitations")
+                  .insert(
+                    {
+                      org_id: inviteOrgId,
+                      email: `invite-target-member-attempt-${runId}@example.com`,
+                      role: "MEMBER",
+                      invited_by: memberUser.user.id,
+                    },
+                  );
+
+              expect(memberInsertError).not.toBeNull();
+
+              // An ADMIN can.
+              const { data: created, error: adminInsertError } =
+                await clientAdmin
+                  .from("organization_invitations")
+                  .insert(
+                    {
+                      org_id: inviteOrgId,
+                      email: `invite-target-${runId}@example.com`,
+                      role: "MEMBER",
+                      invited_by: adminUser.user.id,
+                    },
+                  )
+                  .select("id, status")
+                  .single();
+
+              expect(adminInsertError).toBeNull();
+              expect(created?.status).toBe("PENDING");
+
+              const invitationId =
+                created!.id;
+
+              // The MEMBER cannot revoke it either -- USING excludes
+              // the row from the UPDATE's target set entirely (zero
+              // rows affected, no error), the same shape as every
+              // other ADMIN/OWNER-gated UPDATE policy in this suite.
+              const { data: memberRevokeResult, error: memberRevokeError } =
+                await clientMember
+                  .from("organization_invitations")
+                  .update(
+                    { status: "REVOKED" },
+                  )
+                  .eq("id", invitationId)
+                  .select("id");
+
+              expect(memberRevokeError).toBeNull();
+              expect(memberRevokeResult).toHaveLength(0);
+
+              const { data: stillPending } =
+                await serviceClient
+                  .from("organization_invitations")
+                  .select("status")
+                  .eq("id", invitationId)
+                  .single();
+
+              expect(stillPending?.status).toBe("PENDING");
+
+              // The ADMIN who created it (or any ADMIN/OWNER of this
+              // org) can revoke it.
+              const { data: revoked, error: adminRevokeError } =
+                await clientAdmin
+                  .from("organization_invitations")
+                  .update(
+                    { status: "REVOKED" },
+                  )
+                  .eq("id", invitationId)
+                  .select("id, status");
+
+              expect(adminRevokeError).toBeNull();
+              expect(revoked).toHaveLength(1);
+              expect(revoked?.[0]?.status).toBe("REVOKED");
+            } finally {
+              await serviceClient
+                .from("organization_invitations")
+                .delete()
+                .eq("org_id", inviteOrgId);
+
+              await serviceClient
+                .from("memberships")
+                .delete()
+                .eq("org_id", inviteOrgId);
+
+              await serviceClient
+                .from("organizations")
+                .delete()
+                .eq("id", inviteOrgId);
+
+              for (
+                const user of [ownerUser.user, adminUser.user, memberUser.user]
+              ) {
+                await serviceClient.auth.admin.deleteUser(
+                  user.id,
+                );
+              }
             }
           },
         );

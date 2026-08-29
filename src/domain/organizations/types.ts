@@ -58,6 +58,16 @@ export interface Membership {
   user_id: UserId;
   role: MembershipRole;
   created_at: IsoTimestamp;
+
+  // Null = active. Non-null = offboarded (master plan §14): the person
+  // holds no access anywhere — app.user_org_ids() and
+  // app.user_is_admin_or_owner_of() both skip the row
+  // (20260829360000) — but the row survives so their historical
+  // audit_events still resolve to a person rather than a bare uuid.
+  // Every invariant in ./invariants.ts that counts owners counts
+  // ACTIVE owners only; a deactivated OWNER can no longer satisfy an
+  // org's one-owner minimum.
+  deactivated_at: IsoTimestamp | null;
 }
 
 // OWNER is deliberately excluded from what an invite can grant --

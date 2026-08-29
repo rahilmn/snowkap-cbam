@@ -1207,6 +1207,79 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "a DEACTIVATED member cannot accept a bootstrap invite on their org's behalf",
+      async () => {
+        // This gate was a raw `exists (select 1 from
+        // public.memberships ...)` until 20260829360000, which counted
+        // a deactivated membership as membership -- so an offboarded
+        // person could still bind their FORMER org into a new cross-org
+        // sharing relationship. They would gain no read access
+        // themselves (that runs through
+        // app.user_shared_installation_ids() -> app.user_org_ids()),
+        // which is precisely why it needed a test: the damage lands on
+        // the org's state, not on anything the actor could see.
+        //
+        // Deactivated via the service role, which bypasses RLS and the
+        // TypeScript last-active-OWNER invariant alike -- deliberate:
+        // the point is to exercise the SQL gate against the state, not
+        // to route through the application service that would normally
+        // refuse to deactivate a sole OWNER.
+        const { error: deactivateError } =
+          await serviceClient
+            .from("memberships")
+            .update(
+              { deactivated_at: new Date().toISOString() },
+            )
+            .eq("org_id", invitedOrgId)
+            .eq("user_id", invitedOwnerId);
+
+        expect(deactivateError).toBeNull();
+
+        try {
+          const { data } =
+            await clientInvitedOwner.rpc(
+              "accept_sharing_grant_invitation",
+              {
+                p_grant_id: bootstrapGrantId,
+                p_org_id: invitedOrgId,
+              },
+            );
+
+          const row =
+            (data as { result_status: string; result_org_id: string | null }[] | null)?.[0];
+
+          expect(row?.result_status).toBe(
+            "NOT_A_MEMBER",
+          );
+
+          const { data: stillInvited } =
+            await serviceClient
+              .from("sharing_grants")
+              .select("status, grantee_org_id")
+              .eq(
+                "id",
+                bootstrapGrantId,
+              )
+              .single();
+
+          expect(stillInvited).toEqual(
+            { status: "INVITED", grantee_org_id: null },
+          );
+        } finally {
+          // Restored before the next test, which accepts this same
+          // still-INVITED grant for real.
+          await serviceClient
+            .from("memberships")
+            .update(
+              { deactivated_at: null },
+            )
+            .eq("org_id", invitedOrgId)
+            .eq("user_id", invitedOwnerId);
+        }
+      },
+    );
+
+    it(
       "the correctly invited user accepts into their own active org, resolving grantee_org_id and granting the same read access a direct grant would", async () => {
         const { data: acceptData } =
           await clientInvitedOwner.rpc(

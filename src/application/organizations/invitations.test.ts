@@ -22,10 +22,12 @@ function mockUserScopedSupabase(
   {
     insertResult,
     updateError = null,
+    updateRowsAffected = 1,
     selectResult,
   }: {
     insertResult?: { data: unknown; error: unknown };
     updateError?: unknown;
+    updateRowsAffected?: number;
     selectResult?: { data: unknown; error: unknown };
   },
 ) {
@@ -56,10 +58,23 @@ function mockUserScopedSupabase(
           {
             eq: () => (
               {
-                eq: () =>
-                  Promise.resolve(
-                    { error: updateError },
-                  ),
+                eq: () => (
+                  {
+                    select: () =>
+                      Promise.resolve(
+                        {
+                          data:
+                            updateError
+                              ? null
+                              : Array.from(
+                                  { length: updateRowsAffected },
+                                  () => ({ id: "row" }),
+                                ),
+                          error: updateError,
+                        },
+                      ),
+                  }
+                ),
               }
             ),
           }
@@ -272,6 +287,26 @@ describe(
         );
       },
     );
+
+    it(
+      "reports PERSIST_FAILED when the update affects zero rows (RLS blocked an unauthorized caller, or the invitation was no longer PENDING)",
+      async () => {
+        // P10 review, NIT #7, 2026-08-29: PostgREST reports no error
+        // for an UPDATE silently filtered to zero rows, so this used to
+        // report OK for a revoke that never happened.
+        const result =
+          await revokeInvitation(
+            mockUserScopedSupabase(
+              { updateError: null, updateRowsAffected: 0 },
+            ),
+            invitationId,
+          );
+
+        expect(result).toEqual(
+          { status: "PERSIST_FAILED" },
+        );
+      },
+    );
   },
 );
 
@@ -314,6 +349,30 @@ describe(
 
         expect(result).toEqual(
           { status: "ALREADY_MEMBER", orgId },
+        );
+      },
+    );
+
+    it(
+      "maps MEMBERSHIP_DEACTIVATED to its own status, not to ALREADY_MEMBER or NOT_FOUND",
+      async () => {
+        // An unmapped status falls through to NOT_FOUND ("That
+        // invitation could not be found"), which for this one would be
+        // a lie -- the invitation is valid and the RPC deliberately
+        // leaves it PENDING (20260829360000 §7).
+        const result =
+          await acceptInvitation(
+            mockRpcSupabase(
+              {
+                data: [{ result_status: "MEMBERSHIP_DEACTIVATED", result_org_id: orgId }],
+                error: null,
+              },
+            ),
+            invitationId,
+          );
+
+        expect(result).toEqual(
+          { status: "MEMBERSHIP_DEACTIVATED", orgId },
         );
       },
     );

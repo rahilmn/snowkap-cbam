@@ -102,6 +102,17 @@ export async function acceptInvitationAction(
         message: "This invitation has already been used.",
       };
 
+    // Deliberately not folded into the default: this invitation is
+    // valid and still PENDING (the RPC leaves it that way -- see
+    // 20260829360000 §7), so "could not be found" would be both wrong
+    // and a dead end. The person's earlier membership of this org was
+    // deactivated, and only an admin can lift that.
+    case "MEMBERSHIP_DEACTIVATED":
+      return {
+        status: "error",
+        message: "Your access to this organization was deactivated. Ask an administrator there to reactivate you — this invitation stays valid until they do.",
+      };
+
     default:
       return {
         status: "error",

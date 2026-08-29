@@ -713,6 +713,87 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "a DEACTIVATED member of the grantee org cannot report a consumption event, and can again once reactivated",
+      async () => {
+        // This RPC's NOT_A_MEMBER gate was a raw
+        // `exists (select 1 from public.memberships ...)` until
+        // 20260829360000 -- which counted a deactivated membership as
+        // membership, so an offboarded person could keep writing
+        // "your data was consumed" claims into the GRANTOR org's
+        // append-only audit stream, which by design has no UPDATE or
+        // DELETE policy and therefore no way to retract them. The gate
+        // now routes through app.user_org_ids(), so this probes the
+        // same helper the RLS policies use, from a code path that is
+        // not an RLS policy at all.
+        async function setImporterMemberDeactivatedAt(
+          value: string | null,
+        ): Promise<void> {
+          const { error } =
+            await serviceClient
+              .from("memberships")
+              .update(
+                { deactivated_at: value },
+              )
+              .eq("org_id", importerOrgId)
+              .eq("user_id", importerMemberId);
+
+          expect(error).toBeNull();
+        }
+
+        await setImporterMemberDeactivatedAt(
+          new Date().toISOString(),
+        );
+
+        try {
+          const deactivatedRow =
+            await callRpc(
+              clientImporterMember,
+              {
+                p_sharing_grant_id: grantId,
+                p_installation_id: installationId,
+                p_emission_data_id: activeVerifiedEmissionDataId,
+                p_emission_data_version: 1,
+                p_shipment_line_id: lineId,
+                p_determination_kind: "DETERMINED",
+              },
+            );
+
+          expect(deactivatedRow?.result_status).toBe(
+            "NOT_A_MEMBER",
+          );
+
+          expect(deactivatedRow?.result_audit_event_id).toBeNull();
+        } finally {
+          await setImporterMemberDeactivatedAt(
+            null,
+          );
+        }
+
+        // Reactivated, the identical call goes through -- so the
+        // rejection above was the deactivation and nothing else about
+        // these fixtures.
+        const reactivatedRow =
+          await callRpc(
+            clientImporterMember,
+            {
+              p_sharing_grant_id: grantId,
+              p_installation_id: installationId,
+              p_emission_data_id: activeVerifiedEmissionDataId,
+              p_emission_data_version: 1,
+              p_shipment_line_id: lineId,
+              p_determination_kind: "DETERMINED",
+            },
+          );
+
+        expect(reactivatedRow?.result_status).toBe(
+          "OK",
+        );
+
+        expect(reactivatedRow?.result_audit_event_id).not.toBeNull();
+      },
+    );
+
+    it(
       "a member of the actual grantee org cannot report a consumption event against the WRONG installation for an otherwise-ACTIVE grant",
       async () => {
         const row =
