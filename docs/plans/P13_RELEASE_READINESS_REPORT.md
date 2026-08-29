@@ -1,15 +1,19 @@
 # SNOWKAP CBAM — FINAL P13 RELEASE READINESS REPORT
 
 **Date**: 2026-08-29 (updated 2026-08-30 with the blocker-remediation
-round's results — see §15 items 9–15 and §16.6)
+round's results — see §15 items 9–15 and §16.6; updated again 2026-08-30
+after the verified 24-commit checkpoint push to
+`origin/feature/full-product-build` and a fresh Railway re-check — see §29)
 **Repository**: https://github.com/rahilmn/snowkap-cbam
 **Branch**: `feature/full-product-build`
-**HEAD**: `18c4aaf` (the 12-dimension adversarial audit referenced
-throughout this report, launched while HEAD was `28bc578`, completed and its
-results are fully incorporated in §16; 23 more commits landed between this
-report's original `4eb4ff5` HEAD and `18c4aaf` — the audit's own §16.6
-triage table plus the blocker-remediation round that acted on it — all
-incorporated in §15/§16.6's updates)
+**HEAD**: `11d882b` (pushed to and confirmed synchronized with
+`origin/feature/full-product-build`; the 12-dimension adversarial audit
+referenced throughout this report was launched while HEAD was `28bc578`,
+completed and its results are fully incorporated in §16; commits between
+this report's original `4eb4ff5` HEAD and current HEAD are the audit's own
+§16.6 triage table, the blocker-remediation round that acted on it, and
+this round's re-verification work on the R7/R9 memo — all incorporated in
+§15/§16.6/§11's updates)
 
 This report supersedes any prior status summary given mid-session in this
 conversation. Where this document and an earlier message in this session
@@ -1062,6 +1066,31 @@ Railway expects (`railway.json`'s `startCommand: "node server.js"` binds to
 `process.env.PORT`, which Railway sets automatically — confirm nothing in
 the Railway service config overrides `PORT` to a value the container isn't
 using).
+
+**Re-verified 2026-08-30, independently, in the following blocker-remediation
+round (this is not the same check as above re-described — this is a fresh
+navigation + fresh network capture run today, after the 24-commit push in
+this round)**: identical outcome. `GET /` → `502 Bad Gateway`, tab title
+"502 Bad Gateway" (Railway Request ID `DNVLc3QqTqyl4Xi1AQeqjw`); `GET
+/api/health` → `502 Bad Gateway` (Railway Request ID
+`gwyKJeYmRJGGV00VV7rehQ`) — a *different* Request ID from both the root path
+and every prior check this session, confirming each hit is a fresh,
+independently-failing request against Railway's edge, not a cached or stale
+response. The full raw response body for the `/api/health` request was
+retrieved directly via `read_network_requests` (not inferred from the
+rendered page) and is, byte-for-byte, Railway's own static platform error
+template — same embedded CSS custom properties (`--bg: hsl(250, 24%, 9%)`),
+same Railway logo SVG paths, same links to `docs.railway.com/guides/logs`,
+`docs.railway.com/guides/fixing-common-errors`, and `station.railway.com` —
+unambiguously the platform edge answering on the application's behalf
+because the container itself never bound to a port to answer anything.
+Nothing about this round's push (the 24 commits verified and pushed
+immediately before this check) could have caused or fixed this — Railway
+was never triggered to redeploy by this session, since this session has no
+Railway control-plane access of any kind to trigger a deploy in the first
+place, and Railway's own auto-deploy (if configured) is outside this
+session's visibility. **Status unchanged: still down, still unobservable
+beyond the platform-edge response.**
 
 ## 30. Deployed commit SHA
 
