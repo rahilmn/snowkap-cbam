@@ -5,14 +5,17 @@ Per CLAUDE.md's protected-zone rules and the explicit instruction this memo
 was written under, this is a decision document only — implementation
 follows a decision, never precedes it.
 
-**Date**: 2026-08-29
+**Date**: 2026-08-29 (re-verified and extended 2026-08-30 — a third
+independent affected-pairs derivation and a further, unsuccessful attempt
+at the primary source; see §5, §8)
 **Prepared by**: autonomous engineering session, P13 release-blocker
 remediation
 **Independently re-verified**: every factual claim below (the resolver's
 actual behavior, the affected-pair count, the rules-document text) was
 directly re-checked against the live code and the live ACTIVE regulatory
-dataset while writing this memo — none of it is carried forward from an
-earlier claim without re-confirmation.
+dataset both when this memo was first written and again on 2026-08-30 —
+none of it is carried forward from an earlier claim without
+re-confirmation.
 
 ---
 
@@ -111,10 +114,25 @@ ambiguity is a separate concern):
   a different, separately-reasoned case; see §7)
 ```
 
-This count was independently re-derived twice in this overall effort —
-once by the final adversarial audit workflow, once by this memo's own
-author, using two differently-written SQL queries that both landed on
-exactly 361/108/18. This is not a single unverified number.
+This count was independently re-derived **three times** across this overall
+effort — once by the final adversarial audit workflow, once by this memo's
+own author when first writing it, and a third time on 2026-08-30 while
+preparing this memo for an owner decision request — using three
+differently-written SQL queries that all landed on exactly 361/108/18. The
+third re-derivation is worth describing honestly: a first, broader query
+attempt that day (counting every listed-country/good pair with an
+`UNAVAILABLE` value, with no further restriction) returned 563 pairs across
+108 countries and 22 goods — a real discrepancy from 361/108/18, not
+silently discarded. Investigating it found the difference immediately: the
+broader query included pairs where the "Other Countries and Territories"
+fallback itself has no *available* value for that good either — meaning
+even a flipped resolver behavior would not actually resolve those extra
+202 pairs (4 extra goods), so they are correctly excluded from "pairs the
+R7-clause-2 fix would actually unblock." Restricting to pairs where the
+fallback genuinely has an available value reproduced 361/108/18 exactly.
+This is not a single unverified number, and the one time this session's own
+re-check surfaced a different figure, the discrepancy was chased down and
+resolved rather than reported alongside the original without explanation.
 
 **Affected workflows**: any importer declaring a shipment line whose origin
 country is one of the 108 affected countries, for one of the 18 affected
@@ -192,15 +210,43 @@ as clearly different regulatory situations under either interpretation.
 
 The verbatim primary legal text (Commission Implementing Regulation (EU)
 2025/2621, Annex I, or its correcting regulation (EU) 2026/1740) was **not
-read directly** by this session. Two attempts were made: the EUR-Lex HTML
-page exceeded the available fetch tool's size limit, and the official
-Commission PDF annex returned an HTTP 403. What this memo relies on instead
-is (a) this repo's own pre-existing R7/R9 text, presumably transcribed at
-some earlier point with better source access than this session had, and
-(b) two independent web-search summaries corroborating that text against
-EUR-Lex-derived sources. This is meaningfully short of "verified against
-the primary source, read directly" — which is exactly why this remains a
-memo requesting a decision, not a change already made.
+read directly** by this session, across three separate attempts on two
+separate occasions:
+
+- **Attempt set 1** (when this memo was first written): the EUR-Lex HTML
+  page exceeded the available fetch tool's size limit, and the official
+  Commission PDF annex returned an HTTP 403.
+- **Attempt set 2** (2026-08-30, re-attempted specifically to try to close
+  this gap before the owner decision): EUR-Lex's own CELEX-format document
+  URL (`.../TXT/HTML/?uri=CELEX:32025R2621`), tried via both a fetch tool
+  and a real, JavaScript-rendering browser, redirected to EUR-Lex's generic
+  homepage every time — the homepage itself displays EUR-Lex's own banner
+  notice: **"EUR-Lex is temporarily not fully available. You can however
+  access recent OJs."** This is a stated platform-side outage, not a
+  fetch-tool limitation or a URL error on this session's part. EUR-Lex's
+  own suggested fallback link (`op.europa.eu/en/web/eu-law-in-force`)
+  returned a bot-detection/CAPTCHA challenge page ("One moment, we're
+  checking you're not a bot") — per this session's own operating
+  constraints, no attempt was made to bypass it; that path was abandoned
+  outright rather than worked around.
+
+What this memo relies on instead is (a) this repo's own pre-existing R7/R9
+text, presumably transcribed at some earlier point with better source
+access than this session had, and (b) three independent web-search-sourced
+corroborations of that same text against EUR-Lex-derived sources — two from
+the memo's original writing, plus a third found on 2026-08-30
+(co2-iq.com, an EU CBAM compliance-tooling vendor, quoting: "Where a
+country or territory is explicitly listed but no value is provided or the
+relevant field shows '–', the default value for the respective good from
+the table 'Other countries and territories' needs to be selected" —
+independently matching this repo's own R7 clause 2 almost verbatim). This
+is still meaningfully short of "verified against the primary source, read
+directly" — which is exactly why this remains a memo requesting a decision,
+not a change already made. **If EUR-Lex's outage has since cleared, the
+owner reading this is encouraged to check the primary text directly** at
+`https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32025R2621`
+before deciding — that would settle this more conclusively than any
+corroboration this session could gather.
 
 ## 9. Implementation consequences of each choice
 
