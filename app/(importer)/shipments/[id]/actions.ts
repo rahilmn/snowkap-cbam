@@ -271,6 +271,76 @@ const searchCbamGoodsLimiter =
   );
 
 /**
+ * 2026-08-30 (P13 final non-blocked-work audit, missing-rate-limit,
+ * confirmed via adversarial verify): this file wired a rate limiter
+ * for searchCbamGoodsAction's own 2026-08-29 finding above, but never
+ * extended the same reasoning to its six mutation actions --
+ * addLineAction, removeLineAction, transitionShipmentAction,
+ * resolveEmissionsAction, determineFromActualDataAction, and
+ * calculateLineAction. Every one of them is a directly-POSTable Server
+ * Action reachable independent of UI rendering (same proxy.ts
+ * limitation the comment above already documents), and none had any
+ * throttle at all -- the identical gap class already found and fixed
+ * in app/team/actions.ts, just in a file that remediation didn't
+ * touch. 30/10min matches this codebase's established rate for
+ * authenticated mutation actions of comparable weight (see
+ * app/(producer)/sharing/actions.ts's revokeSharingGrantAction).
+ * calculateLineAction and resolveEmissionsAction are the heaviest of
+ * the six (the full calculation engine and a regulatory-resolver
+ * lookup respectively) but share the same limit for simplicity --
+ * nothing here relies on a looser bound for either.
+ */
+const LINE_MUTATION_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const addLineLimiter =
+  createInMemoryRateLimiter(
+    LINE_MUTATION_RATE_LIMIT,
+  );
+
+const removeLineLimiter =
+  createInMemoryRateLimiter(
+    LINE_MUTATION_RATE_LIMIT,
+  );
+
+const transitionShipmentLimiter =
+  createInMemoryRateLimiter(
+    LINE_MUTATION_RATE_LIMIT,
+  );
+
+const resolveEmissionsLimiter =
+  createInMemoryRateLimiter(
+    LINE_MUTATION_RATE_LIMIT,
+  );
+
+const determineFromActualDataLimiter =
+  createInMemoryRateLimiter(
+    LINE_MUTATION_RATE_LIMIT,
+  );
+
+const calculateLineLimiter =
+  createInMemoryRateLimiter(
+    LINE_MUTATION_RATE_LIMIT,
+  );
+
+function tooManyAttemptsResult(
+  retryAfterMs: number,
+): { status: "error"; message: string } {
+  const retryAfterSeconds =
+    Math.ceil(retryAfterMs / 1000);
+
+  return {
+    status: "error",
+    message:
+      `Too many attempts. Try again in ${retryAfterSeconds} ` +
+      `${retryAfterSeconds === 1 ? "second" : "seconds"}.`,
+  };
+}
+
+/**
  * Live-search backing for the CN/TARIC classification combobox
  * (cn-code-picker.tsx) -- read-only against the public regulatory
  * cbam_goods reference data (already readable by any authenticated
@@ -333,6 +403,18 @@ export async function addLineAction(
   _previousState: LineActionState,
   formData: FormData,
 ): Promise<LineActionState> {
+  const rateLimitResult =
+    addLineLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return tooManyAttemptsResult(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     addLineSchema.safeParse(
       {
@@ -426,6 +508,18 @@ export async function removeLineAction(
   _previousState: LineActionState,
   formData: FormData,
 ): Promise<LineActionState> {
+  const rateLimitResult =
+    removeLineLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return tooManyAttemptsResult(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     removeLineSchema.safeParse(
       {
@@ -503,6 +597,18 @@ export async function transitionShipmentAction(
   _previousState: LineActionState,
   formData: FormData,
 ): Promise<LineActionState> {
+  const rateLimitResult =
+    transitionShipmentLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return tooManyAttemptsResult(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     transitionSchema.safeParse(
       {
@@ -593,6 +699,18 @@ export async function resolveEmissionsAction(
   _previousState: ResolveEmissionsActionState,
   formData: FormData,
 ): Promise<ResolveEmissionsActionState> {
+  const rateLimitResult =
+    resolveEmissionsLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return tooManyAttemptsResult(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     resolveEmissionsSchema.safeParse(
       {
@@ -743,6 +861,18 @@ export async function determineFromActualDataAction(
   _previousState: LineActionState,
   formData: FormData,
 ): Promise<LineActionState> {
+  const rateLimitResult =
+    determineFromActualDataLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return tooManyAttemptsResult(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     determineFromActualDataSchema.safeParse(
       {
@@ -850,6 +980,18 @@ export async function calculateLineAction(
   _previousState: LineActionState,
   formData: FormData,
 ): Promise<LineActionState> {
+  const rateLimitResult =
+    calculateLineLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return tooManyAttemptsResult(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
   const parsed =
     calculateLineSchema.safeParse(
       {
