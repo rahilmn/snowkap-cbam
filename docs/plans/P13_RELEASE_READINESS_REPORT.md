@@ -238,6 +238,15 @@ than either fixing under time pressure or leaving undocumented.
 
 ## 11. Provenance / R7-R9 regulatory contradiction — OWNER DECISION NEEDED
 
+**Full standalone decision memo:**
+[`docs/regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md`](../regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md)
+— current resolver behavior, both rule interpretations, the 361-pair
+affected scope (independently re-derived twice, most recently via a second,
+differently-written query confirming the same 361/108/18 figures),
+evidence for each reading, implementation consequences of each choice, and
+the exact decision needed. This section summarizes it; that document is the
+authoritative version if the two ever diverge.
+
 This is the material, non-Railway item requiring your input before it can
 be resolved. Full analysis, not a placeholder:
 
