@@ -565,6 +565,86 @@ describe(
     );
 
     it(
+      "remains UNRESOLVED/UNAVAILABLE (not NO_MATCH) when the REQUESTED country is itself the Other Countries and Territories sentinel and its own record is UNAVAILABLE",
+      () => {
+        // 2026-08-30 (found by an independent adversarial review of the
+        // R7 clause 2 / R9 fix, commit 6094593): the fallback-attempt
+        // carve-out above must not apply when the resolver is ALREADY
+        // resolving for "_Other Countries and Territorie" itself -- there
+        // is no further fallback beyond that table, so an UNAVAILABLE
+        // record there is genuinely terminal (R9: "if the corresponding
+        // fallback is also unavailable, resolution remains unresolved").
+        // Before this test existed, this exact input would have
+        // incorrectly fallen through the fallback-attempt block (guarded
+        // by `input.origin_country_name !== OTHER_TERRITORIES`, which is
+        // false here) straight to the final NO_MATCH catch-all --
+        // reporting "no record exists" for a code that DOES have a
+        // record, just an unavailable one. Confirmed unreachable in
+        // production today (RegulatoryCountryMapper never maps a real ISO
+        // origin to this sentinel name, and no production caller passes
+        // it in directly), but this is a protected-zone domain function
+        // and the defect is real, so it is fixed and tested regardless.
+        const otherTerritoriesOwnRecordUnavailable =
+          record({
+            origin_country_name:
+              "_Other Countries and Territorie",
+
+            source_sheet:
+              "_Other Countries and Territorie",
+
+            normalized_trade_code:
+              "2507008070",
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+
+            total_emissions: {
+              value: null,
+
+              status:
+                "UNAVAILABLE",
+
+              raw_source_value:
+                "-",
+            },
+          });
+
+        const result =
+          resolveDefaultValue(
+            [
+              otherTerritoriesOwnRecordUnavailable,
+            ],
+            {
+              origin_country_name:
+                "_Other Countries and Territorie",
+
+              trade_code:
+                "2507008070",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "UNAVAILABLE",
+        );
+
+        expect(
+          result.record,
+        ).toBeNull();
+      },
+    );
+
+    it(
       "never bypasses REFERENCE_REQUIRED with a resolvable Other Countries and Territories fallback (R7/R9 is scoped to UNAVAILABLE only)",
       () => {
         const reference =

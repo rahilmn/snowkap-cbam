@@ -750,13 +750,29 @@ export function resolveDefaultValue(
    * this carve-out and remain fully authoritative, never bypassed -- R7
    * clause 2 / R9 name only the blank/"-" (UNAVAILABLE) case; the other
    * three are a deliberately narrower scope (see the memo's §7).
+   *
+   * The carve-out also does NOT apply when the requested country IS
+   * OTHER_TERRITORIES itself (found by an independent adversarial review
+   * of this fix, 2026-08-30) -- there is no further fallback beyond the
+   * Other Countries and Territories table, so an UNAVAILABLE record there
+   * is genuinely terminal (R9: "if the corresponding fallback is also
+   * unavailable, resolution remains unresolved"). Without this guard, that
+   * input would fall through the fallback-attempt block below (itself
+   * guarded by the same origin-name check) straight to the final NO_MATCH
+   * catch-all, misreporting "no record exists" for a code that does have
+   * a record, just an unavailable one. Confirmed unreachable via any
+   * production caller today (no ISO origin ever maps to this sentinel
+   * name), but this is a protected-zone domain function, so the defect is
+   * fixed and tested regardless of current reachability.
    */
   const requestedCountryUnavailable =
     requestedCountry.hasExactMatch &&
     requestedCountry.result.status ===
       "UNRESOLVED" &&
     requestedCountry.result.reason ===
-      "UNAVAILABLE";
+      "UNAVAILABLE" &&
+    input.origin_country_name !==
+      OTHER_TERRITORIES;
 
   if (
     requestedCountry.hasExactMatch &&
