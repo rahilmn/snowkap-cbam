@@ -1384,13 +1384,36 @@ documentation, and production-config review.
     skipped / 0 failed across this round (§24); `pnpm typecheck` stayed
     clean throughout.
 
+**Also fixed, immediately after the above** (a documentation follow-up,
+same round):
+
+- **`AUTHORIZATION_MATRIX.md`'s ~20 disclosed stale citations, regrounded**
+  — actually more than the disclosed count once checked: all 30 of the
+  document's `file:line` citations were re-verified against their own
+  quoted anchor text, 20 were found drifted (some by as much as 602 lines,
+  matching the "500-600+ lines" the document's own disclosure predicted)
+  and corrected, 10 were already accurate. Line-number-only — no claim
+  about which role/capability gates which service was re-audited or
+  changed, since that substance was already confirmed correct by the
+  original finding. Spot-checked directly against source afterward (not
+  just trusted from the pass's own report): every checked citation's
+  quoted anchor text matched exactly at its corrected line. The
+  document's own staleness banner now records this regrounding rather
+  than only the original finding.
+- **`CALCULATION_RULE_REGISTER.md`'s "fixture that doesn't exist" claim in
+  §35, found stale** — this had already been corrected in an earlier
+  round (commit `a46be77`, §16.7) with an honest in-place correction
+  paragraph in the register itself; §35 below was simply never updated to
+  stop listing it as open. Corrected in §35.
+
 **Not fixed, deliberately out of scope this round**: the pre-existing
-documentation staleness already disclosed in §35 (three architecture docs,
-~20 stale `AUTHORIZATION_MATRIX.md` citations, one bad
-`CALCULATION_RULE_REGISTER.md` fixture reference) — untouched, still
-exactly as disclosed. §29's Railway outage and §11's R7/R9 memo remain the
-only two items changing the RELEASE BLOCKED classification (§37), and
-neither was touched this round, per standing instruction.
+documentation staleness already disclosed in §35 for the three
+architecture docs (`DATABASE_SCHEMA.md`, `DOMAIN_MODEL.md`,
+`ARCHITECTURE.md`) — untouched, still exactly as disclosed; no other
+document-wide regrounding pass was run beyond the two items above. §29's
+Railway outage and §11's R7/R9 memo remain the only two items changing
+the RELEASE BLOCKED classification (§37), and neither was touched this
+round, per standing instruction.
 
 ## 19. Explainability
 
@@ -1773,8 +1796,14 @@ directly-observed gaps.
   this session, `DOMAIN_MODEL.md`, `ARCHITECTURE.md`) still lag the most
   recent review round in places beyond what this session's documentation
   pass closed; ~20 stale file:line citations remain scattered across
-  `AUTHORIZATION_MATRIX.md`; `CALCULATION_RULE_REGISTER.md` cites one
-  fixture that doesn't exist.
+  `AUTHORIZATION_MATRIX.md` (a regrounding pass is in progress this round
+  — see §16.10's update). **Stale, already fixed**: this bullet previously
+  also said `CALCULATION_RULE_REGISTER.md` "cites one fixture that doesn't
+  exist" — that was corrected in an earlier round (commit `a46be77`, per
+  §16.7) with an honest in-place correction paragraph; re-verified this
+  round still present at current HEAD. Left in this list uncorrected until
+  now purely by oversight, not because the underlying issue was still
+  open.
 - CSV/XLSX shipment import, a resolution explorer, real dashboards (the
   post-sign-in landing page at `/` is still the literal Phase-2 placeholder
   — confirmed live this round, §5), a user-profile screen, a 403 page, an
