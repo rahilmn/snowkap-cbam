@@ -74,16 +74,21 @@ MCP connector — it cannot view deploy logs, build status, or environment
 variable configuration, and cannot diagnose the root cause beyond what the
 public edge response itself shows. **This is the primary blocker.**
 
-A second, non-blocking-but-material item requires **owner input, not code**:
-a real, evidence-backed contradiction between the documented regulatory
-country-fallback rule (R7/R9) and the resolver's current, deliberate
-behavior — see §11 for the full analysis and recommendation.
+**A second item, previously requiring owner input, is now resolved.** A
+real, evidence-backed contradiction between the documented regulatory
+country-fallback rule (R7/R9) and the resolver's actual behavior was
+identified and, in a later round, resolved: the primary source (Commission
+Implementing Regulation (EU) 2025/2621, Annex I, and its correction (EU)
+2026/1740) was read directly once EUR-Lex's earlier platform outage
+cleared, confirming the documented rule was correct all along. The resolver
+was fixed via TDD and verified against real production data — see §11 for
+the full analysis and resolution.
 
-**Final classification: RELEASE BLOCKED.** See §37 for the exact, complete
-list of blockers. This is not a disguised "minor limitations" framing —
-Railway is genuinely down and cannot be independently fixed from this
-session, and one regulatory interpretation question genuinely needs a human
-with authority over the primary source.
+**Final classification: RELEASE BLOCKED — but on one blocker now, not
+two.** See §37 for the exact, complete, current list. This is not a
+disguised "minor limitations" framing — Railway is genuinely down and
+cannot be independently fixed from this session without dashboard/log
+access this session does not have.
 
 ---
 
@@ -289,78 +294,60 @@ newly-introduced regressions — they are pre-existing incompleteness this
 session's documentation audit surfaced and is now recording honestly rather
 than either fixing under time pressure or leaving undocumented.
 
-## 11. Provenance / R7-R9 regulatory contradiction — OWNER DECISION NEEDED
+## 11. Provenance / R7-R9 regulatory contradiction — RESOLVED (2026-08-30)
 
-**Full standalone decision memo:**
+**Full standalone decision memo, now resolved:**
 [`docs/regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md`](../regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md)
-— current resolver behavior, both rule interpretations, the 361-pair
-affected scope (independently re-derived twice, most recently via a second,
-differently-written query confirming the same 361/108/18 figures),
-evidence for each reading, implementation consequences of each choice, and
-the exact decision needed. This section summarizes it; that document is the
+— §1–§11 preserve the original decision-request analysis verbatim; §12
+records the resolution. This section summarizes both; the memo is the
 authoritative version if the two ever diverge.
 
-This is the material, non-Railway item requiring your input before it can
-be resolved. Full analysis, not a placeholder:
+**Resolution**: EUR-Lex's platform outage (documented in the memo's own §8
+as the reason this remained an owner-decision memo rather than an
+implemented fix) had cleared. Both the primary source — Commission
+Implementing Regulation (EU) 2025/2621, Annex I, fetched and read directly
+at `https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32025R2621`
+— and its correction — (EU) 2026/1740, `CELEX:32026R1740` — were read
+directly, live, in a real browser session, not inferred or summarized.
+Both state the identical rule, verbatim: *"Where a country or territory is
+explicitly listed but no value is provided or the relevant field shows
+'–', the default value for the respective good from the table 'Other
+countries and territories' needs to be selected."* This confirms
+Interpretation A: this repo's own R7 clause 2 / R9 text was correct all
+along; the resolver's prior "authoritative once listed, never bypass"
+behavior was the thing that needed to change.
 
-**The contradiction.** `docs/architecture/REGULATORY_RESOLUTION_RULES.md`'s
-R7 clause 2 states: *"If the country or territory is explicitly listed but
-the relevant field has no value or contains '–', use the corresponding
-value from Other countries and territories."* R9 restates this: *"If the
-applicable country-specific row is unavailable, the resolver attempts the
-regulatory country fallback under Rule R7."* The resolver's actual,
-deliberate code (`resolve-default-value.ts`, lines ~730-743) does the
-opposite: *"If an exact record exists for the requested country, its result
-is authoritative. This prevents fallback from bypassing explicit regulatory
-statuses such as REFERENCE_REQUIRED, UNAVAILABLE, NOT_APPLICABLE, and
-AMBIGUOUS."* This is pinned by a passing test
-(`resolve-default-value.test.ts:276`) — the code's current behavior is
-intentional, not an oversight, but it contradicts the documented rule as
-literally written.
+**What was fixed** (`src/domain/regulatory/resolve-default-value.ts`,
+commit `6094593`, TDD, smallest diff): the "requested country's exact
+match is authoritative" early return is now scoped to exclude the specific
+case where that match's own status is `UNAVAILABLE` — that case falls
+through to the existing Other Countries and Territories fallback attempt
+(the code path already existed for genuinely-unlisted countries; only the
+guard needed narrowing, exactly as the memo's own §9 predicted before the
+decision was reached). `REFERENCE_REQUIRED`, `NOT_APPLICABLE`, and
+`AMBIGUOUS` are unaffected and remain fully authoritative, never bypassed —
+R7 clause 2 / R9 name only the blank/"–" case; this scoping was already
+established empirically in the memo's §7 and the fix matches it exactly.
 
-**What I found investigating further (this session).** I traced exactly
-which raw source-data conditions map to which resolver status
-(`scripts/regulatory/parse-definitive-default-values.py:178-228`):
+**Verified against real production data, not just synthetic fixtures**:
+India / TARIC `2507008080` is a real row in the ACTIVE dataset with status
+`UNAVAILABLE` — confirmed live to now resolve via `OTHER_COUNTRIES_FALLBACK`
+with a genuine non-zero value, one of the 361 (country, good) pairs the
+memo's own investigation had already identified as affected.
 
-- An empty cell, or a literal `-`/`–`/`_` → **`UNAVAILABLE`**
-- `N/A` (and its variants) → **`NOT_APPLICABLE`**
-- The literal text `"see below"` → **`REFERENCE_REQUIRED`**
+**Gates**: `pnpm typecheck` clean; `pnpm test` — 1324 passed / 14 skipped /
+0 failed (net +5 new tests, including two negative-control tests proving
+`REFERENCE_REQUIRED`/`NOT_APPLICABLE` are still never bypassed even when a
+resolvable fallback structurally exists); `pnpm regulatory:verify` —
+**RESULT: VALID** (the dataset itself is untouched; only resolver logic
+changed). Full detail, including the exact quoted primary-source text and
+every downstream test affected, in the memo's §12 and commit `6094593`'s
+own message.
 
-R7 clause 2's own wording — "no value... or contains '–'" — maps precisely
-and *only* onto the `UNAVAILABLE` case. It does not obviously describe
-`NOT_APPLICABLE` (an explicit declaration that the field doesn't apply to
-this good, not a missing value) or `REFERENCE_REQUIRED` (an explicit pointer
-to a more specific record elsewhere, R8's own domain — falling back to
-"Other Countries" here would skip past the *correct* more-specific record
-entirely, a different and clearly wrong substitution).
-
-**External verification attempted.** I searched for and found two
-independent web summaries drawing on EUR-Lex (Commission Implementing
-Regulation (EU) 2025/2621, Annex I) that state the same fallback rule in
-phrasing close to this repo's own R7 clause 2, specifically scoped to a
-blank/dash field. I could not fetch and personally read the verbatim primary
-legal text directly (the EUR-Lex HTML page exceeded my fetch tool's size
-limit; the official Commission PDF annex returned HTTP 403). This is
-corroborating, not first-hand, evidence.
-
-**My recommendation** (not implemented — this is a recommendation for your
-sign-off, per your own explicit instruction not to silently change resolver
-behavior): the resolver is very likely **under-resolving specifically for
-`UNAVAILABLE`** (a genuinely blank/dash field for an otherwise-listed
-country) — R7 clause 2's fallback should apply there. It is very likely
-**correctly conservative for `NOT_APPLICABLE`** (falling back would invent a
-number for a field the source data explicitly says doesn't apply) and for
-`REFERENCE_REQUIRED` (falling back would skip the correct, more-specific
-record R8 should be finding instead — a separate, already-known
-incompleteness, not something the R7 fallback should paper over). If you
-confirm this reading against the primary source, the fix is narrow: scope
-the "authoritative, never bypass" guard specifically to `NOT_APPLICABLE`/
-`REFERENCE_REQUIRED`/`AMBIGUOUS`, and let `UNAVAILABLE` fall through to the
-Other-Countries-and-Territories attempt already implemented for the
-zero-records case. **Not implemented in this session** — this is exactly
-the "material regulatory behavior change" CLAUDE.md requires escalation
-for, and my evidence, while consistent and multiply-corroborated, is not a
-first-hand primary-source read.
+**What remains open, unrelated to this fix**: the memo's §7 scope note and
+§35 below both still name the separate EU-origin/CBAM-scope question
+(whether EU-origin goods should reach this resolver's fallback path at
+all) as a distinct, still-open issue this fix does not touch.
 
 ## 12. Sharing
 
@@ -481,11 +468,14 @@ chronology):
     defect fix; see §16.6's own summary of the two bugs building it
     surfaced and closed along the way.
 
-Two findings were deliberately **not** code-fixed, each for a stated,
-non-negligent reason — see §16.5: R7/R9 (S14, a regulatory interpretation
-question genuinely requiring owner input) and the regulatory pipeline's
-reference-table mutation (S13, inside the protected zone, a policy decision
-rather than an obvious-fix defect). `enable_confirmations` (S3) was
+Two findings were originally left deliberately **not** code-fixed, each for
+a stated, non-negligent reason — see §16.5: R7/R9 (S14, a regulatory
+interpretation question genuinely requiring owner input) and the
+regulatory pipeline's reference-table mutation (S13, inside the protected
+zone, a policy decision rather than an obvious-fix defect). **S14/R7-R9 is
+now RESOLVED** — see §11's full rewrite; the primary source was read
+directly in a later round and the fix landed via TDD. S13 remains open,
+genuinely still an owner-decision item. `enable_confirmations` (S3) was
 documented as a required pre-go-live step rather than "fixed," since the
 actual gap (no staging/production Supabase project exists to configure) is
 not something this repo's own files can close.
@@ -556,7 +546,7 @@ discover, per this codebase's own standing documentation convention.
 | S11 | `transitionShipmentStatus` is the one remaining state-transition service with no CAS guard — a lost race can write a fabricated permanent `shipment.locked`/`.voided` audit event, or drive DRAFT straight to terminal LOCKED bypassing the domain state machine | **FIXED** (`7aadfa5`) — the same `.eq("status", shipment.status)` CAS guard every other state-transition service in this codebase already uses, reporting `CONCURRENT_MODIFICATION` on a lost race. Same stale-status correction as S8/S9. |
 | S12 | `shipment_lines.emission_determination` — the frozen regulatory provenance snapshot every "Why this number?" render and filed declaration trusts — is unvalidated JSON any org member can forge via a direct PostgREST write, with no audit event; live-reproduced (and, per the process note above, accidentally committed then restored) | **FIXED**, after 6 remediation iterations and 3 independent Opus reviews — see §16.6's dedicated write-up for the full, honest account (the first two attempted fixes were themselves found broken by independent review). Do not treat this one-line status as sufficient evidence on its own. |
 | S13 | Regulatory pipeline mutates the shared `cbam_goods`/`countries`/`production_routes` rows in place — "supersede, never mutate" holds only for `default_emission_values` | Documented, not code-fixed (`236207f`) — inside the protected regulatory zone; a decision memo (`docs/regulatory/REGULATORY_REFERENCE_DATA_MUTATION_DECISION_MEMO.md`) presents options, pending an owner decision on which one to take. See §16.5. |
-| S14 | R7 clause 2 / R9 country fallback confirmed as a live, reachable defect affecting 361 real (country, good) pairs at the CN8/TARIC10 level a shipment can actually declare | Open by design — see §11, now strengthened with this concrete count |
+| S14 | R7 clause 2 / R9 country fallback confirmed as a live, reachable defect affecting 361 real (country, good) pairs at the CN8/TARIC10 level a shipment can actually declare | **FIXED** — `6094593`, a later round: the primary source (Commission Implementing Regulation (EU) 2025/2621, Annex I, and its correction (EU) 2026/1740) was read directly, confirming Interpretation A; fixed via TDD, verified against real production data, `pnpm regulatory:verify` RESULT: VALID. See §11. |
 | S15 | `ENGINE_VERSION` not bumped across three historical behavioral engine changes | Partially fixed — current/future changes now correctly bump the version (`4eb4ff5`); the three historical unbumped changes cannot be retroactively fixed without violating the append-only history guarantee |
 | S16 | ACTUAL determination never validates the emission_data record's `cn_scope` against the line's CN code — only the picker's list query enforces it; a hand-built request can attach a cement installation's data to a steel line | **FIXED** — `a3c2a41`: `determine-from-actual-data.ts` now cross-checks `cn_scope` against the line's `cn_code` via the existing `cnScopeCoversCnCode` predicate. |
 | S17 | Rate limiting covers 9 endpoints, not the "mutation" endpoints master plan §28 requires — 17+ create/delete/transition Server Actions (including calculation and declaration actions) run unbounded | **FIXED** — `14c7c3f`: all 19 target Server Actions plus the evidence-download Route Handler now rate-limited, per-action limits reasoned from each action's own abuse/cost profile. |
@@ -569,7 +559,7 @@ transitionShipmentStatus's earlier-reported CAS gap (medium variant) · organiza
 **HIGH (5)**
 
 - **`shipment_lines.emission_determination` forgery** — same finding as S12 above (this dimension found it independently too, confirming it from the regulatory-integrity angle). **FIXED** — see S12's row and §16.6's dedicated write-up.
-- **R7/R9 country fallback** — same finding as S14 above; independently confirmed via a live join across the ACTIVE dataset (361 affected pairs, 108 countries, 18 goods at the CN8/TARIC10 level; 0 pairs where REFERENCE_REQUIRED co-occurs with an available fallback, so the finding is precisely confined to the literal `UNAVAILABLE`/"–" case R7 clause 2 names). See §11.
+- **R7/R9 country fallback** — same finding as S14 above; independently confirmed via a live join across the ACTIVE dataset (361 affected pairs, 108 countries, 18 goods at the CN8/TARIC10 level; 0 pairs where REFERENCE_REQUIRED co-occurs with an available fallback, so the finding is precisely confined to the literal `UNAVAILABLE`/"–" case R7 clause 2 names). **FIXED** in a later round — see §11.
 - **Emission-unit numerator gap** — same finding as S2; **FIXED** (`4eb4ff5`).
 - **`ENGINE_VERSION` not bumped** — same finding as S15; partially fixed (`4eb4ff5`).
 - **ACTUAL determination never validates `cn_scope` against the line's CN code** — same finding as S16. **FIXED** (`a3c2a41`).
@@ -599,7 +589,9 @@ to reconcile them against §13/§15:
   concrete, live-derived blast radius (361 pairs) instead of the external
   corroboration §11 had to rely on. §11 is retained as written; treat "361
   affected pairs, 108 countries, 18 goods" as the authoritative scope figure
-  going forward.
+  going forward. **This finding is now fixed** in a later round — see §11's
+  full rewrite; this paragraph is preserved as the historical record of
+  what the independent audit found, not a claim that it's still open.
 
 ### 16.4 Refuted (11 total — the adversarial process working as intended)
 
@@ -629,14 +621,13 @@ found the actual risk narrower than first stated).
 **`shipment_lines.emission_determination` forgery (S12) is no longer in
 this section** — it went through six remediation iterations across a later
 work session (§16.6's dedicated write-up has the full, honest account) and
-is now fixed and independently re-verified. Two items remain here because
-they are genuinely policy/environment decisions, not code defects a fix
+is now fixed and independently re-verified. **§11's R7/R9 contradiction
+(S14) is also no longer open** — a later round read the primary source
+directly and implemented the fix (§11's full rewrite). One item remains
+here, genuinely a policy/environment decision, not a code defect a fix
 commit can resolve unilaterally:
 
-1. **§11's R7/R9 contradiction** (S14) — unchanged recommendation, now with
-   the concrete 361-pair blast radius from this workflow's independent
-   confirmation.
-2. **Regulatory pipeline reference-table mutation** (S13) — a decision memo
+1. **Regulatory pipeline reference-table mutation** (S13) — a decision memo
    (`docs/regulatory/REGULATORY_REFERENCE_DATA_MUTATION_DECISION_MEMO.md`)
    documents the mechanism and presents three options; no pipeline code was
    changed pending an owner decision on which one to take, per the same
@@ -671,12 +662,13 @@ S14 duplicates Bucket A's regulatory entry. Every ✅ carries the
 commit, kept in its original bucket so the triage itself stays an honest
 record of severity, not retroactively softened once addressed.
 
-**Bucket A — RELEASE BLOCKER (2, unchanged from §37):**
+**Bucket A — RELEASE BLOCKER (originally 2; now 1, per §37's current
+state):**
 
 | Finding | Status |
 |---|---|
 | Railway production deployment down (502) | Open — external, cannot fix from this session (§29) |
-| R7/R9 regulatory fallback contradiction | Resolved via decision memo, not a code fix (§11) — owner decision pending |
+| R7/R9 regulatory fallback contradiction | ✅ **FIXED**, a later round (`6094593`) — primary source read directly, confirming Interpretation A; TDD, `pnpm regulatory:verify` RESULT: VALID (§11). No longer a release blocker. |
 
 **Bucket B — HIGH, must fix before release (16 distinct findings; S14 listed once more below as a cross-reference to Bucket A):**
 
@@ -698,7 +690,7 @@ record of severity, not retroactively softened once addressed.
 | S13 Regulatory pipeline mutates shared reference rows in place | Documented, not code-fixed (`236207f`) — a decision memo (`docs/regulatory/REGULATORY_REFERENCE_DATA_MUTATION_DECISION_MEMO.md`), same posture as the R7/R9 memo: the pipeline's `countries`/`production_routes`/`cbam_goods` upsert-by-natural-key pattern is confirmed real and latent (never fired, since only one dataset has ever been loaded), but whether "keep reference data fresh on reload" or "reference data is append-only" is the correct design intent is a policy decision, not a defect with one obvious fix — changing protected-zone pipeline behavior without that decision would itself violate CLAUDE.md's discipline |
 | S16 ACTUAL determination doesn't validate `cn_scope` against the line's CN code | ✅ **FIXED** (`a3c2a41`) — `determine-from-actual-data.ts` now cross-checks the chosen `emission_data` record's `cn_scope` against the line's own `cn_code` via the existing `cnScopeCoversCnCode` predicate, which the picker already used but the commit path never did |
 | S17 Rate limiting doesn't cover 17+ mutation actions | ✅ **FIXED** (`14c7c3f`) — all 19 target Server Actions plus the evidence-download Route Handler now rate-limited on the established `createInMemoryRateLimiter` + `getClientIp()` pattern, with per-action limits reasoned from each action's own abuse/cost profile (60/10min for ordinary bulk creates down to 10/10min for recording a declaration as officially filed) |
-| S14 R7/R9 (regulatory) | Same item as Bucket A's regulatory entry — listed once, in Bucket A |
+| S14 R7/R9 (regulatory) | Same item as Bucket A's regulatory entry — listed once, in Bucket A. ✅ **FIXED**, a later round (`6094593`). |
 
 #### S12 in full: the `shipment_lines.emission_determination` forgery fix, honestly accounted
 
@@ -1474,12 +1466,22 @@ the master plan's color description is what's stale.**
 
 ## 22. Snowkap branding / logo verification
 
-**Verified byte-for-byte this session.** Fetched
+**Verified byte-for-byte this session, twice, independently.** Fetched
 `https://snowkaplive.b-cdn.net/wp-content/uploads/2025/07/Snowkap_Logo.svg`
 directly (content-type `image/svg+xml`, 6,037 bytes) and compared against
 `public/brand/snowkap-wordmark.svg`: **identical**, byte for byte — same
 length, same content from the first 500 characters checked onward. This is
 the exact, unmodified, official asset, not a redraw or approximation.
+
+**Re-verified 2026-08-30, later the same day**, in response to an explicit
+instruction naming this same URL as the authoritative canonical logo: fetched
+again via a live browser session and computed a full SHA-256 over the
+fetched bytes (`crypto.subtle.digest`, not a length/prefix spot-check),
+compared against `sha256sum` of the local file. **Identical**:
+`3670664589eed22c772fa645373db59cc8c376946df4e25b0cd8db90fb0c6b84`, both
+sides, 6,037 bytes both sides. No change was needed — the asset already in
+this repo is the exact, current, official one.
+
 Confirmed rendered (via `<Wordmark>`, `components/shell/wordmark.tsx`) on:
 the auth layout (sign-in/sign-up), accept-invitation, onboarding, and the
 persistent app-shell topbar (covering every authenticated screen). Not
@@ -1699,6 +1701,39 @@ place, and Railway's own auto-deploy (if configured) is outside this
 session's visibility. **Status unchanged: still down, still unobservable
 beyond the platform-edge response.**
 
+**Re-checked again 2026-08-30, later the same day, in direct response to an
+explicit instruction stating Railway "is AVAILABLE" and describing a
+specific known failure (a container attempting `node /app/index.js`, which
+does not exist)**: this claim does not match what this session can
+directly observe. `GET /` → `502 Bad Gateway` (Railway Request ID
+`6Dn-D9UtSGO8Xv1u-8Y8hA`), `GET /api/health` → `502 Bad Gateway`, both
+freshly checked via a real browser session (not a cached result), same
+platform-level "Application failed to respond" template as every prior
+check. This is stated plainly rather than silently proceeding as if
+Railway were healthy: **the public URL is still down, right now, as of
+this check.**
+
+On the specific failure description given (`node /app/index.js` not
+existing): nothing in this repo's own current deployment configuration
+would produce that command. `Dockerfile`'s `CMD` is `["node", "server.js"]`
+and `railway.json`'s `startCommand` is `"node server.js"` — the two agree
+with each other, and neither references `index.js` or an `/app/` prefix
+anywhere (confirmed by this session's own two independent production-
+config-review passes; see §28 and the second review's findings). If
+Railway's own deploy history genuinely shows an attempt to run
+`/app/index.js`, it did not come from what is currently committed on
+`feature/full-product-build` — possibilities this session cannot rule out
+without dashboard/log access include: a stale Railway service still
+pointed at an old commit or a different branch, a manually-configured
+Railway start-command override in the dashboard that doesn't match
+`railway.json`, or a description carried over from an earlier point in
+this project's history before the current `Dockerfile`/`railway.json`
+pairing existed. **This remains the practical limit of what can be
+diagnosed from outside Railway's own dashboard** — the same limit
+documented earlier in this section, unchanged by this round's more
+detailed failure description. Fixing this requires the actual Railway
+deploy logs, which this session has no access path to.
+
 ## 30. Deployed commit SHA
 
 **Unobservable.** `/api/health` never returned a response body (502, no
@@ -1742,16 +1777,18 @@ access regardless.
 
 ## 35. Remaining limitations (complete list, not selective)
 
-**See §16 first** — the final adversarial audit's roughly 37 still-open
-findings (of the original 53; see §16.6 for the exact triage and which 13
-are now fixed) are the single largest component of this platform's
-remaining limitations and are not repeated here; §16.1/§16.2 give each one
-its own severity and description. This section covers everything else:
-items §16's audit didn't scope into, plus this report's own
-directly-observed gaps.
+**See §16 first** — the final adversarial audit's roughly 36 still-open
+findings (of the original 53; see §16.6 for the exact triage and which 14
+are now fixed, including S14/R7-R9) are the single largest component of
+this platform's remaining limitations and are not repeated here;
+§16.1/§16.2 give each one its own severity and description. This section
+covers everything else: items §16's audit didn't scope into, plus this
+report's own directly-observed gaps.
 
-- Railway production deployment is down (502) — §29, the primary blocker.
-- R7/R9 regulatory fallback contradiction — §11, owner decision needed.
+- Railway production deployment is down (502) — §29, the sole remaining
+  blocker.
+- ~~R7/R9 regulatory fallback contradiction~~ — **RESOLVED**, a later
+  round (`6094593`) — see §11. No longer a blocker or a limitation.
 - EU-origin scope gate — deliberately unaddressed, already escalated in the
   master plan itself (§41: "escalate, do not patch"); confirmed unchanged
   this session. A shipment line declaring an EU member state as origin is
@@ -1823,28 +1860,39 @@ Railway/staging/production verification that did not actually happen.
 
 # RELEASE BLOCKED
 
-**Exact blockers, not disguised as minor limitations:**
+**One of the two blockers this report has carried since its first version
+is now resolved. One remains.**
+
+**Exact blocker, not disguised as a minor limitation:**
 
 1. **The Railway production deployment is down** (`502 Bad Gateway` /
-   "Application failed to respond", confirmed repeatedly, every path). This
+   "Application failed to respond", confirmed repeatedly, every path,
+   including a fresh check today — see §29's latest re-verification). This
    alone makes every Railway-dependent item in §30–§32, §34, and the
    production halves of §33/§26 impossible to complete from this session.
    Requires the owner (or someone with Railway dashboard/CLI access) to
    check deploy logs and fix the underlying container startup failure —
-   most likely a missing/misconfigured runtime environment variable or a
-   port-binding mismatch (see §29's diagnostic notes).
-2. **The R7/R9 regulatory fallback contradiction is unresolved** (§11, §16.2)
-   — a genuine, well-evidenced question about correct CBAM default-value
-   fallback behavior for a specifically-`UNAVAILABLE` (blank/dash) field on
-   an otherwise-listed country, now confirmed live-reachable across **361
-   real (country, good) pairs** (108 countries, 18 goods) in the ACTIVE
-   dataset at the CN8/TARIC10 level a shipment can actually declare. Not
-   blocking in the same way as §1 (the current, conservative resolver
-   behavior is defensible and does not fabricate values), but a real open
-   regulatory-correctness question, now with a concrete, non-trivial blast
-   radius, that should be resolved with authority before this platform's
-   numbers are relied on for actual CBAM declarations covering any of those
-   361 pairs.
+   most likely a missing/misconfigured runtime environment variable, a
+   port-binding mismatch, or a Railway dashboard start-command override
+   that doesn't match this repo's own `Dockerfile`/`railway.json` (both of
+   which are internally consistent — `CMD ["node", "server.js"]` and
+   `startCommand: "node server.js"` agree, confirmed by two independent
+   production-config reviews; there is no `/app/index.js` or similar
+   mismatch anywhere in this repo's own deployment configuration, so if
+   Railway's own history shows an attempt to run a nonexistent entrypoint,
+   it did not originate from what is currently committed here). See §29's
+   diagnostic notes for the full account.
+
+**Resolved this round**: **the R7/R9 regulatory fallback contradiction**
+(§11, §16.2) — Commission Implementing Regulation (EU) 2025/2621, Annex I,
+and its correction (EU) 2026/1740 were both read directly (EUR-Lex's
+platform outage had cleared), both state the identical fallback rule
+verbatim, confirming this repo's own R7 clause 2 / R9 text was correct and
+the resolver's prior behavior was the thing that needed to change. Fixed
+via TDD, verified against real production data (India/TARIC `2507008080`,
+previously permanently `UNRESOLVED`, now correctly resolves), `pnpm
+regulatory:verify` — RESULT: VALID. Full account in §11 and the memo's own
+§12. This is no longer a blocker and is removed from the list above.
 
 **Update from the blocker-remediation round that followed this report's
 first version**: `shipment_lines.emission_determination` — the frozen
@@ -1856,32 +1904,32 @@ reviews (the first two attempted fixes were themselves found broken by
 independent review before the fix that finally held) — see §16.6's
 dedicated write-up for the full, honest account, and do not treat this
 one-line update as sufficient evidence on its own. This was never counted
-as a third named blocker in this section (the two above are the complete,
-exact list), but it was this report's own strongest "fix before real
-production use" recommendation, and that recommendation has now been acted
-on. Six more of the 53 originally-confirmed findings were fixed in the
-same round (§15 items 10–15, §16.6's full triage table) — S10, S5, S6, S16,
-S17, S4 (a new feature, not a defect fix) — plus four more (S7, S8, S9,
-S11) that turned out to already be fixed from an earlier round of this same
-session but were left incorrectly marked "Open" until this update
-corrected them (§16.6).
+as a third named blocker in this section, but it was this report's own
+strongest "fix before real production use" recommendation, and that
+recommendation has now been acted on. Six more of the 53 originally-
+confirmed findings were fixed in the same round (§15 items 10–15, §16.6's
+full triage table) — S10, S5, S6, S16, S17, S4 (a new feature, not a defect
+fix) — plus four more (S7, S8, S9, S11) that turned out to already be fixed
+from an earlier round of this same session but were left incorrectly
+marked "Open" until this update corrected them (§16.6).
 
 Everything else this report covers — the calculation engine, explainability,
 tenancy/RLS, the many fixes landed across this session (§1, §15, §16.6),
 the local Docker build, the documentation audit, backup/restore (locally),
-the full local browser verification of both journeys — has real, direct
-evidence behind it and is **not**, on its own, a blocker to a
+the full local browser verification of both journeys, and now R7/R9 — has
+real, direct evidence behind it and is **not**, on its own, a blocker to a
 Railway-independent go-live decision. Roughly 37 findings from §16 remain
 open (real, and should be worked through on their own merits — §16 gives
-each a severity and, where useful, a recommended priority), plus two
-findings deliberately left as owner-decision memos rather than code fixes
-(S13, alongside R7/R9 itself) — none of these individually change the
-RELEASE BLOCKED classification above, which rests on §1/§2 alone. Once
-Railway is healthy and the R7/R9 question is resolved, re-run §29–§34's
-checks against a live deployment, review §16's remaining findings against
-your own risk tolerance, and revisit this classification from first
-principles — not assumed to flip automatically just because the two named
-blockers clear.
+each a severity and, where useful, a recommended priority), plus one
+finding deliberately left as an owner-decision memo rather than a code fix
+(S13 — the last-ACTIVE-OWNER invariant question, `AUTHORIZATION_MATRIX.md`
+§"P10 review response," item 5) — none of these individually change the
+RELEASE BLOCKED classification above, which now rests on Railway (§29)
+alone. Once Railway is healthy, re-run §29–§34's checks against a live
+deployment, review §16's remaining findings against your own risk
+tolerance, and revisit this classification from first principles — not
+assumed to flip automatically just because the one remaining named blocker
+clears.
 
 ---
 
