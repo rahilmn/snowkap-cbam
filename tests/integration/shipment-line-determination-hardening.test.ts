@@ -135,6 +135,46 @@ function determinationFrom(
   };
 }
 
+// 2026-08-30 (R7 clause 2 / R9 fix regression coverage): builds the
+// shape a real OTHER_COUNTRIES_FALLBACK determination now takes for a
+// listed/MAPPED country whose own record was UNAVAILABLE --
+// country_mapping still names the ORIGINALLY REQUESTED (real, listed)
+// country, but record_identity/values come from the ACTUAL matched
+// row, which is the Other Countries and Territories table's own entry,
+// not the requested country's.
+function otherCountriesFallbackDeterminationFrom(
+  fallbackRecord: RealRecord,
+  requestedCountryName: string,
+): Record<string, unknown> {
+  return {
+    method: "DEFAULT",
+    resolution: {
+      dataset_id: fallbackRecord.dataset_id,
+      dataset_version: fallbackRecord.dataset_version,
+      resolved_at: "2026-08-30T00:00:00.000Z",
+      reason: "OTHER_COUNTRIES_FALLBACK",
+      country_mapping: { status: "MAPPED", regulatory_country_name: requestedCountryName },
+      record_identity: {
+        source_sheet: fallbackRecord.source_sheet,
+        source_row: fallbackRecord.source_row,
+        source_trade_code: fallbackRecord.source_trade_code,
+        origin_country_name: fallbackRecord.origin_country_name,
+        source_production_route_code: fallbackRecord.source_production_route_code,
+      },
+      values: {
+        direct: { value: fallbackRecord.direct_value, status: fallbackRecord.direct_status, raw_source_value: fallbackRecord.direct_value },
+        indirect: { value: fallbackRecord.indirect_value, status: fallbackRecord.indirect_status, raw_source_value: fallbackRecord.indirect_value },
+        total: { value: fallbackRecord.total_value, status: fallbackRecord.total_status, raw_source_value: fallbackRecord.total_value },
+      },
+      emission_unit: fallbackRecord.emission_unit,
+      trace: [
+        { step: "UNAVAILABLE", outcome: "Exact record has no usable total-emissions value" },
+        { step: "COUNTRY_FALLBACK", outcome: "Trying _Other Countries and Territorie" },
+      ],
+    },
+  };
+}
+
 interface RealEmissionData {
   id: string;
   verification_status: string;
@@ -206,6 +246,7 @@ describe.skipIf(!localSupabaseReachable)(
     let recordA: RealRecord;
     let recordB: RealRecord;
     let recordWithRoute: RealRecord;
+    let otherTerritoriesRecord: RealRecord;
     let realEmissionData: RealEmissionData;
     let installationId: string;
     let producerOrgId: string;
@@ -410,6 +451,49 @@ describe.skipIf(!localSupabaseReachable)(
           total_value: routeRow.total_value,
           total_status: routeRow.total_status,
         };
+
+      // A real, AVAILABLE "_Other Countries and Territorie" row -- for
+      // the R7 clause 2 / R9 regression coverage below (2026-08-30,
+      // found by an independent adversarial review of
+      // src/domain/regulatory/resolve-default-value.ts's own R7/R9 fix,
+      // commit 6094593): this validator function was never exercised
+      // with reason "OTHER_COUNTRIES_FALLBACK" paired with
+      // country_mapping.status "MAPPED" -- a combination that fix made
+      // newly reachable (a listed country's own record can now be
+      // UNAVAILABLE and fall back to this table) and that this
+      // validator's pre-existing logic incorrectly rejected as a
+      // forgery, live-reproduced via the real browser UI before being
+      // fixed here.
+      const { data: otherTerritoriesCandidates, error: otherTerritoriesError } =
+        await serviceClient
+          .from("default_emission_values")
+          .select(
+            "dataset_id, source_sheet, source_row, source_trade_code, total_value, total_status, direct_value, direct_status, indirect_value, indirect_status, emission_unit, production_route_id, countries!inner(name, iso2), regulatory_datasets!inner(version)",
+          )
+          .eq(
+            "total_status",
+            "AVAILABLE",
+          )
+          .eq(
+            "countries.name",
+            "_Other Countries and Territorie",
+          )
+          .is(
+            "production_route_id",
+            null,
+          )
+          .limit(1);
+
+      if (otherTerritoriesError || !otherTerritoriesCandidates || otherTerritoriesCandidates.length < 1) {
+        throw new Error(
+          `Failed to fetch a real, AVAILABLE Other Countries and Territories candidate: ${otherTerritoriesError?.message}`,
+        );
+      }
+
+      otherTerritoriesRecord =
+        toRealRecord(
+          otherTerritoriesCandidates[0]!,
+        );
 
       const { data: importerOrg, error: importerOrgError } =
         await serviceClient
@@ -830,6 +914,152 @@ describe.skipIf(!localSupabaseReachable)(
             .resolution.dataset_version,
         ).toBe(
           recordA.dataset_version,
+        );
+      },
+    );
+
+    it(
+      "accepts a genuine OTHER_COUNTRIES_FALLBACK determination for a MAPPED (listed) country whose own record was UNAVAILABLE (R7 clause 2 / R9 fix regression, 2026-08-30)",
+      async () => {
+        // Live-reproduced before this fix: this exact determination
+        // shape was rejected with a raw 42501, surfaced to the user as
+        // "This shipment is locked or void and can no longer be
+        // edited." -- found via real browser UI verification of
+        // src/domain/regulatory/resolve-default-value.ts's own R7/R9
+        // fix (commit 6094593), not by this suite (which had no
+        // coverage of this reason/status combination at all until now).
+        const lineId =
+          await insertLine(
+            {
+              cn_code: otherTerritoriesRecord.source_trade_code.replace(/\s+/g, ""),
+              cn_code_level:
+                otherTerritoriesRecord.source_trade_code.replace(/\s+/g, "").length > 8
+                  ? "TARIC10"
+                  : "CN8",
+              origin_country: recordA.origin_country_iso2,
+            },
+          );
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              {
+                emission_determination: otherCountriesFallbackDeterminationFrom(
+                  otherTerritoriesRecord,
+                  recordA.origin_country_name,
+                ),
+              },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).toBeNull();
+
+        const { data: after } =
+          await serviceClient
+            .from("shipment_lines")
+            .select("emission_determination")
+            .eq(
+              "id",
+              lineId,
+            )
+            .single();
+
+        expect(
+          (after?.emission_determination as { resolution: { reason: string } })
+            .resolution.reason,
+        ).toBe(
+          "OTHER_COUNTRIES_FALLBACK",
+        );
+
+        expect(
+          (
+            after?.emission_determination as {
+              resolution: { record_identity: { origin_country_name: string } };
+            }
+          ).resolution.record_identity.origin_country_name,
+        ).toBe(
+          "_Other Countries and Territorie",
+        );
+      },
+    );
+
+    it(
+      "still rejects an OTHER_COUNTRIES_FALLBACK determination claiming a fabricated regulatory_country_name that doesn't match the line's own ISO origin_country (the fix must not weaken this check)",
+      async () => {
+        const lineId =
+          await insertLine(
+            {
+              cn_code: otherTerritoriesRecord.source_trade_code.replace(/\s+/g, ""),
+              cn_code_level:
+                otherTerritoriesRecord.source_trade_code.replace(/\s+/g, "").length > 8
+                  ? "TARIC10"
+                  : "CN8",
+              origin_country: recordA.origin_country_iso2,
+            },
+          );
+
+        const forged =
+          otherCountriesFallbackDeterminationFrom(
+            otherTerritoriesRecord,
+            "Not A Real Country Name",
+          );
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "still rejects an OTHER_COUNTRIES_FALLBACK reason paired with a record_identity that isn't actually the Other Countries and Territories row (claiming fallback but citing a different real record)",
+      async () => {
+        const lineId =
+          await insertLine(
+            {
+              cn_code: recordA.source_trade_code.replace(/\s+/g, ""),
+              cn_code_level: "CN8",
+              origin_country: recordA.origin_country_iso2,
+            },
+          );
+
+        const forged: Record<string, unknown> =
+          determinationFrom(
+            recordA,
+          );
+
+        (forged.resolution as Record<string, unknown>).reason =
+          "OTHER_COUNTRIES_FALLBACK";
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
         );
       },
     );
