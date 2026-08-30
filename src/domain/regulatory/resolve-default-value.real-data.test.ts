@@ -240,16 +240,55 @@ describe.skipIf(!datasetAvailable)(
             .status ===
           "UNAVAILABLE"
         ) {
+          // 2026-08-30 (R7 clause 2 / R9 fix, primary-source-confirmed --
+          // see docs/regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md):
+          // this test previously asserted UNRESOLVED/UNAVAILABLE here.
+          // India's real "2507008080" row is exactly the R7-clause-2
+          // case -- explicitly listed, but its own value is unavailable
+          // -- and the resolver now attempts the Other Countries and
+          // Territories fallback for this code before giving up, per
+          // Commission Implementing Regulation (EU) 2025/2621, Annex I
+          // (read directly, confirmed unchanged by its correction (EU)
+          // 2026/1740). In the real ACTIVE dataset that fallback IS
+          // available, so this specific real row now resolves via
+          // OTHER_COUNTRIES_FALLBACK instead of staying unresolved --
+          // this is the fix working correctly against real production
+          // data, not a regression. The invariant this test exists to
+          // prove -- never a fabricated zero -- is asserted directly
+          // below rather than assumed from the status change alone.
           expect(
             result.status,
           ).toBe(
-            "UNRESOLVED",
+            "RESOLVED",
           );
 
           expect(
             result.reason,
           ).toBe(
-            "UNAVAILABLE",
+            "OTHER_COUNTRIES_FALLBACK",
+          );
+
+          expect(
+            result.record
+              ?.total_emissions.status,
+          ).toBe(
+            "AVAILABLE",
+          );
+
+          const fallbackValue =
+            result.record
+              ?.total_emissions.value;
+
+          expect(
+            fallbackValue,
+          ).not.toBeNull();
+
+          expect(
+            Number(
+              fallbackValue,
+            ),
+          ).toBeGreaterThan(
+            0,
           );
         }
       },

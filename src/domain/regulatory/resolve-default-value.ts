@@ -729,15 +729,38 @@ export function resolveDefaultValue(
 
 
   /*
-   * If an exact record exists for the requested country,
-   * its result is authoritative.
+   * If an exact record exists for the requested country, its result is
+   * authoritative -- UNLESS that record's own status is specifically
+   * UNAVAILABLE, in which case Rule R7 clause 2 / R9 require attempting
+   * the Other Countries and Territories fallback below before giving up.
    *
-   * This prevents fallback from bypassing explicit regulatory
-   * statuses such as REFERENCE_REQUIRED, UNAVAILABLE,
-   * NOT_APPLICABLE, and AMBIGUOUS.
+   * 2026-08-30: this UNAVAILABLE carve-out is a primary-source-confirmed
+   * fix, not a broadening of judgment -- Commission Implementing
+   * Regulation (EU) 2025/2621, Annex I (read directly at
+   * https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32025R2621,
+   * its correction (EU) 2026/1740 confirmed the identical clause
+   * unchanged) states verbatim: "Where a country or territory is
+   * explicitly listed but no value is provided or the relevant field
+   * shows '-', the default value for the respective good from the table
+   * 'Other countries and territories' needs to be selected." See
+   * docs/regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md for the full
+   * evidence trail.
+   *
+   * REFERENCE_REQUIRED, NOT_APPLICABLE, and AMBIGUOUS are NOT included in
+   * this carve-out and remain fully authoritative, never bypassed -- R7
+   * clause 2 / R9 name only the blank/"-" (UNAVAILABLE) case; the other
+   * three are a deliberately narrower scope (see the memo's §7).
    */
+  const requestedCountryUnavailable =
+    requestedCountry.hasExactMatch &&
+    requestedCountry.result.status ===
+      "UNRESOLVED" &&
+    requestedCountry.result.reason ===
+      "UNAVAILABLE";
+
   if (
-    requestedCountry.hasExactMatch
+    requestedCountry.hasExactMatch &&
+    !requestedCountryUnavailable
   ) {
     return requestedCountry.result;
   }
@@ -746,8 +769,9 @@ export function resolveDefaultValue(
   /*
    * SECOND: country fallback.
    *
-   * Fallback is attempted only when there is no exact record
-   * for the requested country/code.
+   * Fallback is attempted when there is no exact record for the
+   * requested country/code, OR when an exact record exists but its
+   * status is specifically UNAVAILABLE (R7 clause 2 / R9, see above).
    */
   if (
     input.origin_country_name !==

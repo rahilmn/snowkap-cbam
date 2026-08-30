@@ -357,7 +357,6 @@ describe(
 
     it.each([
       ["REFERENCE_REQUIRED", "REFERENCE_REQUIRED"],
-      ["UNAVAILABLE", "UNAVAILABLE"],
       ["NOT_APPLICABLE", "NOT_APPLICABLE"],
     ] as const)(
       "reports UNRESOLVED with reason %s and persists nothing when the exact record is %s",
@@ -395,6 +394,123 @@ describe(
             ),
             countryMapping: { status: "MAPPED", regulatory_country_name: "China" },
           },
+        );
+      },
+    );
+
+    it(
+      // 2026-08-30 (R7 clause 2 / R9 fix, primary-source-confirmed -- see
+      // docs/regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md): UNAVAILABLE
+      // is deliberately no longer covered by the it.each above -- it now
+      // behaves differently from REFERENCE_REQUIRED/NOT_APPLICABLE, since
+      // the resolver attempts the Other Countries and Territories fallback
+      // before giving up on it. This fixture has only the single exact
+      // record (no fallback record), matching the it.each's own minimal
+      // style, so the fallback attempt finds nothing and the terminal
+      // reason is NO_MATCH -- see the sibling test below for the realistic
+      // case where a fallback value actually exists.
+      "reports UNRESOLVED with reason NO_MATCH and persists nothing when the exact record is UNAVAILABLE and no fallback record exists",
+      async () => {
+        const result =
+          await determineLineEmissions(
+            mockSupabase(
+              {},
+            ),
+            mockRepository(
+              [
+                record(
+                  {
+                    total_emissions: {
+                      value: null,
+                      status: "UNAVAILABLE",
+                      raw_source_value: null,
+                    },
+                  },
+                ),
+              ],
+            ),
+            mockMapper(
+              { status: "MAPPED", regulatory_country_name: "China" },
+            ),
+            memberContext(),
+            lineId,
+          );
+
+        expect(result).toEqual(
+          {
+            status: "UNRESOLVED",
+            resolution: expect.objectContaining(
+              { status: "UNRESOLVED", reason: "NO_MATCH" },
+            ),
+            countryMapping: { status: "MAPPED", regulatory_country_name: "China" },
+          },
+        );
+      },
+    );
+
+    it(
+      "falls back to Other Countries and Territories and reports DETERMINED when a listed country's exact record is UNAVAILABLE but the fallback resolves (R7 clause 2 / R9)",
+      async () => {
+        const unavailableExact =
+          record(
+            {
+              total_emissions: {
+                value: null,
+                status: "UNAVAILABLE",
+                raw_source_value: "-",
+              },
+            },
+          );
+
+        const fallbackRecord =
+          record(
+            {
+              origin_country_name: "_Other Countries and Territorie",
+            },
+          );
+
+        const updatedRow =
+          {
+            id: "line-1",
+            shipment_id: "ship-1",
+            org_id: "org-1",
+            line_number: 1,
+            cn_code: "25232100",
+            cn_code_level: "CN8",
+            goods_description: null,
+            origin_country: "CN",
+            net_mass_tonnes: "10.5",
+            quantity_mwh: null,
+            production_route_name: null,
+            production_route_indicator: null,
+            emission_determination: { method: "DEFAULT", resolution: {} },
+          };
+
+        const result =
+          await determineLineEmissions(
+            mockSupabase(
+              {
+                updateResult: { data: updatedRow, error: null },
+              },
+            ),
+            mockRepository(
+              [unavailableExact, fallbackRecord],
+            ),
+            mockMapper(
+              { status: "MAPPED", regulatory_country_name: "China" },
+            ),
+            memberContext(),
+            lineId,
+          );
+
+        expect(result.status).toBe(
+          "DETERMINED",
+        );
+
+        expect(
+          result.status === "DETERMINED" ? result.resolution.reason : null,
+        ).toBe(
+          "OTHER_COUNTRIES_FALLBACK",
         );
       },
     );

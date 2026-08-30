@@ -273,8 +273,28 @@ describe(
     );
 
     it(
-      "returns UNAVAILABLE rather than zero",
+      "returns NO_MATCH rather than zero when neither the listed country nor any Other Countries and Territories row exists for the code",
       () => {
+        // 2026-08-30 (R7 clause 2 / R9 fix): before this fix, this test's
+        // name was "returns UNAVAILABLE rather than zero" and asserted
+        // reason "UNAVAILABLE" -- correct for the OLD (pre-fix) behavior,
+        // where any exact record's status short-circuited resolution
+        // immediately, without ever attempting the Other Countries and
+        // Territories fallback. Per R7 clause 2 / R9 (Commission
+        // Implementing Regulation (EU) 2025/2621, Annex I, confirmed
+        // unchanged by its correction (EU) 2026/1740 -- read directly,
+        // both times -- see
+        // docs/regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md), the
+        // resolver now attempts that fallback before giving up on an
+        // UNAVAILABLE exact match. This fixture has no fallback record at
+        // all (an unrealistic case for the real dataset, where every code
+        // has an Other Countries and Territories row -- see the new test
+        // below for the realistic "fallback also unavailable" case R9
+        // actually describes), so the fallback attempt itself finds
+        // nothing and the terminal reason becomes NO_MATCH. The
+        // invariant this test exists to prove is unchanged either way:
+        // never a fabricated zero, always an honest UNRESOLVED status
+        // with a null record.
         const unavailable =
           record({
             normalized_trade_code:
@@ -320,7 +340,402 @@ describe(
         expect(
           result.reason,
         ).toBe(
+          "NO_MATCH",
+        );
+
+        expect(
+          result.record,
+        ).toBeNull();
+      },
+    );
+
+    it(
+      "falls back to Other Countries and Territories when a listed country's own record is explicitly UNAVAILABLE (R7 clause 2 / R9)",
+      () => {
+        // Primary-source-confirmed 2026-08-30: Commission Implementing
+        // Regulation (EU) 2025/2621, Annex I (read directly at
+        // https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32025R2621,
+        // its correction (EU) 2026/1740 confirmed the same clause
+        // unchanged) states verbatim: "Where a country or territory is
+        // explicitly listed but no value is provided or the relevant
+        // field shows '-', the default value for the respective good
+        // from the table 'Other countries and territories' needs to be
+        // selected." See
+        // docs/regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md for
+        // the full evidence trail this fix is based on.
+        const unavailable =
+          record({
+            origin_country_name:
+              "India",
+
+            normalized_trade_code:
+              "2507008080",
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+
+            total_emissions: {
+              value: null,
+
+              status:
+                "UNAVAILABLE",
+
+              raw_source_value:
+                "-",
+            },
+          });
+
+        const fallback =
+          record({
+            origin_country_name:
+              "_Other Countries and Territorie",
+
+            source_sheet:
+              "_Other Countries and Territorie",
+
+            normalized_trade_code:
+              "2507008080",
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+
+            total_emissions: {
+              value:
+                "0.42",
+
+              status:
+                "AVAILABLE",
+
+              raw_source_value:
+                "0.42",
+            },
+          });
+
+        const result =
+          resolveDefaultValue(
+            [
+              unavailable,
+              fallback,
+            ],
+            {
+              origin_country_name:
+                "India",
+
+              trade_code:
+                "2507008080",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "RESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "OTHER_COUNTRIES_FALLBACK",
+        );
+
+        expect(
+          result.record?.origin_country_name,
+        ).toBe(
+          "_Other Countries and Territorie",
+        );
+
+        expect(
+          result.record?.total_emissions.value,
+        ).toBe(
+          "0.42",
+        );
+
+        expect(
+          result.trace.some(
+            (step) =>
+              step.step ===
+                "COUNTRY_FALLBACK" &&
+              step.outcome.includes(
+                "_Other Countries and Territorie",
+              ),
+          ),
+        ).toBe(true);
+      },
+    );
+
+    it(
+      "remains UNRESOLVED/UNAVAILABLE, never a fabricated value, when both the listed country and its Other Countries and Territories fallback are UNAVAILABLE for the same code (R9)",
+      () => {
+        // R9, verbatim: "If the corresponding fallback is also
+        // unavailable, resolution remains unresolved." This is the
+        // realistic shape of that case for the real dataset (every code
+        // has an Other Countries and Territories row -- unlike the
+        // "returns NO_MATCH..." test above, which covers the row-absent
+        // edge case a real dataset never actually presents).
+        const unavailable =
+          record({
+            origin_country_name:
+              "India",
+
+            normalized_trade_code:
+              "2507008090",
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+
+            total_emissions: {
+              value: null,
+
+              status:
+                "UNAVAILABLE",
+
+              raw_source_value:
+                "-",
+            },
+          });
+
+        const fallbackAlsoUnavailable =
+          record({
+            origin_country_name:
+              "_Other Countries and Territorie",
+
+            source_sheet:
+              "_Other Countries and Territorie",
+
+            normalized_trade_code:
+              "2507008090",
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+
+            total_emissions: {
+              value: null,
+
+              status:
+                "UNAVAILABLE",
+
+              raw_source_value:
+                "-",
+            },
+          });
+
+        const result =
+          resolveDefaultValue(
+            [
+              unavailable,
+              fallbackAlsoUnavailable,
+            ],
+            {
+              origin_country_name:
+                "India",
+
+              trade_code:
+                "2507008090",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
           "UNAVAILABLE",
+        );
+
+        expect(
+          result.record,
+        ).toBeNull();
+      },
+    );
+
+    it(
+      "never bypasses REFERENCE_REQUIRED with a resolvable Other Countries and Territories fallback (R7/R9 is scoped to UNAVAILABLE only)",
+      () => {
+        const reference =
+          record({
+            origin_country_name:
+              "India",
+
+            normalized_trade_code:
+              "3102",
+
+            code_level:
+              "HS4",
+
+            total_emissions: {
+              value: null,
+
+              status:
+                "REFERENCE_REQUIRED",
+
+              raw_source_value:
+                "see below",
+            },
+          });
+
+        const resolvableFallback =
+          record({
+            origin_country_name:
+              "_Other Countries and Territorie",
+
+            source_sheet:
+              "_Other Countries and Territorie",
+
+            normalized_trade_code:
+              "3102",
+
+            code_level:
+              "HS4",
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+
+            total_emissions: {
+              value:
+                "1.10",
+
+              status:
+                "AVAILABLE",
+
+              raw_source_value:
+                "1.10",
+            },
+          });
+
+        const result =
+          resolveDefaultValue(
+            [
+              reference,
+              resolvableFallback,
+            ],
+            {
+              origin_country_name:
+                "India",
+
+              trade_code:
+                "3102",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "REFERENCE_REQUIRED",
+        );
+
+        expect(
+          result.record,
+        ).toBeNull();
+      },
+    );
+
+    it(
+      "never bypasses NOT_APPLICABLE with a resolvable Other Countries and Territories fallback (R7/R9 is scoped to UNAVAILABLE only)",
+      () => {
+        const notApplicable =
+          record({
+            origin_country_name:
+              "India",
+
+            normalized_trade_code:
+              "3103",
+
+            code_level:
+              "HS4",
+
+            total_emissions: {
+              value: null,
+
+              status:
+                "NOT_APPLICABLE",
+
+              raw_source_value:
+                "n/a",
+            },
+          });
+
+        const resolvableFallback =
+          record({
+            origin_country_name:
+              "_Other Countries and Territorie",
+
+            source_sheet:
+              "_Other Countries and Territorie",
+
+            normalized_trade_code:
+              "3103",
+
+            code_level:
+              "HS4",
+
+            source_production_route_code:
+              null,
+
+            production_route:
+              null,
+
+            total_emissions: {
+              value:
+                "0.90",
+
+              status:
+                "AVAILABLE",
+
+              raw_source_value:
+                "0.90",
+            },
+          });
+
+        const result =
+          resolveDefaultValue(
+            [
+              notApplicable,
+              resolvableFallback,
+            ],
+            {
+              origin_country_name:
+                "India",
+
+              trade_code:
+                "3103",
+            },
+          );
+
+        expect(
+          result.status,
+        ).toBe(
+          "UNRESOLVED",
+        );
+
+        expect(
+          result.reason,
+        ).toBe(
+          "NOT_APPLICABLE",
         );
 
         expect(
@@ -1229,10 +1644,23 @@ describe(
           "UNRESOLVED",
         );
 
+        // 2026-08-30 (R7 clause 2 / R9 fix): this test's core invariant
+        // -- the other route's "3.000" AVAILABLE value is never
+        // substituted (result.record stays null, asserted below) -- is
+        // unaffected by the fix and remains the point of this test. The
+        // exact reason string changed from "UNAVAILABLE" to "NO_MATCH"
+        // as a side effect: the resolver now also attempts the Other
+        // Countries and Territories COUNTRY fallback (a different
+        // mechanism from route matching) before giving up on the
+        // requested route's own UNAVAILABLE record, and this fixture has
+        // no such fallback record at all, so that attempt finds nothing.
+        // See "returns NO_MATCH rather than zero when neither the listed
+        // country nor any Other Countries and Territories row exists for
+        // the code" above for the same edge case in isolation.
         expect(
           result.reason,
         ).toBe(
-          "UNAVAILABLE",
+          "NO_MATCH",
         );
 
         expect(
