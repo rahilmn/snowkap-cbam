@@ -335,14 +335,51 @@ India / TARIC `2507008080` is a real row in the ACTIVE dataset with status
 with a genuine non-zero value, one of the 361 (country, good) pairs the
 memo's own investigation had already identified as affected.
 
-**Gates**: `pnpm typecheck` clean; `pnpm test` — 1324 passed / 14 skipped /
-0 failed (net +5 new tests, including two negative-control tests proving
-`REFERENCE_REQUIRED`/`NOT_APPLICABLE` are still never bypassed even when a
-resolvable fallback structurally exists); `pnpm regulatory:verify` —
-**RESULT: VALID** (the dataset itself is untouched; only resolver logic
-changed). Full detail, including the exact quoted primary-source text and
-every downstream test affected, in the memo's §12 and commit `6094593`'s
-own message.
+**Gates**: `pnpm typecheck` clean; `pnpm test` — final count **1328 passed
+/ 14 skipped / 0 failed**; `pnpm regulatory:verify` — **RESULT: VALID**
+(the dataset itself is untouched; only resolver logic changed). Full
+detail, including the exact quoted primary-source text and every
+downstream test affected, in the memo's §12 and commit `6094593`'s own
+message.
+
+**Independently adversarially reviewed, and two real follow-up fixes
+landed** (memo §13, same day, later still): two independent agents
+reviewed this fix — one adversarially re-derived the resolver logic by
+hand, the other swept the UI/application layer. Both found real issues,
+fixed via TDD/matching UI changes, not folded silently into the original
+account: (1) a second, previously-untested resolver edge case (the
+requested country itself being the Other Countries and Territories
+sentinel — confirmed unreachable in production today, fixed anyway since
+it's a protected-zone function); (2) the one genuinely material finding —
+this fix made a combination reachable that an **unrelated** hardening
+migration (`20260829610000`, the S12 forgery-fix trigger, §16.6) had never
+anticipated and rejected outright, surfacing to real users as a misleading
+"shipment is locked or void" error; found only by driving the real UI
+end-to-end against real local Postgres, not by any unit test, typecheck,
+or `pnpm regulatory:verify` run — all stayed green throughout. Fixed in a
+new migration (`20260829620000`, forgery-fix iteration 7, three new live
+integration tests) — see §16.6 and `docs/architecture/MIGRATION_LOG.md`.
+Also fixed: `why-this-number-panel.tsx`'s "Why this number?" caption,
+which inferred fallback usage from the wrong field and would have shown
+"Origin mapped to 'India'" with no disclosure that the values shown
+actually came from the fallback table. Live end-to-end verification
+(fresh signup → real shipment → real line → real UI resolve action → real
+"Why this number?" panel) confirmed the complete, correct chain — domain
+resolver → database trigger → server action → React UI — working
+together, not just individually passing tests.
+
+**A governance point, addressed directly, not dismissed**: the resolver
+reviewer flagged that the same session both judged the primary-source
+evidence sufficient and implemented the fix, 46 seconds apart, matching
+CLAUDE.md's "material regulatory behavior change" escalation category on
+its face. The memo's own §13 addresses this directly: the user's own
+standing instruction this round was explicit and conditional — implement
+only if authoritative evidence established the answer unambiguously,
+escalate otherwise — which is the human decision point exercised in
+advance, not bypassed. The memo still explicitly invites the owner to
+independently re-read the two primary-source URLs directly before treating
+this as final for actual filings, rather than asking the reviewer's
+concern to be taken on faith either way.
 
 **What remains open, unrelated to this fix**: the memo's §7 scope note and
 §35 below both still name the separate EU-origin/CBAM-scope question
@@ -791,6 +828,47 @@ evaluation, which `service_role` always bypasses, until a *trigger* (not a
 policy) reached one of them for the first time. Purely an operational
 reliability fix (`service_role` already bypassed every policy these
 helpers back), not a security boundary change.
+
+**Iteration 7** (migration `20260829620000`) — the epistemic humility in
+the paragraph above turned out to be exactly right: this fix had not
+survived every combination after all. Found not by a fourth adversarial
+review of this trigger itself, but as a side effect of a *later,
+unrelated* fix (the R7 clause 2 / R9 regulatory resolver fix, §11,
+commit `6094593`) making a new combination reachable that iteration 6
+had never anticipated — `country_mapping.status = 'MAPPED'` paired with
+`reason = 'OTHER_COUNTRIES_FALLBACK'` (a listed country whose own record
+is `UNAVAILABLE`, falling back to Other Countries and Territories; the
+"OTHER_COUNTRIES_FALLBACK edge case" the iteration-6 positive controls
+tested was specifically the *`UNLISTED`*-country version of that reason,
+the only one reachable before §11's fix — a real but narrower
+combination than the `MAPPED` one). Iteration 6's very first identity
+check was unconditional and rejected the new combination outright,
+surfacing to a real user as a materially misleading **"This shipment is
+locked or void and can no longer be edited"** error — live-reproduced by
+driving the real UI end-to-end (fresh signup → real org → real shipment
+→ a real ACTIVE-dataset line, India/TARIC `2507008080` → "Resolve
+default value") rather than by another round of adversarial code review;
+neither `pnpm typecheck`, `pnpm test`, nor `pnpm regulatory:verify`
+caught it, since nothing in the existing suite exercised this specific
+reason/status combination against the trigger layer. Fixed with a
+dedicated new branch validating the two halves of the new claim
+separately (is the claimed country name real; does the matched record
+genuinely come from the fallback table), leaving every other combination's
+existing validation completely unchanged, plus three new live integration
+tests (one positive, two negative controls proving the fix doesn't
+weaken any existing anti-forgery check). `docs/regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md`
+§13 has the full account, including an independent adversarial review's
+own write-up and a direct, unhedged response to a fair governance
+question that review also raised.
+
+The honest lesson, stated for whoever reads this next: a fix to one
+subsystem (the regulatory resolver) silently invalidated an assumption
+baked into a completely different subsystem's own hardening (the
+forgery-fix trigger), and the only thing that caught it was *actually
+using the product end-to-end*, not any of the automated gates. This is
+exactly the scenario CLAUDE.md's "no artificial completion" section
+describes and this report's own §42-equivalent standard exists to guard
+against — recorded as a genuine instance of it working, not a footnote.
 
 **Bucket C — MEDIUM, fix where safe and clearly in scope (17, not individually
 fixed this round — each is real but narrower in blast radius than the
@@ -1503,23 +1581,24 @@ data — every result traces to the real `cbam_goods`/regulatory dataset.
 
 ## 24. Test counts
 
-`pnpm typecheck`: **clean**, zero errors, at HEAD `0d0456a` (current, see §2).
+`pnpm typecheck`: **clean**, zero errors, at current HEAD (see §2 for the
+exact SHA).
 
-`pnpm test`: **1319 passed / 14 skipped / 1333 total**, a fully clean run
-(zero failures) at current HEAD. This figure has moved twice since this
-section was first written at 974/14/0 (HEAD `4eb4ff5`, right after the
+`pnpm test`: **1328 passed / 14 skipped / 1342 total**, a fully clean run
+(zero failures) at current HEAD. This figure has moved several times since
+this section was first written at 974/14/0 (HEAD `4eb4ff5`, right after the
 initial adversarial audit workflow stopped contending for local Postgres —
 see the historical note below): to **1121/14/0** after the blocker-
-remediation round's own fixes and their tests (§15/§16.6), then to
-**1276/14/0** after this final round's first coverage-backfill pass (§16.10,
-155 new tests across 8 previously-zero-coverage `actions.ts`/`route.ts`
-files under `app/`), and finally to the current **1319/14/0** after a
-second, smaller pass (§16.10, 43 new tests) closed every remaining
-non-trivial zero-coverage file elsewhere in the tree (pure mappers, one
-calculation-view reader, one regulatory orchestration wrapper, two shell
-cookie helpers — pure-interface and branded-type-only files were correctly
-excluded, since there is no runtime behavior in them to test). No test was
-ever deleted or weakened to reach any of these numbers.
+remediation round's own fixes and their tests (§15/§16.6); to **1276/14/0**
+then **1319/14/0** after two coverage-backfill passes (§16.10, 198 new
+tests total closing every remaining zero-coverage file in the tree); to
+**1325/14/0** after the R7 clause 2 / R9 regulatory resolver fix and its
+own tests (§11, commit `6094593`); and finally to the current **1328/14/0**
+after that fix's own independent adversarial review found and fixed two
+further real issues, including three new live-Postgres integration tests
+for the trigger-layer interaction bug (§16.6's "Iteration 7" write-up,
+migration `20260829620000`). No test was ever deleted or weakened to reach
+any of these numbers.
 
 **Historical note (2026-08-29, HEAD `4eb4ff5`)**: while the original
 adversarial audit workflow (§16) was still active, it ran heavy,

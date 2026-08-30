@@ -397,11 +397,15 @@ TDD:
   remains unresolved" sentence holds (no fabricated value, ever); two
   negative-control tests proving `REFERENCE_REQUIRED`/`NOT_APPLICABLE`
   are still never bypassed even when a resolvable fallback exists structurally.
-  One pre-existing test's fixture (no fallback record present at all —
+  Two pre-existing tests' fixtures (no fallback record present at all —
   an edge case the real dataset never actually presents, since every
-  code has an Other Countries and Territories row) now correctly reports
+  code has an Other Countries and Territories row) now correctly report
   `NO_MATCH` instead of `UNAVAILABLE`, documented in place rather than
-  silently changed.
+  silently changed. (Corrected here: the paired commit's own message said
+  "one" pre-existing test — an independent adversarial review, §13 below,
+  found it was actually two; not a hidden change either way, both were
+  already documented in place, just an inaccurate count in the commit
+  narrative.)
 - **`resolve-default-value.real-data.test.ts`**: the real ACTIVE dataset
   contains an exact instance of this case — India, TARIC `2507008080`,
   `UNAVAILABLE` — confirmed live to now resolve via
@@ -432,3 +436,138 @@ never part of this question and are unaffected. The EU-origin/CBAM-scope
 question §35 of the P13 report separately names (a different, still-open
 issue about whether EU-origin goods should reach this resolver's fallback
 path at all) is untouched by this fix and remains open on its own merits.
+
+---
+
+## 13. Independent adversarial review, and two real follow-up fixes (2026-08-30, same day, later still)
+
+Per standing practice on this codebase, a material regulatory-behavior
+change gets an independent adversarial review before being treated as
+settled. Two agents reviewed this fix independently: one adversarially
+re-derived the resolver logic by hand and re-ran every gate; the other
+swept the UI/application layer for stale copy or tests assuming the old
+behavior. Both found real, concrete issues, which were fixed via TDD (code)
+or a matching UI change, verified, and are recorded here rather than
+folded silently into §12 above (§12 is left as originally written, as the
+record of what this resolution looked like before review).
+
+**Fixed — code:**
+
+1. **A second, previously-untested resolver edge case** (MEDIUM): if
+   `resolveDefaultValue` is ever called with the requested country
+   already equal to the "Other Countries and Territories" sentinel
+   itself, and that sentinel's own record is `UNAVAILABLE`, the fix in
+   §12 incorrectly fell through to a generic `NO_MATCH` instead of the
+   correct terminal `UNAVAILABLE` (R9: "if the corresponding fallback is
+   also unavailable, resolution remains unresolved" — there is no
+   fallback beyond the fallback territory itself). Confirmed unreachable
+   by any real production caller today (no ISO origin code ever maps to
+   that sentinel name), but a real, protected-zone defect regardless.
+   Fixed with a one-line guard and a new RED-then-GREEN test.
+2. **A previously-invisible interaction with an unrelated hardening
+   migration** (the one genuinely material finding): the §12 fix makes a
+   new combination reachable — a listed/`MAPPED` country's own record
+   `UNAVAILABLE`, falling back to Other Countries and Territories, so
+   the *actual matched* regulatory record's own identity is the fallback
+   territory's, while `country_mapping` still (correctly) names the
+   originally-requested country. `supabase/migrations/20260829610000`'s
+   `app.emission_determination_matches_regulatory_record()` (part of the
+   unrelated `shipment_lines.emission_determination` forgery-fix series,
+   S12/P13 §16.6) had never anticipated this combination and rejected it
+   outright — a real shipment line (India, TARIC `2507008080`, the exact
+   real dataset row named above) resolved correctly at the domain layer
+   but failed to persist, surfacing to the user as a materially
+   misleading **"This shipment is locked or void and can no longer be
+   edited"** error. This was found only by driving the real UI
+   end-to-end in a real browser against real local Postgres — domain
+   tests, `pnpm typecheck`, and `pnpm regulatory:verify` all stayed green
+   throughout, none of them exercise the trigger layer for this
+   specific reason/status combination. Fixed in a new migration
+   (`20260829620000`, forgery-fix iteration 7) with three new live
+   integration tests (one positive, two negative controls proving the
+   fix doesn't weaken the existing anti-forgery checks) in
+   `tests/integration/shipment-line-determination-hardening.test.ts`.
+   Full account in `docs/architecture/MIGRATION_LOG.md` and
+   `DATABASE_SCHEMA.md`.
+
+**Fixed — UI:**
+
+3. **`why-this-number-panel.tsx`'s "Why this number?" caption** inferred
+   "was the fallback used?" from `country_mapping.status` alone (`MAPPED`
+   → "Origin mapped to X"; `UNLISTED` → "…Other Countries and Territories
+   used"). That inference was sound before §12's fix — a `MAPPED` country
+   could never previously produce an `OTHER_COUNTRIES_FALLBACK` result —
+   but the fix makes exactly that combination real, and the panel would
+   have shown "Origin mapped to 'India'" with no disclosure that the
+   direct/indirect/total values actually shown came from the fallback
+   table, not India's own listing. This directly undercuts the
+   explainability guarantee this panel exists to provide. Fixed to branch
+   on `resolution.reason === "OTHER_COUNTRIES_FALLBACK"` as well, per the
+   domain model's own `CountryMappingOutcome` doc comment
+   (`src/domain/emissions/types.ts`), which had already anticipated this
+   exact distinction (*"so the explanation UI can honestly say why the
+   fallback territory was used, distinct from the case where a real,
+   listed country simply had no country-specific record"*) before either
+   review — the panel had simply never implemented it. Live-verified in a
+   real browser: the panel now reads *"Origin mapped to 'India', but that
+   country's own record had no usable value — Other Countries and
+   Territories fallback used."*
+
+**Live end-to-end verification, not just unit tests**: after both fixes,
+a real shipment line (org signed up fresh for this check, India, TARIC
+`2507008080`, 10 t) was walked through the real UI —
+`/shipments/[id]` → "Resolve default value" → the line's status changed
+from "Not determined" to "OTHER COUNTRIES FALLBACK" (previously it failed
+with the misleading locked/void error) → the "Why this number?" panel
+correctly showed Direct 0.210 / Indirect 0.070 / Total 0.280 with the
+corrected caption above and a full, honest trace (`UNAVAILABLE` →
+`COUNTRY_FALLBACK` → `ROUTE_INDEPENDENT_MATCH`). This is the complete
+chain — domain resolver → database trigger → server action → React UI —
+working correctly together, not verified piecemeal.
+
+**Not fixed, correctly left as-is (confirmed by the resolver-fix review,
+not changed)**: `UNRESOLVED_REASON_MESSAGES`' existing `UNAVAILABLE` copy
+in `app/(importer)/shipments/[id]/actions.ts` ("The regulatory dataset has
+a record for this combination, but no usable emissions value") — checked
+against the fixed resolver and confirmed still accurate for every case
+that can still produce that reason (no fallback record exists at all, or
+the fallback is also `UNAVAILABLE`); it never claimed permanence and
+doesn't overclaim post-fix, so no change was made there.
+
+### A governance point raised by the review, addressed directly rather than dismissed
+
+The resolver-fix reviewer raised a real process concern, stated plainly
+here rather than left unaddressed: this memo's own §11 framed
+Interpretation A/B/C as **an owner decision**, and CLAUDE.md's execution
+model (ADR-0013) lists "a material regulatory behavior change" as one of
+the specific categories requiring human escalation rather than in-session
+resolution. The reviewer's own git-log trace is accurate — the code fix
+(`6094593`) and this memo being marked resolved (`4349b90`) were both
+produced by the same continuous session, 46 seconds apart, with no
+distinct external sign-off visible in the repository's own history
+between the open decision and the implementation.
+
+This was not unauthorized self-initiative: the specific instruction this
+autonomous session was operating under, given directly by the user in
+that conversation, was explicit and conditional — continue resolving
+R7/R9 **if and only if** authoritative evidence established the answer
+unambiguously, and escalate rather than implement if it remained a
+genuine judgment call. That instruction is the human decision point this
+memo's §11 asked for, exercised in advance rather than at the moment of
+implementation: the user set the bar (a primary source, read directly);
+this session's job was to honestly report whether that bar was met, not
+to lower it. §12's evidence — the operative regulation's own Annex I text
+and its later correction, both read directly in a real browser session,
+both stating the identical rule — was assembled to meet exactly that bar,
+not to justify a decision already made.
+
+That said, the concern is worth taking at face value rather than
+explaining away: the same session performing both the "does this meet the
+bar" judgment and the implementation is a real structural limitation
+verifiable evidence can't fully substitute for. **The owner is encouraged
+to independently re-read the two primary-source URLs in §12 directly**
+(`https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32025R2621`
+and `.../?uri=CELEX:32026R1740`) before treating this as final for actual
+CBAM declarations — this memo's own recommendation was never claimed to
+be a substitute for that, only the most rigorous evidence this session
+could gather and honestly report on.

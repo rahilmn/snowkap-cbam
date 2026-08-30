@@ -134,7 +134,8 @@ follow-up, the same "grep-proof or it's wrong" discipline
 | `20260829580000` | `p13_review_shipment_line_determination_forgery_fix_v3.sql` | Forgery fix, iteration 3 |
 | `20260829590000` | `p13_review_app_schema_service_role_execute_grants.sql` | Live-reproduced while writing a regression test: `service_role` lacked schema `USAGE` on `app` plus `EXECUTE` on seven helper functions |
 | `20260829600000` | `p13_review_shipment_line_determination_forgery_fix_v5.sql` | Forgery fix, iteration 5 (iteration 4 was a test-only change, not a migration) |
-| `20260829610000` | `p13_review_shipment_line_determination_forgery_fix_v6.sql` | Forgery fix, iteration 6 — the fix that finally held under three independent Opus reviews; see `P13_RELEASE_READINESS_REPORT.md` §16.6 |
+| `20260829610000` | `p13_review_shipment_line_determination_forgery_fix_v6.sql` | Forgery fix, iteration 6 — held under three independent Opus reviews *for the surface those reviews examined*; a real gap in a combination those reviews never exercised was found later — see `20260829620000` below |
+| `20260829620000` | `p13_review_shipment_line_determination_forgery_fix_v7.sql` | Forgery fix, iteration 7 — self-discovered via live browser end-to-end verification of the unrelated R7 clause 2 / R9 regulatory resolver fix (`docs/regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md` §12): that fix made a combination reachable (a listed/MAPPED country's own record UNAVAILABLE, falling back to Other Countries and Territories) that v6's validator had never anticipated and rejected as a forgery, surfacing to users as a misleading "shipment is locked or void" error. Not caught by domain-level tests, typecheck, or `pnpm regulatory:verify` — only by exercising the real UI end-to-end against real Postgres. See `P13_RELEASE_READINESS_REPORT.md` §16.6 for the full account. |
 
 ## Not yet reflected in this log at the code level (tracked, not migrations)
 

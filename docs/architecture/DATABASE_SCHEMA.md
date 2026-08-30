@@ -11,7 +11,7 @@
 > document covers the five migrations applied since**
 > (`20260829450000`–`20260829490000`, 44 migrations total as of that
 > update) — **and the "Further P13 additions" section after it covers
-> twelve more** (`20260829500000`–`20260829610000`, 56 migrations total
+> thirteen more** (`20260829500000`–`20260829620000`, 57 migrations total
 > as of 2026-08-30 — see [`MIGRATION_LOG.md`](./MIGRATION_LOG.md) for the
 > full ordered list). Read all three: the body for the schema's shape,
 > the two P13 sections for what changed on top of it, in order. Update
@@ -1248,28 +1248,33 @@ drop-and-recreate-in-a-new-migration pattern (see this document's own
 
 ## Further P13 additions (found stale during the final non-blocked-work audit, 2026-08-30)
 
-Twelve more migrations landed after the "P13 additions" section above was
-written (`20260829500000`–`20260829610000`), during this session's own
-final adversarial audit and its blocker-remediation round (see
-`docs/plans/P13_RELEASE_READINESS_REPORT.md` §16.6 for the full narrative
-of most of these). Like the five above, none touch the protected
-regulatory zone or add a new table — all are policy/trigger/function
-redefinitions, several of them multiple corrective iterations on the same
-underlying fix (the `shipment_line_determination_forgery_fix` series took
-six iterations total, v1 through v6, after independent review found the
-first attempts still incomplete — see the release-readiness report for
-why). One-line purpose per migration (see `MIGRATION_LOG.md` and the files
-themselves for the full detail already written into each one):
+Thirteen more migrations landed after the "P13 additions" section above
+was written (`20260829500000`–`20260829620000`), during this session's own
+final adversarial audit, its blocker-remediation round, and a later
+regulatory-fix round (see `docs/plans/P13_RELEASE_READINESS_REPORT.md`
+§16.6 for the full narrative of most of these). Like the five above, none
+touch the protected regulatory zone or add a new table — all are
+policy/trigger/function redefinitions, several of them multiple corrective
+iterations on the same underlying fix (the
+`shipment_line_determination_forgery_fix` series took **seven** iterations
+total, v1 through v7 — v6 held under three independent Opus reviews for
+the surface those reviews examined, but iteration 7 closed a real gap in a
+combination none of those reviews exercised, found only via live browser
+end-to-end verification of an unrelated later fix; see the release-
+readiness report for the full account of why each attempt turned out
+incomplete). One-line purpose per migration (see `MIGRATION_LOG.md` and
+the files themselves for the full detail already written into each one):
 
 - **`20260829500000`/`_v2` (`20260829530000`)/`_v3` (`20260829580000`)/`_v5`
-  (`20260829600000`)/`_v6` (`20260829610000`)** — the
-  `shipment_lines.emission_determination` forgery-fix series: closes a
+  (`20260829600000`)/`_v6` (`20260829610000`)/`_v7` (`20260829620000`)** —
+  the `shipment_lines.emission_determination` forgery-fix series: closes a
   chain of successively-discovered gaps in the `WITH CHECK` validating a
-  claimed ACTUAL determination against its real `emission_data` row (the
-  final, held fix is `app.validate_emission_determination_write()` plus
-  its `BEFORE INSERT/UPDATE` trigger — a full account of why five earlier
-  attempts each turned out incomplete is in the release-readiness report,
-  not repeated here).
+  claimed determination against its real regulatory/`emission_data` row.
+  The currently-held fix is `app.validate_emission_determination_write()`
+  plus its `BEFORE INSERT/UPDATE` trigger, calling
+  `app.emission_determination_matches_regulatory_record()` (iteration 7's
+  version) — a full account of why six earlier attempts each turned out
+  incomplete is in the release-readiness report, not repeated here.
 - **`20260829510000`** — `storage.buckets.file_size_limit`/`allowed_mime_types`
   set on the `evidence` bucket, closing a direct-Storage-API bypass of the
   application-layer 20 MiB/MIME-allowlist upload-safety controls.
