@@ -1626,6 +1626,27 @@ the (safe-to-expose) anon key is correctly present. Container stopped and
 removed after verification. **This is LOCAL Docker verification, not
 Railway** — see §28 note and §29 for why they are not the same evidence.
 
+**Re-verified again 2026-08-30, later the same day, at current HEAD
+`bea7b62`** (which includes the R7/R9 regulatory fix, `6094593`) — a fresh
+build-and-run cycle to confirm the fix ships correctly in a real production
+image, not just in `pnpm dev`: `docker build` succeeded (27 routes,
+TypeScript checked, no errors); the container ran as non-root
+(`nextjs`, uid 1001, gid 1001, confirmed via `docker exec ... id`); first
+run with `SUPABASE_URL` pointed at `127.0.0.1` reported `"status":
+"degraded"` with database/dataset checks erroring — expected and benign
+(inside the container's own network namespace, `127.0.0.1` is the
+container itself, not the host running local Supabase; this is a
+container-networking artifact of manual local verification, not a defect
+that would occur with a real Railway-hosted Supabase URL, since Railway
+reaches a public URL over the internet, not `localhost`). Re-run
+substituting `host.docker.internal` for the host's local Supabase reached
+it correctly: `GET /api/health` → `200`,
+`{"status":"ok","git_sha":"bea7b6226b60e27c95d25f64075a4eb1e7613c46","checks":{"database":"ok","active_regulatory_dataset":"ok"}}`
+— `git_sha` matches current HEAD exactly, confirming the R7/R9 fix is
+correctly baked into a real, working production image. Container stopped
+cleanly (graceful shutdown within a 15s grace period, no forced kill
+needed) and the test image removed afterward.
+
 ## 29. Railway deployment status — BLOCKED, confirmed down
 
 **`https://snowkap-cbam-production.up.railway.app` returned a persistent
