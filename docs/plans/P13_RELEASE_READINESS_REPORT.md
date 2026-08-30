@@ -6,18 +6,19 @@ after the verified 24-commit checkpoint push to
 `origin/feature/full-product-build` and a fresh Railway re-check — see §29;
 updated again 2026-08-30 with a CI reliability fix, a documentation
 correction, and a final coverage-backfill round closing every remaining
-zero-coverage file — see §16.10)
+zero-coverage file — see §16.10; updated again 2026-08-30 with the R7/R9
+regulatory resolver fix, its independent adversarial review, and two
+real follow-up fixes the review found — see §11 and §16.6's "Iteration 7")
 **Repository**: https://github.com/rahilmn/snowkap-cbam
 **Branch**: `feature/full-product-build`
-**HEAD**: `0d0456a` (pushed to and confirmed synchronized with
+**HEAD**: `5ae588c` (pushed to and confirmed synchronized with
 `origin/feature/full-product-build`; the 12-dimension adversarial audit
 referenced throughout this report was launched while HEAD was `28bc578`,
 completed and its results are fully incorporated in §16; commits between
 this report's original `4eb4ff5` HEAD and current HEAD are the audit's own
-§16.6 triage table, the blocker-remediation round that acted on it, this
-round's re-verification work on the R7/R9 memo (all incorporated in
-§15/§16.6/§11's updates), and this final round's CI fix, documentation
-correction, and coverage backfill (§16.10))
+§16.6 triage table, the blocker-remediation round that acted on it, R7/R9's
+resolution and its own adversarial-review follow-up fixes (§11/§16.6), and
+the CI fix/documentation/coverage-backfill round in between (§16.10))
 
 This report supersedes any prior status summary given mid-session in this
 conversation. Where this document and an earlier message in this session
@@ -95,15 +96,16 @@ access this session does not have.
 ## 2. Exact Git HEAD
 
 ```
-0d0456a test: backfill coverage for last 9 zero-coverage files (mappers, calculation reader, regulatory glue, shell cookie helpers)
+5ae588c docs: record the R7/R9 adversarial review, its two follow-up fixes, and the governance question raised
 ```
 
-Full HEAD SHA: `0d0456adf69788223b29c2e2b64678d5403b7122` (see `git rev-parse
+Full HEAD SHA: `5ae588c6e152095ad65532dfcf9e8ffa9c99a756` (see `git rev-parse
 HEAD` in the repository to reconfirm at any time). **Superseded note**: this
 section previously cited `28bc578` — that was the HEAD when this report's
 adversarial-audit-derived sections (§15/§16) were last substantively
-updated, not a claim that nothing landed afterward. §16.10 documents
-everything committed between `28bc578` and this current HEAD.
+updated, not a claim that nothing landed afterward. §16.10 and §11/§16.6's
+"Iteration 7" write-up document everything committed between `28bc578` and
+this current HEAD.
 
 ## 3. Branch / remote state
 
