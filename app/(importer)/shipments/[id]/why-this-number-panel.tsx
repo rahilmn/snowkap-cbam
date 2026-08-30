@@ -479,7 +479,10 @@ export function WhyThisNumberPanel(
 
             <p className="text-[11px] text-[var(--text-tertiary)]">
               Dataset {resolution.dataset_version} · Unit {resolution.emission_unit} ·{" "}
-              {resolution.country_mapping.status === "MAPPED"
+              {resolution.reason === "OTHER_COUNTRIES_FALLBACK" &&
+              resolution.country_mapping.status === "MAPPED"
+                ? `Origin mapped to "${resolution.country_mapping.regulatory_country_name}", but that country's own record had no usable value -- Other Countries and Territories fallback used`
+                : resolution.country_mapping.status === "MAPPED"
                 ? `Origin mapped to "${resolution.country_mapping.regulatory_country_name}"`
                 : "Origin not individually listed -- Other Countries and Territories used"}
             </p>
