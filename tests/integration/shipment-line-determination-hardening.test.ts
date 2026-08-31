@@ -1027,6 +1027,143 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "rejects an OTHER_COUNTRIES_FALLBACK claim when the line's OWN country has a usable value -- the R7 clause 2 precondition (v8 regression)",
+      async () => {
+        // THE UNDERSTATEMENT REGRESSION TEST.
+        //
+        // Found by the P13 final adversarial review and reproduced before
+        // fixing: the validator enforced the SHAPE of a fallback claim but
+        // never its PRECONDITION. R7 clause 2 permits the Other Countries
+        // and Territories value only when the listed country's own field
+        // is blank/"-". Live example: China / 2804 10 00 has its own
+        // AVAILABLE default of 26.640, while Other Countries is 17.740 --
+        // so an importer could persist a 33% UNDERSTATEMENT of embedded
+        // emissions that every downstream surface would then present as a
+        // validator-approved regulatory figure.
+        //
+        // Fixed in migration 20260831110000 (v8). This test fails against
+        // v7 and passes against v8.
+        const { data: rows } =
+          await serviceClient
+            .from("default_emission_values")
+            .select(
+              "source_sheet, source_row, source_trade_code, emission_unit, direct_status, direct_value, indirect_status, indirect_value, total_status, total_value, dataset_id, countries!inner(name, iso2), regulatory_datasets!inner(version)",
+            )
+            .eq("total_status", "AVAILABLE")
+            .eq("countries.name", "_Other Countries and Territorie")
+            .is("production_route_id", null)
+            .limit(50);
+
+        // Find an Other-Countries row whose code ALSO has an AVAILABLE
+        // value for some real, ISO-mapped country -- i.e. a case where a
+        // fallback claim would be illegitimate.
+        let fallbackRow: Record<string, unknown> | null = null;
+        let victimIso: string | null = null;
+        let victimName: string | null = null;
+
+        for (const row of (rows ?? []) as Record<string, unknown>[]) {
+          const { data: own } =
+            await serviceClient
+              .from("default_emission_values")
+              .select("total_status, countries!inner(name, iso2)")
+              .eq("source_trade_code", row.source_trade_code as string)
+              .eq("total_status", "AVAILABLE")
+              .is("production_route_id", null)
+              .neq("countries.name", "_Other Countries and Territorie")
+              .not("countries.iso2", "is", null)
+              .limit(1);
+
+          // The embedded `countries` relation comes back typed as an
+          // array by the generated client even though !inner yields one
+          // row, so normalise before reading it.
+          const rawCandidate =
+            (own ?? [])[0] as unknown as
+              { countries?: { name: string; iso2: string } | { name: string; iso2: string }[] }
+              | undefined;
+
+          const candidateCountry =
+            Array.isArray(rawCandidate?.countries)
+              ? rawCandidate?.countries[0]
+              : rawCandidate?.countries;
+
+          if (candidateCountry?.iso2) {
+            fallbackRow = row;
+            victimIso = candidateCountry.iso2;
+            victimName = candidateCountry.name;
+            break;
+          }
+        }
+
+        if (!fallbackRow || !victimIso || !victimName) {
+          throw new Error(
+            "Could not find a code where both a real country and Other Countries have AVAILABLE values -- this test needs one to be meaningful.",
+          );
+        }
+
+        const code =
+          (fallbackRow.source_trade_code as string).replace(/\s+/g, "");
+
+        const lineId =
+          await insertLine(
+            {
+              cn_code: code,
+              cn_code_level: code.length > 8 ? "TARIC10" : "CN8",
+              origin_country: victimIso,
+            },
+          );
+
+        const countries =
+          fallbackRow.countries as unknown as { name: string };
+
+        const datasets =
+          fallbackRow.regulatory_datasets as unknown as { version: string };
+
+        const forged = {
+          method: "DEFAULT",
+          resolution: {
+            dataset_id: fallbackRow.dataset_id,
+            dataset_version: datasets.version,
+            resolved_at: "2026-08-31T00:00:00.000Z",
+            reason: "OTHER_COUNTRIES_FALLBACK",
+            country_mapping: { status: "MAPPED", regulatory_country_name: victimName },
+            record_identity: {
+              source_sheet: fallbackRow.source_sheet,
+              source_row: fallbackRow.source_row,
+              source_trade_code: fallbackRow.source_trade_code,
+              origin_country_name: countries.name,
+              source_production_route_code: null,
+            },
+            values: {
+              direct: { value: fallbackRow.direct_value, status: fallbackRow.direct_status },
+              indirect: { value: fallbackRow.indirect_value, status: fallbackRow.indirect_status },
+              total: { value: fallbackRow.total_value, status: fallbackRow.total_status },
+            },
+            emission_unit: fallbackRow.emission_unit,
+            trace: [{ step: "COUNTRY_FALLBACK", outcome: "forged" }],
+          },
+        };
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        // The line's own country HAS a usable value, so no fallback is
+        // permitted for it -- this must be refused.
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
       "still rejects an OTHER_COUNTRIES_FALLBACK reason paired with a record_identity that isn't actually the Other Countries and Territories row (claiming fallback but citing a different real record)",
       async () => {
         const lineId =
