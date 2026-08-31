@@ -92,6 +92,15 @@ vi.mock(
   ),
 );
 
+vi.mock(
+  "../team/actions",
+  () => (
+    {
+      getAppOrigin: async () => "https://app.example.com",
+    }
+  ),
+);
+
 const { signInAction, signUpAction, signOutAction } =
   await import(
     "./actions"
@@ -372,6 +381,51 @@ describe(
         );
 
         expect(signUpMock).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it(
+      "sends an explicit emailRedirectTo so the confirmation link never depends on the dashboard Site URL",
+      async () => {
+        // 2026-08-31 (first real-external-user release gate): signUp was
+        // called with only {email, password}. With no `emailRedirectTo`,
+        // GoTrue builds the confirmation link from the PROJECT'S OWN
+        // dashboard "Site URL" -- so a project still pointing at
+        // http://localhost:3000 mails every new user a link to a host
+        // that does not exist for them, and email confirmation silently
+        // cannot be completed by anyone. Nothing in this repository
+        // could detect that; the failure lives entirely in remote
+        // config. Sending the redirect explicitly makes the deployment
+        // that serves the request decide where its own users land, which
+        // is the only party that actually knows.
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        signUpMock.mockResolvedValueOnce(
+          {
+            data: { session: null },
+            error: null,
+          },
+        );
+
+        await signUpAction(
+          { status: "idle" },
+          formData(
+            { email: "buyer@example.com", password: "correct-horse-battery" },
+          ),
+        );
+
+        expect(signUpMock).toHaveBeenCalledWith(
+          {
+            email: "buyer@example.com",
+            password: "correct-horse-battery",
+            options: {
+              emailRedirectTo:
+                "https://app.example.com/auth/callback?next=/onboarding",
+            },
+          },
+        );
       },
     );
 

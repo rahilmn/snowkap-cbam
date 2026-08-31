@@ -17,6 +17,10 @@ import {
   getClientIp,
 } from "../../components/shell/get-client-ip";
 
+import {
+  getAppOrigin,
+} from "../team/actions";
+
 import type {
   AuthActionState,
 } from "./action-state";
@@ -208,9 +212,32 @@ export async function signUpAction(
   const supabase =
     await getServerSupabaseClient();
 
+  // The confirmation link must be built from the origin that actually
+  // served this request -- never left to GoTrue's fallback, which is the
+  // project's dashboard "Site URL". A hosted project whose Site URL still
+  // reads http://localhost:3000 would mail every new user a link to a
+  // host that does not exist for them: signup would appear to succeed,
+  // the message would say "check your email," and confirmation would be
+  // impossible to complete. No test or type in this repository can catch
+  // that, because the broken half lives in remote configuration. Sending
+  // it explicitly moves the decision to the only party that knows the
+  // answer -- the deployment handling the request.
+  //
+  // `/onboarding` is where a confirmed-and-signed-in new user belongs,
+  // matching the immediate-session branch below. The value goes through
+  // app/auth/callback/is-safe-redirect-path.ts on the way back, like
+  // every other `next` this app issues.
+  const origin =
+    await getAppOrigin();
+
   const { data, error } =
     await supabase.auth.signUp(
-      parsed.data,
+      {
+        ...parsed.data,
+        options: {
+          emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
+        },
+      },
     );
 
   if (error) {
