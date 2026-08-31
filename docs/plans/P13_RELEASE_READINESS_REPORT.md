@@ -1746,6 +1746,63 @@ comment as deferred to a later UI phase, but for a release candidate it is
 a material limitation and is listed as such in §35 rather than left as a
 source-code aside.
 
+### 16.14 Declaration lifecycle and deployment provenance, verified live (2026-08-31)
+
+**Deployment provenance — CLOSED.** `/api/health` now reports
+`git_sha: "18d12565845c16ad6e53c0b2f8869e8065ad16c2"`, matching this
+branch's HEAD exactly, alongside `database: ok`,
+`active_regulatory_dataset: ok`, `product_schema: ok`.
+
+Getting there exposed a real bug. After `GIT_SHA=${{RAILWAY_GIT_COMMIT_SHA}}`
+was added to Railway, health began reporting `git_sha: ""` -- an **empty
+string** where it had previously reported the honest `"unknown"`. All four
+read sites used `process.env.GIT_SHA ?? "dev"`, and `??` guards only
+null/undefined, so a set-but-empty variable produced an empty provenance
+string that *looks* like a value. Fixed in `resolveGitSha()` (commit
+`18d1256`): empty/whitespace treated as unset, plus a
+`RAILWAY_GIT_COMMIT_SHA` fallback. **That fallback is what actually
+works**, which confirms the diagnosis: the `GIT_SHA` build-arg is not
+surviving the Dockerfile build stage, but Railway's runtime variable is
+present. Provenance no longer depends on that build-arg link.
+
+A layering note worth recording: the first attempt placed the helper in
+`src/infrastructure/`, which `tests/architecture/layering.test.ts`
+correctly rejected for `app/status/page.tsx`. Per CLAUDE.md that is a
+signal to restructure rather than widen the allowlist -- and the rule was
+right. It is a **pure function** over an env record with no Supabase, no
+secrets and no I/O, so it never belonged in infrastructure. Moved to
+`src/application/health/`. The architecture test did its job.
+
+**Declaration lifecycle — CLOSED, verified end-to-end on the live
+deployment:**
+
+| Stage | Evidence |
+|---|---|
+| Draft created | `DRAFT`, completeness gate correctly blocking with the exact reason: *"Shipment not READY or LOCKED"* |
+| Blocker satisfied | shipment marked `READY`; refresh then reports *"Complete -- ready to mark ready"* |
+| Marked ready | `READY`; member shipments *"Frozen at the moment this declaration was marked ready"* |
+| Empty filing reference | rejected -- **note: by HTML5 `required`, i.e. the client-side guard.** The server-side `EMPTY_FILED_REFERENCE` path exists and is unit-tested, but this live run exercised only the client guard; stated precisely rather than over-claimed. |
+| Filed | `FILED_RECORDED`, reference recorded verbatim, `filed_snapshot` present, filed timestamp shown |
+| **LOCK cascade** | member shipment transitioned `READY` -> **`LOCKED`** |
+| **Immutability after filing** | direct PostgREST edit of a locked line -> **0 rows**; direct attempt to reset the shipment to `DRAFT` -> **0 rows**; data unchanged |
+| **Amendment** | creates a genuinely NEW declaration row (`DRAFT`) whose `supersedes_declaration_id` points at the original; the original stays `FILED_RECORDED` with its snapshot intact |
+| Audit trail | `declaration.draft_generated` -> `draft_refreshed` -> `marked_ready` -> `filed` -> `amendment_created` |
+| Official-filing claim | correctly disclaimed on-screen **and inside the filed snapshot payload itself**: *"the authorised declarant files through the official channel themselves"* |
+
+**Regulatory honesty at filing time, worth calling out.** The filed
+snapshot reports **"Total embedded emissions (full precision): 2 tCO2e"**
+and then states plainly: *"Not rounded -- declaration rounding method
+unresolved. Declaration-time rounding is an escalated, unresolved
+regulatory gap (RULE-EE-006)"*, citing Implementing Regulation (EU)
+2025/2547 Annex II point A.1(6)-(8). The product refuses to invent a
+rounding rule it cannot source, discloses the gap with a citation, and
+still gives the declarant the exact full-precision figure. That is
+precisely the posture CLAIMED elsewhere in this report, observed working
+in production. **RULE-EE-006 remains an open owner/regulatory decision.**
+
+The snapshot is also confirmed to survive amendment -- historical
+reproducibility holds across versioning.
+
 ## 19. Explainability
 
 Live-verified this session (§6): input → classification (CN8 match) →
