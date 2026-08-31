@@ -756,6 +756,105 @@ describe(
     );
 
     it(
+      "fails CLOSED when the owning emission_data read errors -- it must not delete evidence it could not confirm is unlocked",
+      async () => {
+        // 2026-08-31 (P13 final round). removeEvidenceFile read the
+        // owning record only to ask "is it VERIFIED?", via
+        //   if (ownership.status === "OK" && ...VERIFIED) reject
+        // so when that read ERRORED the conjunct was false, the guard
+        // was skipped, and the delete proceeded. The VERIFIED lock is
+        // an integrity lock -- evidence behind a completed verification
+        // must not be destroyable -- and a transient query error is
+        // exactly when it must hold, not release.
+        //
+        // uploadEvidenceFile, against the same helper in this same
+        // file, already fails closed (`if (ownership.status ===
+        // "REJECTED") return ownership;`). Only the removal path
+        // diverged.
+        const recorder =
+          makeRecorder();
+
+        const result =
+          await removeEvidenceFile(
+            makeMockSupabase(
+              {
+                evidence_files: { data: evidenceFileRow, error: null },
+                emission_data: [
+                  { data: null, error: { message: "canceling statement due to statement timeout" } },
+                ],
+              },
+              {},
+              recorder,
+            ),
+            memberContext(),
+            "evidence-file-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "PERSIST_FAILED" },
+        );
+
+        // The point of the fix: nothing was destroyed.
+        expect(recorder.storageOps).toEqual(
+          [],
+        );
+
+        expect(
+          recorder.ops.filter(
+            (op) => op.table === "evidence_files" && op.op === "delete",
+          ),
+        ).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "does not report OK when RLS silently filters the metadata DELETE to zero rows",
+      async () => {
+        // 2026-08-31 (P13 final round). PostgREST returns NO error for a
+        // DELETE that RLS filters to zero rows, so `deleteError` was
+        // null and the function reported OK for a row it never deleted.
+        // evidence_files_delete_own_org (20260829560000) filters exactly
+        // that way when the parent is VERIFIED.
+        //
+        // Composed with the fail-open above this was a data-destruction
+        // bug: storage's own delete policy has NO verification clause,
+        // so the object was permanently removed while the row survived
+        // pointing at it, and the caller was told it worked.
+        //
+        // manage-membership.ts:236-243 already carries the fix pattern
+        // (.select("id") + zero-rows guard) for exactly this hazard.
+        const recorder =
+          makeRecorder();
+
+        const result =
+          await removeEvidenceFile(
+            makeMockSupabase(
+              {
+                evidence_files: [
+                  { data: evidenceFileRow, error: null },
+                  // The DELETE: no error, and no rows.
+                  { data: [], error: null },
+                ],
+                emission_data: [
+                  { data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1"] }, error: null },
+                ],
+              },
+              {},
+              recorder,
+            ),
+            memberContext(),
+            "evidence-file-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "PERSIST_FAILED" },
+        );
+      },
+    );
+
+    it(
       "rejects NOT_FOUND when the file belongs to a different org, without touching storage",
       async () => {
         const recorder =
@@ -795,6 +894,16 @@ describe(
             makeMockSupabase(
               {
                 evidence_files: { data: evidenceFileRow, error: null },
+                // Fixture completed 2026-08-31: this case never modelled
+                // the owning-record read, and so was reaching the storage
+                // step only because removeEvidenceFile used to fail OPEN
+                // on that read. Now that it fails closed, the fixture has
+                // to describe what actually happens in this scenario -- a
+                // successful, non-VERIFIED ownership read, followed by a
+                // storage failure. The assertions below are unchanged.
+                emission_data: [
+                  { data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1"] }, error: null },
+                ],
               },
               { removeError: { message: "storage denied" } },
               recorder,

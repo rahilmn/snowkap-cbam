@@ -202,8 +202,17 @@ describe(
     );
 
     it(
-      "bypasses the limit entirely when DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS='true' -- the E2E-harness escape hatch, off by default",
+      "bypasses the limit entirely when BOTH the build flag and DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS='true' -- the E2E-harness escape hatch, off by default",
       () => {
+        // Both keys, because as of 2026-08-31 the bypass requires the
+        // build-time flag too (see the two tests below, which prove
+        // neither key alone is sufficient). The assertion itself is
+        // unchanged.
+        vi.stubEnv(
+          "E2E_RATE_LIMIT_BYPASS_BUILD",
+          "true",
+        );
+
         vi.stubEnv(
           "DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS",
           "true",
@@ -222,6 +231,64 @@ describe(
         for (let i = 0; i < 10; i += 1) {
           expect(limiter.check("ip-1", i).allowed).toBe(true);
         }
+      },
+    );
+
+    it(
+      "does NOT bypass on the runtime flag alone -- a stray env var on a production deploy cannot disable rate limiting",
+      () => {
+        // 2026-08-31 (P13 final round). The bypass used to be a single
+        // RUNTIME env read, so anyone who could set an environment
+        // variable on the production service -- a mistyped Railway
+        // variable, a copied .env, a compromised dashboard session --
+        // could silently disable rate limiting on every auth, invitation
+        // and upload endpoint at once, with nothing in the request path
+        // revealing it.
+        //
+        // The bypass now additionally requires a flag that is inlined at
+        // BUILD time. The production image is built without it, so the
+        // conjunct below is a compile-time `false` there and the runtime
+        // variable is inert no matter who sets it.
+        vi.stubEnv(
+          "DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS",
+          "true",
+        );
+
+        vi.stubEnv(
+          "E2E_RATE_LIMIT_BYPASS_BUILD",
+          "",
+        );
+
+        const limiter =
+          createInMemoryRateLimiter(
+            { limit: 1, windowMs: 1000 },
+          );
+
+        expect(limiter.check("ip-1", 0).allowed).toBe(true);
+        expect(limiter.check("ip-1", 1).allowed).toBe(false);
+      },
+    );
+
+    it(
+      "does NOT bypass on the build flag alone -- the harness must still opt in at runtime",
+      () => {
+        vi.stubEnv(
+          "E2E_RATE_LIMIT_BYPASS_BUILD",
+          "true",
+        );
+
+        vi.stubEnv(
+          "DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS",
+          "",
+        );
+
+        const limiter =
+          createInMemoryRateLimiter(
+            { limit: 1, windowMs: 1000 },
+          );
+
+        expect(limiter.check("ip-1", 0).allowed).toBe(true);
+        expect(limiter.check("ip-1", 1).allowed).toBe(false);
       },
     );
 

@@ -215,6 +215,28 @@ const nextConfig: NextConfig = {
       process.env.GIT_SHA?.trim() ||
       process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ||
       "dev",
+
+    // 2026-08-31 (P13 final round). The E2E rate-limit bypass in
+    // src/infrastructure/rate-limit/rate-limiter.ts must be impossible
+    // to switch on at RUNTIME, or a single stray environment variable on
+    // the production service disables rate limiting across every auth,
+    // invitation and upload endpoint at once.
+    //
+    // This `env` block is Next's documented BUILD-TIME inlining
+    // mechanism (the same one NEXT_PUBLIC_GIT_SHA above relies on): the
+    // value is substituted into the bundle as a literal when the image
+    // is built. A production build, which never has the source variable
+    // set, therefore bakes in "" -- and no runtime variable can change
+    // an already-compiled literal.
+    //
+    // Verified by inspecting the emitted chunk, not assumed: a plain
+    // `NEXT_PUBLIC_`-prefixed read was tried FIRST and Turbopack left it
+    // as a live `process.env` lookup in the server bundle, which would
+    // have given exactly the false confidence this is meant to remove.
+    E2E_RATE_LIMIT_BYPASS_BUILD:
+      process.env.NEXT_PUBLIC_E2E_RATE_LIMIT_BYPASS_BUILD === "true"
+        ? "true"
+        : "",
   },
 
   // Supabase's local Auth config (supabase/config.toml's site_url) uses

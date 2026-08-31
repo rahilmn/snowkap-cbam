@@ -137,7 +137,40 @@ export function createInMemoryRateLimiter(
 ): RateLimiter {
   // See this file's header comment ("E2E-HARNESS ESCAPE HATCH") --
   // read once per limiter instance, exact string "true" only.
+  //
+  // TWO keys, deliberately, and they are different KINDS of key.
+  //
+  // The second is a runtime env read, as before. The first,
+  // E2E_RATE_LIMIT_BYPASS_BUILD, is declared in next.config.ts's `env`
+  // block -- Next's documented BUILD-TIME inlining mechanism, the same
+  // one NEXT_PUBLIC_GIT_SHA uses -- so it is substituted into the
+  // bundle as a string literal when the image is built. A production
+  // build bakes in "", making this conjunct a compile-time false that
+  // no runtime environment variable can revive.
+  //
+  // The mechanism was VERIFIED by reading the emitted chunk, not
+  // assumed. A plain `NEXT_PUBLIC_`-prefixed read was tried first and
+  // Turbopack left it as a live `process.env` lookup in the server
+  // bundle -- which would have looked identical in source while
+  // providing none of the guarantee.
+  //
+  // Why this rather than a `NODE_ENV !== "production"` guard, which
+  // would be the obvious move: the E2E harness runs
+  // `pnpm build && pnpm start` (playwright.config.ts), a real production
+  // build, so NODE_ENV is "production" there too. A NODE_ENV guard would
+  // break the harness while proving nothing. What actually separates the
+  // harness from the deploy is who ran the BUILD, which is exactly what
+  // a build-time flag captures.
+  //
+  // Before this, the bypass was a single runtime read: anyone able to
+  // set an env var on the production service could disable rate limiting
+  // across every auth, invitation and upload endpoint at once, silently.
+  // (P13 final round, 2026-08-31.)
+  const builtWithE2eBypass =
+    process.env.E2E_RATE_LIMIT_BYPASS_BUILD === "true";
+
   const bypassForE2eTests =
+    builtWithE2eBypass &&
     process.env.DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS === "true";
 
   const hitsByKey =

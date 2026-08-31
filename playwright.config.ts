@@ -195,6 +195,14 @@ export default defineConfig(
       // that comment for the full, live-reproduced account of why.
       env: {
         ...resolvedEnv,
+        // Two keys as of 2026-08-31, see rate-limiter.ts. This one is
+        // read at BUILD time (Next inlines NEXT_PUBLIC_* as literals),
+        // and `command` above is "pnpm build && pnpm start", so this env
+        // block covers the build too -- which is the point. A production
+        // image built without it has the bypass compiled out entirely,
+        // so the runtime key below cannot re-enable it there no matter
+        // who sets it.
+        NEXT_PUBLIC_E2E_RATE_LIMIT_BYPASS_BUILD: "true",
         DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS: "true",
       },
     },

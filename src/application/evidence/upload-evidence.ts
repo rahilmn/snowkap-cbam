@@ -522,7 +522,36 @@ export async function removeEvidenceFile(
       fetched.file.emission_data_id,
     );
 
-  if (ownership.status === "OK" && ownership.verificationStatus === "VERIFIED") {
+  // Fail CLOSED. This read exists to answer "is the parent VERIFIED?",
+  // and the VERIFIED lock is an integrity lock -- evidence behind a
+  // completed verification must not be destroyable. When the read
+  // ERRORS we do not know the answer, so the only safe answer is no.
+  //
+  // Previously this was folded into the conjunct below, so an errored
+  // read made the condition false, skipped the guard, and let the
+  // deletion proceed on a record that might well have been VERIFIED.
+  // uploadEvidenceFile fails closed against this same helper (see its
+  // `if (ownership.status === "REJECTED") return ownership;`); only the
+  // removal path diverged. (P13 final round, 2026-08-31.)
+  if (ownership.status === "REJECTED") {
+    // Mapped explicitly rather than widening RemoveEvidenceFileResult to
+    // carry EMISSION_DATA_NOT_FOUND: this caller is removing a file, and
+    // "the record it hangs off isn't there" is a NOT_FOUND from its point
+    // of view, not a distinct outcome it could act on differently.
+    // (In practice that branch is unreachable -- evidence_files
+    // .emission_data_id is NOT NULL with an FK, and both tables' select
+    // policies key on the same app.user_org_ids() -- but it is modelled
+    // rather than assumed away.)
+    return {
+      status: "REJECTED",
+      reason:
+        ownership.reason === "EMISSION_DATA_NOT_FOUND"
+          ? "NOT_FOUND"
+          : "PERSIST_FAILED",
+    };
+  }
+
+  if (ownership.verificationStatus === "VERIFIED") {
     return {
       status: "REJECTED",
       reason: "EMISSION_DATA_VERIFIED",
@@ -543,13 +572,25 @@ export async function removeEvidenceFile(
     };
   }
 
-  const { error: deleteError } =
+  // Same .select("id") + zero-rows guard manage-membership.ts:236-243
+  // already applies to its own DELETE, for the identical reason:
+  // PostgREST reports NO error for a DELETE that RLS filters to zero
+  // rows, so `deleteError` alone cannot distinguish "deleted" from
+  // "silently refused." evidence_files_delete_own_org (20260829560000)
+  // filters exactly that way when the parent is VERIFIED.
+  //
+  // Without this the function returned OK for a row it never deleted --
+  // and because the storage delete above has no verification clause in
+  // its own policy, the object was already gone by then. (P13 final
+  // round, 2026-08-31.)
+  const { data: deleted, error: deleteError } =
     await supabase
       .from("evidence_files")
       .delete()
-      .eq("id", evidenceFileId);
+      .eq("id", evidenceFileId)
+      .select("id");
 
-  if (deleteError) {
+  if (deleteError || !deleted || deleted.length === 0) {
     return {
       status: "REJECTED",
       reason: "PERSIST_FAILED",
