@@ -1844,6 +1844,44 @@ rows). The dump was never committed and never left the local machine.
 the live deployment backwards, which is an owner call, not a routine
 verification step.
 
+### 16.16 Mobile navigation built and verified live (2026-08-31)
+
+§16.13 recorded "no mobile navigation" as a material limitation. It is now
+fixed (commit `ccec6d3`) and verified on the live deployment at 375px.
+
+`MobileNav` is a drawer rendered only below `md`, reusing
+`IMPORTER_NAV`/`PRODUCER_NAV`/`SETTINGS_NAV` from `sidebar.tsx` rather
+than re-declaring them, so the mobile and desktop navigations cannot
+drift. `app-shell.tsx` now resolves the experience once and passes it to
+both `Topbar` and `Sidebar`, so the drawer can never render a different
+nav set than the desktop sidebar for the same organization. The org
+switcher (previously `hidden ... sm:block`, so unreachable on a phone) is
+surfaced inside the drawer via a new optional `className` prop; the
+topbar's own responsive behaviour is unchanged.
+
+Verified live at 375px, measured rather than eyeballed:
+
+| Check | Before | After |
+|---|---|---|
+| Nav links reachable | **0** | **9** |
+| Drawer semantics | n/a | `role="dialog"`, `aria-modal="true"`, `aria-label="Navigation"` |
+| Trigger state | n/a | `aria-expanded` toggles `true`/`false` correctly |
+| Escape closes | n/a | yes |
+| Focus moved into panel on open | n/a | yes |
+| Background scroll locked / restored | n/a | yes / yes |
+| Org switcher reachable | **no** | yes (renders as a disabled control naming the current org for a single-org user, which is its correct behaviour) |
+| Page-level horizontal overflow | none | none (header `scrollWidth === clientWidth === 375`) |
+
+A note on method, because it nearly produced a false finding in the other
+direction: the first screenshot after this change *appeared* to show the
+topbar overflowing, with "CBAM" colliding with the theme toggle and
+sign-out clipped. Measuring the actual geometry showed no overflow at all
+-- left cluster ends at x=215, right cluster starts at x=231, right edge
+at x=359 inside a 375px viewport. The apparent collision was an artifact
+of the screenshot being upscaled (a 469px image for a 375px viewport).
+Reported here because "trust the measurement over the screenshot" is the
+reason a regression was *not* invented.
+
 ## 19. Explainability
 
 Live-verified this session (§6): input → classification (CN8 match) →
@@ -2297,14 +2335,9 @@ covers everything else: items §16's audit didn't scope into, plus this
 report's own directly-observed gaps.
 
 - ~~Railway production deployment is down (502)~~ — **RESOLVED** (§16.11).
-- **No mobile navigation.** Below the `md` breakpoint the sidebar is
-  `display:none` with no drawer/hamburger/bottom-bar replacement, and the
-  org switcher is absent too, so a phone user can only move between
-  screens by typing URLs. The layout itself is sound at 375px (no
-  horizontal overflow; tables scroll in their own containers) — this is a
-  navigation gap, not a layout break. Documented as deferred in
-  `sidebar.tsx`, listed here because it is material for a release
-  candidate (§16.13).
+- ~~No mobile navigation~~ — **RESOLVED** (§16.16, commit `ccec6d3`): a
+  drawer with the full nav set, org switching, Escape-to-close and focus
+  management, verified live at 375px (nav links reachable went 0 -> 9).
 - **Seven sidebar entries are placeholders** (producer *Production data*,
   *Evidence*, *Verification*; importer *Calculations*, *Installations*;
   *Settings*). They are correctly `disabled` and now visibly dimmed
