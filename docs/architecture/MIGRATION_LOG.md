@@ -12,9 +12,18 @@ scattered across 44 individual file headers.
 timestamp prefix is the sort key). "Applied" here means confirmed via
 `pnpm exec supabase migration list --local` against this environment's
 local Supabase instance (both the `local` and `remote` tracking
-columns show every version below) — **not** staging or production,
-neither of which has ever been connected to this environment (see
-`docs/runbooks/DEPLOYMENT.md`). The five **protected** regulatory
+columns show every version below).
+
+**Updated 2026-08-31**: this now also applies to the hosted project
+backing the live Railway deployment. The header previously said staging
+and production had "never been connected to this environment" — that is
+no longer true. On 2026-08-30 the hosted project was found to have only
+4 of the then-57 migrations applied (regulatory foundation only, ZERO
+product tables — see `P13_RELEASE_READINESS_REPORT.md` §16.11), and the
+53 pending migrations were applied to it after verifying that none of
+them mutate regulatory data. The protected dataset was confirmed intact
+afterwards (12,540 rows, one ACTIVE version, `pnpm regulatory:verify`
+RESULT: VALID). There is still no separate *staging* project. The five **protected** regulatory
 migrations are called out explicitly; see
 [`ADR-0005`](../adr/ADR-0005-protected-regulatory-subsystem.md) and
 CLAUDE.md for what "protected" means and why.
@@ -136,6 +145,8 @@ follow-up, the same "grep-proof or it's wrong" discipline
 | `20260829600000` | `p13_review_shipment_line_determination_forgery_fix_v5.sql` | Forgery fix, iteration 5 (iteration 4 was a test-only change, not a migration) |
 | `20260829610000` | `p13_review_shipment_line_determination_forgery_fix_v6.sql` | Forgery fix, iteration 6 — held under three independent Opus reviews *for the surface those reviews examined*; a real gap in a combination those reviews never exercised was found later — see `20260829620000` below |
 | `20260829620000` | `p13_review_shipment_line_determination_forgery_fix_v7.sql` | Forgery fix, iteration 7 — self-discovered via live browser end-to-end verification of the unrelated R7 clause 2 / R9 regulatory resolver fix (`docs/regulatory/R7_R9_COUNTRY_FALLBACK_DECISION_MEMO.md` §12): that fix made a combination reachable (a listed/MAPPED country's own record UNAVAILABLE, falling back to Other Countries and Territories) that v6's validator had never anticipated and rejected as a forgery, surfacing to users as a misleading "shipment is locked or void" error. Not caught by domain-level tests, typecheck, or `pnpm regulatory:verify` — only by exercising the real UI end-to-end against real Postgres. See `P13_RELEASE_READINESS_REPORT.md` §16.6 for the full account. |
+
+| `20260831100000` | `p13_sharing_counterparty_org_names.sql` | Live-production UI finding: a grantee of an ACTIVE sharing grant could not resolve the GRANTOR organization's name, so `/emissions` and the actual-data picker showed "Unknown organization" as the source of figures about to be declared. Not an application bug -- RLS returns no row because a grantee has no membership in the grantor org, and `organization_visible_via_pending_invitation` covers only the PENDING window. Adds `public.sharing_counterparty_org_names()` (SECURITY DEFINER) returning ONLY `(id, name)` and only for a currently-ACTIVE, unexpired grant in either direction -- deliberately NOT by widening `organizations` SELECT RLS, which would disclose the counterparty's full row (`eori_number`, `cbam_declarant_status`, slug). |
 
 ## Not yet reflected in this log at the code level (tracked, not migrations)
 

@@ -166,7 +166,7 @@ now.
 - [`docs/architecture/`](docs/architecture/) — `ARCHITECTURE.md`
   (layering rules and conventions), `DOMAIN_MODEL.md` (aggregates,
   tenancy, sharing), `DATABASE_SCHEMA.md` (the full product + regulatory
-  schema as applied, 44 migrations), `AUTHORIZATION_MATRIX.md` (every
+  schema as applied, 58 migrations), `AUTHORIZATION_MATRIX.md` (every
   gated service, its role/capability gate, and its proof), `MIGRATION_LOG.md`
   (every migration in order, one line each), `ENVIRONMENT.md` (every
   environment variable the codebase actually reads), and

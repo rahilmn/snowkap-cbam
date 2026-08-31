@@ -337,8 +337,8 @@ India / TARIC `2507008080` is a real row in the ACTIVE dataset with status
 with a genuine non-zero value, one of the 361 (country, good) pairs the
 memo's own investigation had already identified as affected.
 
-**Gates**: `pnpm typecheck` clean; `pnpm test` — final count **1328 passed
-/ 14 skipped / 0 failed**; `pnpm regulatory:verify` — **RESULT: VALID**
+**Gates**: `pnpm typecheck` clean; `pnpm test` — **1344 passed
+/ 14 skipped / 0 failed** at final count; `pnpm regulatory:verify` — **RESULT: VALID**
 (the dataset itself is untouched; only resolver logic changed). Full
 detail, including the exact quoted primary-source text and every
 downstream test affected, in the memo's §12 and commit `6094593`'s own
@@ -1981,7 +1981,7 @@ data — every result traces to the real `cbam_goods`/regulatory dataset.
 `pnpm typecheck`: **clean**, zero errors, at current HEAD (see §2 for the
 exact SHA).
 
-`pnpm test`: **1328 passed / 14 skipped / 1342 total**, a fully clean run
+`pnpm test`: **1344 passed / 14 skipped / 1358 total**, a fully clean run
 (zero failures) at current HEAD. This figure has moved several times since
 this section was first written at 974/14/0 (HEAD `4eb4ff5`, right after the
 initial adversarial audit workflow stopped contending for local Postgres —

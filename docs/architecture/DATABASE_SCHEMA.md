@@ -11,7 +11,7 @@
 > document covers the five migrations applied since**
 > (`20260829450000`–`20260829490000`, 44 migrations total as of that
 > update) — **and the "Further P13 additions" section after it covers
-> thirteen more** (`20260829500000`–`20260829620000`, 57 migrations total
+> fourteen more** (`20260829500000`–`20260831100000`, 58 migrations total
 > as of 2026-08-30 — see [`MIGRATION_LOG.md`](./MIGRATION_LOG.md) for the
 > full ordered list). Read all three: the body for the schema's shape,
 > the two P13 sections for what changed on top of it, in order. Update
@@ -1248,7 +1248,7 @@ drop-and-recreate-in-a-new-migration pattern (see this document's own
 
 ## Further P13 additions (found stale during the final non-blocked-work audit, 2026-08-30)
 
-Thirteen more migrations landed after the "P13 additions" section above
+Fourteen more migrations landed after the "P13 additions" section above
 was written (`20260829500000`–`20260829620000`), during this session's own
 final adversarial audit, its blocker-remediation round, and a later
 regulatory-fix round (see `docs/plans/P13_RELEASE_READINESS_REPORT.md`

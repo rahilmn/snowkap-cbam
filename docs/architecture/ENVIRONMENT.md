@@ -245,8 +245,19 @@ what a local `pnpm dev`/`pnpm build` run sees, since nothing passes
 usual sense — every deploy anywhere (staging or production) gets its
 own value automatically, because it *is* the commit SHA being deployed.
 Railway/CI is expected to pass the real deploying commit's SHA as the
-build arg (per the Dockerfile's own comment); nothing in this repo does
-that yet, since no Railway project is connected here.
+build arg (per the Dockerfile's own comment).
+
+**Updated 2026-08-31**: a Railway project IS now connected and healthy,
+and `/api/health` reports the real deployed SHA. Note how it gets there,
+because the obvious path is not the one that works: `GIT_SHA` is set in
+the Railway service to `${{RAILWAY_GIT_COMMIT_SHA}}`, but that value does
+NOT survive into the image as a Docker build arg -- observed live as
+`/api/health` reporting an empty `git_sha`. What actually works is the
+RUNTIME fallback in `src/application/health/resolve-git-sha.ts`, which
+reads `RAILWAY_GIT_COMMIT_SHA` directly from the running container's
+environment (and treats an empty `GIT_SHA` as unset rather than as a
+value). Do not remove that fallback on the assumption the build arg is
+sufficient -- it currently is not.
 
 ## 3. Container / platform-managed (`Dockerfile`)
 
