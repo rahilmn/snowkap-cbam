@@ -13,6 +13,27 @@ import {
 const selectMock =
   vi.fn();
 
+// 2026-08-30: the route now also probes the product schema
+// (src/application/health/check-product-schema.ts, added after a real
+// production incident -- see that file's doc comment). That check uses a
+// SHORTER call chain than the dataset check: `.select("id").limit(1)`
+// with no `.eq()` in between. This mock therefore has to answer BOTH
+// shapes off the same `select()` return value:
+//
+//   dataset check -> .select().eq().eq().limit()  -> selectMock
+//   schema  check -> .select().limit()            -> productSchemaLimitMock
+//
+// Defaults to "table exists" so every pre-existing test in this file
+// keeps asserting exactly what it asserted before this route gained a
+// third check.
+const productSchemaLimitMock =
+  vi.fn(
+    () =>
+      Promise.resolve(
+        { error: null },
+      ),
+  );
+
 vi.mock(
   "../../../src/infrastructure/supabase/client",
   () => (
@@ -27,6 +48,9 @@ vi.mock(
                     select:
                       () => (
                         {
+                          limit:
+                            productSchemaLimitMock,
+
                           eq:
                             () => (
                               {
@@ -105,6 +129,64 @@ describe(
         expect(body.status).toBe("ok");
         expect(body.checks.database).toBe("ok");
         expect(body.checks.active_regulatory_dataset).toBe("ok");
+        expect(body.checks.product_schema).toBe("ok");
+      },
+    );
+
+    it(
+      "reports degraded/503 when the regulatory foundation is healthy but the PRODUCT SCHEMA is absent",
+      async () => {
+        // THE REGRESSION TEST FOR A REAL PRODUCTION INCIDENT
+        // (docs/plans/P13_RELEASE_READINESS_REPORT.md §16.11/§32).
+        //
+        // The live Railway deployment reported {"status":"ok"} against a
+        // Supabase project with 4 of 57 migrations applied and ZERO
+        // product tables: database reachable (true), exactly one ACTIVE
+        // dataset (true) -- both satisfied by the regulatory foundation
+        // alone, which was all that had been migrated. A completely
+        // unusable application read as fully healthy, and the gap was
+        // found only by a human driving the UI.
+        //
+        // This test reproduces exactly that state: dataset check passes,
+        // product tables missing. It must now fail the health check.
+        selectMock.mockResolvedValueOnce(
+          {
+            data: [{ id: "dataset-1" }],
+            error: null,
+          },
+        );
+
+        productSchemaLimitMock.mockResolvedValue(
+          {
+            error: {
+              code: "42P01",
+              message: 'relation "public.organizations" does not exist',
+            },
+          } as never,
+        );
+
+        const {
+          httpStatus,
+          body,
+        } = await bodyOf(
+          await GET(),
+        );
+
+        expect(httpStatus).toBe(503);
+        expect(body.status).toBe("degraded");
+
+        // The regulatory foundation genuinely IS fine -- reporting it as
+        // broken would send an operator down the wrong path entirely.
+        expect(body.checks.database).toBe("ok");
+        expect(body.checks.active_regulatory_dataset).toBe("ok");
+
+        // ...but the application cannot serve a single product request.
+        expect(body.checks.product_schema).toBe("missing");
+        expect(body.missing_tables).toContain("organizations");
+
+        productSchemaLimitMock.mockResolvedValue(
+          { error: null } as never,
+        );
       },
     );
 

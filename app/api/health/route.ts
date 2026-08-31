@@ -16,6 +16,10 @@ import {
   checkActiveDefaultEmissionValuesDataset,
 } from "../../../src/application/regulatory/check-active-default-emission-values-dataset";
 
+import {
+  checkProductSchema,
+} from "../../../src/application/health/check-product-schema";
+
 export const dynamic =
   "force-dynamic";
 
@@ -36,7 +40,23 @@ interface HealthCheckResult {
       | "missing"
       | "duplicate"
       | "error";
+
+    // 2026-08-30: added after a real production incident in which this
+    // route reported "ok" against a database with ZERO product tables --
+    // see check-product-schema.ts's own doc comment and
+    // docs/plans/P13_RELEASE_READINESS_REPORT.md §16.11/§32.
+    product_schema:
+      | "ok"
+      | "missing"
+      | "error";
   };
+
+  /**
+   * Populated only when `product_schema` is "missing", so an operator
+   * reading a failing probe sees immediately WHICH part of the schema is
+   * absent rather than having to go digging.
+   */
+  missing_tables?: string[];
 }
 
 /**
@@ -76,6 +96,9 @@ export async function GET(): Promise<NextResponse<HealthCheckResult>> {
 
       active_regulatory_dataset:
         "ok",
+
+      product_schema:
+        "ok",
     },
   };
 
@@ -109,6 +132,27 @@ export async function GET(): Promise<NextResponse<HealthCheckResult>> {
       result.status =
         "degraded";
     }
+
+    // Readiness, not liveness: a process can be perfectly alive while
+    // being unable to serve a single product request, which is exactly
+    // the outage this check was added for.
+    const schemaCheck =
+      await checkProductSchema(
+        supabase,
+      );
+
+    result.checks.product_schema =
+      schemaCheck.status;
+
+    if (schemaCheck.status === "missing") {
+      result.missing_tables =
+        schemaCheck.missing_tables;
+    }
+
+    if (schemaCheck.status !== "ok") {
+      result.status =
+        "degraded";
+    }
   } catch (caught) {
     result.checks.database =
       "error";
@@ -117,6 +161,9 @@ export async function GET(): Promise<NextResponse<HealthCheckResult>> {
     // itself can throw (e.g. missing env vars), or the query can reject
     // outright -- either way the dataset invariant was never checked.
     result.checks.active_regulatory_dataset =
+      "error";
+
+    result.checks.product_schema =
       "error";
 
     result.status =
