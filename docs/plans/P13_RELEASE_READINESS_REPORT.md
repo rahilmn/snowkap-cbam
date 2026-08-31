@@ -2795,3 +2795,141 @@ because a review that never retracts anything is not being adversarial
 enough with itself.*
 
 **Per the directive: work stops here for independent human audit.**
+
+---
+
+## 45. Remaining-findings round (2026-08-31, after the final report)
+
+Run while the owner performed the first real-external-user
+authentication test (§46). Eight remaining findings were each
+independently re-verified at HEAD by one agent, then adversarially
+challenged by two more instructed to refute rather than confirm. **Two
+of the eight were false** and are closed as such rather than "fixed":
+
+| Finding | Verdict |
+|---|---|
+| Invitation expiry missing | **NOT A DEFECT** — expiry exists and is enforced at accept time *and* read time |
+| `/verification` route 404 | **ALREADY FIXED** — the lifecycle is complete inline on `/emission-data`; a second surface was never wanted |
+| `removeEvidenceFile` fails open | REAL (MEDIUM) — fixed, `f61f7f3` |
+| Rate-limit kill switch unguarded | REAL (MEDIUM) — fixed, `f61f7f3` |
+| `audit_events` payload unbounded | REAL in part (MEDIUM) — fixed, `e5017e9`; the `event_type` half was already closed and left alone |
+| CI never runs the E2E journeys | REAL (MEDIUM) — fixed, `5a29f83` |
+| Password change without re-auth | REAL (MEDIUM) — **deliberately held**, see §45.4 |
+| Stale doc citations | REAL in part (LOW) — fixed, `06261f4`; see the correction in §45.5 |
+
+### 45.1 `removeEvidenceFile` — two defects that composed
+
+Reported as a single fail-open. It was worse: the fail-open and a
+second defect combined into silent data destruction.
+
+The VERIFIED integrity lock read `if (ownership.status === "OK" &&
+...VERIFIED) reject`, so when that read **errored** the conjunct was
+false, the guard was skipped, and deletion proceeded on a record that
+may well have been VERIFIED. Separately, the metadata DELETE had no
+rows-affected guard — and PostgREST returns *no error* for a DELETE that
+RLS filters to zero rows, which is exactly what
+`evidence_files_delete_own_org` does when the parent is VERIFIED.
+
+Composed on a VERIFIED record whose ownership read errors: the storage
+delete policy has no verification clause, so **the object was
+permanently removed**; the row survived pointing at a now-dangling
+object; and the caller was returned `{ status: "OK" }`. Signed download
+URLs would still be minted for that dangling row.
+
+Both halves fixed. The zero-rows guard reuses the `.select("id")`
+pattern `manage-membership.ts` already carries for the identical hazard.
+
+One existing test needed an `emission_data` fixture added: it had never
+modelled the ownership read at all and was reaching the storage step
+*because of* the fail-open. Its assertions are unchanged — the fixture
+was completed, not the test weakened.
+
+### 45.2 Rate-limit kill switch — and a premise that was wrong
+
+The E2E bypass was a single **runtime** env read, so one stray variable
+on the production service disabled rate limiting across every auth,
+invitation and upload endpoint at once, silently. A `NODE_ENV` guard
+would not help: the harness runs `pnpm build && pnpm start`, a real
+production build.
+
+The fix requires a second, **build-time** flag. Worth recording how it
+went, because the first attempt was wrong in a way that would have
+shipped as false confidence: a plain `NEXT_PUBLIC_`-prefixed read was
+tried first, and inspecting the emitted bundle showed **Turbopack left
+it as a live `process.env` lookup** in the server chunk. The source
+would have looked identical while providing none of the guarantee.
+
+Routed through `next.config.ts`'s `env` block instead and re-verified
+against real build output: a clean production build contains **zero**
+files carrying the runtime flag's name in either `.next/server` or the
+`.next/standalone` tree the Dockerfile ships — the branch is dead-code
+eliminated. The same build with the harness flag retains it.
+
+### 45.3 CI had never run the E2E journeys — and it caught a live regression
+
+"Stop local Supabase" sat immediately **before** the Playwright step, so
+every Playwright job in this repository's history ran with no backend.
+The three journey specs self-skip without one. **The job passed because
+they did not run.**
+
+Fixed, and the fix paid for itself immediately: running the suite for
+real failed 3 specs — a genuine regression from *this session's own*
+earlier sidebar work, invisible precisely because CI never ran these.
+`Dashboard` was wired to `/` so it now renders as a link rather than a
+disabled button, and disabled items gained an sr-only " (not available
+yet)" suffix which is part of their accessible name. Specs updated to
+assert what the improved UI actually renders; `exact` retained
+throughout, and the disabled items now additionally prove their
+unavailability is announced.
+
+Full suite verified locally: **24 passed / 8 skipped / 0 failed**, all
+three journeys executing for real (importer 34.1s, cross-org 43.7s,
+producer 18.4s). The 8 skips are the mobile project deliberately
+skipping desktop-only journeys.
+
+**Not yet proven in CI itself.** The workflow triggers only on push to
+`main` and on `pull_request`; feature-branch pushes do not run it, and
+no PR is open (merging to `main` is out of scope per the standing
+instruction). The workflow's one CI-specific step — deriving credentials
+from `supabase status -o env` — was validated locally in isolation, but
+the reordered job has not executed on a runner.
+
+### 45.4 Password change without re-authentication — held, not skipped
+
+Confirmed real and upgraded from LOW to MEDIUM: `/reset-password` is the
+product's *only* password-write path, so it doubles as the change-
+password flow, and it requires no current password while gating on any
+session rather than specifically a recovery session.
+
+**Deliberately not fixed in this round.** The owner was actively running
+the first real-external-user test through that exact flow (steps 8–13 of
+§46) at the time. Changing the code under test mid-test would have made
+any failure ambiguous — product defect, or my edit? The fix is specified
+and ready; it should land once that test has reported.
+
+### 45.5 A correction to §42.5 of the final report
+
+§42.5 stated that "~20 stale `file:line` citations remain scattered
+across `AUTHORIZATION_MATRIX.md`". **That was wrong.** All 30 of that
+file's citations were re-verified line-exact against their own quoted
+anchors and every one lands correctly — its 2026-08-30 regrounding pass
+did hold. The eighteen ADRs, `ARCHITECTURE.md`, `DATABASE_SCHEMA.md`,
+`DOMAIN_MODEL.md`, `MIGRATION_LOG.md` and
+`REGULATORY_RESOLUTION_RULES.md` contain no `file:line` citations at all.
+The drift was entirely in `ENVIRONMENT.md`, and is now fixed there.
+
+One figure the audit itself reported was checked rather than trusted,
+and it changed the edit: the prose said "seven test files plus three
+perf scripts" while calling that ten consumers. The document's own table
+says "13 files: 4 + 6 + 3", its enumeration lists ten test files, and all
+thirteen were confirmed present on disk.
+
+### 45.6 New gate opened by this round
+
+`20260831140000_p13_review_audit_events_payload_bounds.sql` is applied
+**locally only**. Production therefore has this fix's Wall 1 (application
+guard, deployed) but **not** Wall 2 (the CHECK constraints). It joins the
+three migrations of §40 awaiting the same owner-gated
+`supabase db push`. Stated here rather than left implicit, because
+"the fix is committed" and "the fix is in production" are different
+claims and this report keeps them apart.
