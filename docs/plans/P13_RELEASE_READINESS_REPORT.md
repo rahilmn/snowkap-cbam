@@ -1803,6 +1803,47 @@ in production. **RULE-EE-006 remains an open owner/regulatory decision.**
 The snapshot is also confirmed to survive amendment -- historical
 reproducibility holds across versioning.
 
+### 16.15 Backup and restore drill against real production data (2026-08-31)
+
+Executed the strongest evidence obtainable without a destructive action.
+Classification is stated per-step rather than as one blanket label,
+because the backup and the restore have genuinely different standing.
+
+| Step | Classification | Evidence |
+|---|---|---|
+| Logical backup **of production** | **PRODUCTION-VERIFIED** | `pg_dump` (read-only) against the live hosted project succeeded: 4,097,140 bytes, 21 `COPY` blocks (every table) |
+| Restore **into a throwaway** | **LOCAL-VERIFIED** | restored into a local `p13_restore_drill_20260831` database and verified |
+| Restore **into production** | **NOT-VERIFIED — deliberately not attempted** | restoring over a live database is destructive; it is not something to rehearse against production without an explicit owner decision and a maintenance window |
+| Supabase managed backup / PITR | **NOT INDEPENDENTLY VERIFIED** | the Supabase dashboard reports "Last backup 8 hours ago" (owner-observed screenshot), but this session cannot exercise a managed restore |
+
+**What the restore actually recovered**, verified by query against the
+restored copy — this is the part that matters, since a backup that
+restores but loses provenance would be worthless here:
+
+| Recovery target | Result |
+|---|---|
+| Schema / application configuration | **21 of 21 tables** |
+| Regulatory dataset | **12,540 rows**, exactly **1 ACTIVE** dataset, version `2026-definitive-corrected` |
+| Product data | 2 organizations, shipment lines, declarations |
+| **Calculation reproducibility** | both `calculation_results` rows recovered with exact values **2.8** (DEFAULT) and **2** (ACTUAL) |
+| **Regulatory provenance** | the frozen ACTUAL snapshot survived intact: `direct=0.155`, `verification=VERIFIED`, `sharing_grant_id=d816b902-...` |
+| Declaration record | `filed_reference = EU-CBAM-2026-P13-VERIFY-001`, filed snapshot present and readable |
+| Audit trail | 27 audit events |
+
+So a recovered database can still answer "what was this number, and why?"
+for a historical filing -- which is the actual requirement, not merely
+"the rows came back".
+
+**Cleanup performed and verified**: the throwaway database was dropped (0
+copies remain) and the dump file deleted, because it contained real
+production data. Production was confirmed untouched afterwards (12,540
+rows). The dump was never committed and never left the local machine.
+
+**Rollback**: Railway's previous-build redeploy path remains
+**NOT-VERIFIED** in this session -- exercising it would deliberately take
+the live deployment backwards, which is an owner call, not a routine
+verification step.
+
 ## 19. Explainability
 
 Live-verified this session (§6): input → classification (CN8 match) →
