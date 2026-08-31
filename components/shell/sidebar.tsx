@@ -31,7 +31,7 @@ export type Experience =
   | "importer"
   | "producer";
 
-interface NavItem {
+export interface NavItem {
   label: string;
   icon: ComponentType<{ className?: string }>;
   // Real screens are wired one at a time as they're built (§27's
@@ -50,7 +50,7 @@ interface NavItem {
  * inventories. Routes are not yet wired (no product screens exist
  * until Phase 4+) -- items render as inert placeholders.
  */
-const IMPORTER_NAV: NavItem[] = [
+export const IMPORTER_NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/" },
   { label: "Shipments", icon: Ship, href: "/shipments" },
   { label: "Emissions", icon: BarChart3, href: "/emissions" },
@@ -62,7 +62,7 @@ const IMPORTER_NAV: NavItem[] = [
   { label: "Declarations", icon: FileCheck2, href: "/declarations" },
 ];
 
-const PRODUCER_NAV: NavItem[] = [
+export const PRODUCER_NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/" },
   { label: "Installations", icon: Factory, href: "/installations" },
   { label: "Production data", icon: Package },
@@ -73,7 +73,7 @@ const PRODUCER_NAV: NavItem[] = [
   { label: "Activity", icon: Activity, href: "/activity" },
 ];
 
-const SETTINGS_NAV: NavItem[] = [
+export const SETTINGS_NAV: NavItem[] = [
   { label: "Team", icon: Users, href: "/team" },
   { label: "Organization", icon: Building2, href: "/organization" },
   { label: "Settings", icon: Settings },

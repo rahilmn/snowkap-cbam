@@ -18,6 +18,14 @@ import {
 } from "./theme-toggle";
 
 import {
+  MobileNav,
+} from "./mobile-nav";
+
+import type {
+  Experience,
+} from "./sidebar";
+
+import {
   OrgSwitcher,
   type OrgSwitcherOption,
 } from "./org-switcher";
@@ -36,6 +44,10 @@ export interface TopbarProps {
 
   currentOrgId?: string;
   organizations?: OrgSwitcherOption[];
+  // Passed through to the mobile drawer so it renders the SAME nav set
+  // the desktop sidebar would for this org's capabilities.
+  experience?: Experience;
+  activeNavLabel?: string;
 }
 
 export function Topbar(
@@ -43,11 +55,20 @@ export function Topbar(
     organizationName,
     currentOrgId,
     organizations,
+    experience,
+    activeNavLabel,
   }: TopbarProps,
 ) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--border-default)] bg-[var(--surface-raised)] px-4">
       <div className="flex min-w-0 items-center gap-3">
+        <MobileNav
+          experience={experience}
+          activeLabel={activeNavLabel}
+          currentOrgId={currentOrgId}
+          organizations={organizations}
+        />
+
         <Wordmark />
 
         {organizationName && currentOrgId && organizations ? (

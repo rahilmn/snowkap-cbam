@@ -5,6 +5,10 @@ import {
 } from "lucide-react";
 
 import {
+  cn,
+} from "../../lib/utils";
+
+import {
   switchOrganizationAction,
 } from "./switch-org-action";
 
@@ -29,9 +33,16 @@ export function OrgSwitcher(
   {
     currentOrgId,
     organizations,
+    // 2026-08-31: this control is `hidden ... sm:block` in the topbar,
+    // which meant a phone user could not switch organizations at all.
+    // MobileNav renders it inside the drawer and passes a className that
+    // re-enables it there; the topbar's own responsive behaviour is
+    // unchanged.
+    className,
   }: {
     currentOrgId: string;
     organizations: OrgSwitcherOption[];
+    className?: string;
   },
 ) {
   if (organizations.length <= 1) {
@@ -46,7 +57,7 @@ export function OrgSwitcher(
         // this flex child shrink below its content's natural width
         // (required for truncate to do anything in a flex row);
         // max-w-[10rem]/[14rem] cap it before wrap ever triggers.
-        className="hidden min-w-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-sm text-[var(--text-secondary)] disabled:cursor-not-allowed sm:flex"
+        className={cn("hidden min-w-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-sm text-[var(--text-secondary)] disabled:cursor-not-allowed sm:flex", className)}
       >
         <span
           className="max-w-[10rem] truncate md:max-w-[14rem]"
@@ -77,7 +88,7 @@ export function OrgSwitcher(
         // the select itself gets the same width cap so a long option
         // label can't force the control (and the row around it) wider
         // than the header has room for.
-        className="hidden h-7 max-w-[10rem] rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-transparent px-2 text-sm text-[var(--text-secondary)] sm:block md:max-w-[14rem]"
+        className={cn("hidden h-7 max-w-[10rem] rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-transparent px-2 text-sm text-[var(--text-secondary)] sm:block md:max-w-[14rem]", className)}
       >
         {organizations.map(
           (org) => (

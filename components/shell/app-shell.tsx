@@ -100,9 +100,20 @@ export async function AppShell(
       await getPreferredOrgId(),
     );
 
+  // Resolved once and shared by Topbar (mobile drawer) and Sidebar
+  // (desktop) so the two navigations can never disagree about which
+  // experience this org is in.
+  const resolvedExperience =
+    experience ??
+    deriveExperience(
+      orgSummary?.context.capabilities,
+    );
+
   return (
     <div className="flex h-dvh flex-col bg-[var(--surface-page)]">
       <Topbar
+        experience={resolvedExperience}
+        activeNavLabel={activeNavLabel}
         organizationName={orgSummary?.organizationName ?? null}
         currentOrgId={orgSummary?.context.org_id}
         organizations={orgSummary?.availableOrganizations.map(
@@ -117,12 +128,7 @@ export async function AppShell(
 
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
-          experience={
-            experience ??
-            deriveExperience(
-              orgSummary?.context.capabilities,
-            )
-          }
+          experience={resolvedExperience}
           activeLabel={activeNavLabel}
         />
 
