@@ -20,6 +20,10 @@ import {
   checkProductSchema,
 } from "../../../src/application/health/check-product-schema";
 
+import {
+  resolveGitSha,
+} from "../../../src/application/health/resolve-git-sha";
+
 export const dynamic =
   "force-dynamic";
 
@@ -80,8 +84,7 @@ interface HealthCheckResult {
  */
 export async function GET(): Promise<NextResponse<HealthCheckResult>> {
   const gitSha =
-    process.env.GIT_SHA ??
-    "dev";
+    resolveGitSha();
 
   const result: HealthCheckResult = {
     status:

@@ -2,6 +2,10 @@ import {
   NextResponse,
 } from "next/server";
 
+import {
+  resolveGitSha,
+} from "../../../src/application/health/resolve-git-sha";
+
 export const dynamic =
   "force-dynamic";
 
@@ -48,8 +52,7 @@ export function GET(): NextResponse<LivenessResult> {
         "alive",
 
       git_sha:
-        process.env.GIT_SHA ??
-        "dev",
+        resolveGitSha(),
     },
     {
       status:

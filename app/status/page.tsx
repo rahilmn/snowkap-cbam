@@ -1,6 +1,10 @@
 import { redirect } from "next/navigation";
 
 import {
+  resolveGitSha,
+} from "../../src/application/health/resolve-git-sha";
+
+import {
   AppShell,
 } from "../../components/shell/app-shell";
 
@@ -144,8 +148,7 @@ export default async function StatusPage() {
   }
 
   const gitSha =
-    process.env.GIT_SHA ??
-    "dev";
+    resolveGitSha();
 
   const [
     datasetCheck,

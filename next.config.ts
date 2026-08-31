@@ -199,8 +199,21 @@ const nextConfig: NextConfig = {
   // the System/status screen and in structured logs for deployment
   // visibility (docs/plans/MASTER_PLAN.md §32).
   env: {
+    // Mirrors src/application/health/resolve-git-sha.ts, inlined
+    // because this config is loaded outside the app's module graph. Same
+    // two fixes as that helper: an EMPTY GIT_SHA is treated as unset
+    // (`??` guards only null/undefined, so a set-but-empty Railway
+    // variable previously produced an empty provenance string), and
+    // RAILWAY_GIT_COMMIT_SHA is used as a fallback.
+    //
+    // Note this value is baked at BUILD time. If neither variable is
+    // available to the builder, this stays "dev" while the SERVER-side
+    // /api/health still reports the real SHA at runtime -- the health
+    // endpoint, not this client-visible constant, is the authoritative
+    // deployment-provenance signal.
     NEXT_PUBLIC_GIT_SHA:
-      process.env.GIT_SHA ??
+      process.env.GIT_SHA?.trim() ||
+      process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ||
       "dev",
   },
 
