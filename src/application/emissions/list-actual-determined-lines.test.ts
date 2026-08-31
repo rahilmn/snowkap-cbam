@@ -180,6 +180,17 @@ function makeMockSupabase(
       recorder.fromCalls.push(table);
       return builder(table);
     },
+
+    // 2026-08-31: see the identical note in
+    // list-available-actual-data.test.ts -- the grantor-org-name lookup
+    // now goes through app.sharing_counterparty_org_names(), keyed on
+    // "organizations" here so existing fixtures keep their meaning.
+    rpc: (fnName: string) => {
+      recorder.fromCalls.push(`rpc:${fnName}`);
+      return Promise.resolve(
+        tables.organizations ?? { data: null, error: null },
+      );
+    },
   } as never;
 }
 

@@ -350,13 +350,18 @@ export async function listActualDeterminedLines(
     new Map<string, string>();
 
   if (grantorOrgIds.length > 0) {
+    // 2026-08-31: see the identical change in list-available-actual-data.ts
+    // for the full reasoning -- a grantee has no membership in the
+    // grantor org, so a direct RLS-scoped `organizations` read returned
+    // no row and every SHARED line degraded to "Unknown organization"
+    // on the live deployment. app.sharing_counterparty_org_names()
+    // returns only (id, name), gated on a currently-ACTIVE, unexpired
+    // grant.
     const { data: organizationRows, error: organizationError } =
       await supabase
-        .from("organizations")
-        .select(
-          "id, name",
-        )
-        .in("id", grantorOrgIds);
+        .rpc(
+          "sharing_counterparty_org_names",
+        );
 
     if (organizationError) {
       return [];

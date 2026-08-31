@@ -51,7 +51,7 @@ interface NavItem {
  * until Phase 4+) -- items render as inert placeholders.
  */
 const IMPORTER_NAV: NavItem[] = [
-  { label: "Dashboard", icon: LayoutDashboard },
+  { label: "Dashboard", icon: LayoutDashboard, href: "/" },
   { label: "Shipments", icon: Ship, href: "/shipments" },
   { label: "Emissions", icon: BarChart3, href: "/emissions" },
   { label: "Calculations", icon: Calculator },
@@ -63,7 +63,7 @@ const IMPORTER_NAV: NavItem[] = [
 ];
 
 const PRODUCER_NAV: NavItem[] = [
-  { label: "Dashboard", icon: LayoutDashboard },
+  { label: "Dashboard", icon: LayoutDashboard, href: "/" },
   { label: "Installations", icon: Factory, href: "/installations" },
   { label: "Production data", icon: Package },
   { label: "Emissions", icon: BarChart3, href: "/emission-data" },
@@ -151,8 +151,19 @@ function SidebarSection(
               isActive
                 ? "bg-[var(--surface-sunken)] font-medium text-[var(--text-primary)]"
                 : "text-[var(--text-secondary)]",
+              // 2026-08-31 (P13 live UI review): items with no href were
+              // already correctly rendered as `<button disabled>` -- so
+              // they were never truly "dead links", and assistive tech
+              // announced them as disabled. But they were styled
+              // identically to enabled items, so a sighted user had no
+              // way to tell that (for example) "Verification" would not
+              // respond to a click. Dimming them makes the disabled
+              // state visible as well as semantic, which is what WCAG
+              // 2.2's own "don't rely on semantics alone for state"
+              // guidance is getting at. Found by driving the real
+              // production deployment, not by reading this file.
               !item.href &&
-                "disabled:cursor-default",
+                "cursor-default text-[var(--text-tertiary)] opacity-60",
             );
 
           const content =
@@ -194,9 +205,18 @@ function SidebarSection(
                       ? "page"
                       : undefined
                   }
+                  // Names the reason rather than leaving a silently
+                  // inert control: a disabled button with no
+                  // explanation reads as a bug to a user who cannot see
+                  // why it won't respond.
+                  title={`${item.label} is not available yet`}
                   className={itemClassName}
                 >
                   {content}
+
+                  <span className="sr-only">
+                    {" "}(not available yet)
+                  </span>
                 </button>
               )}
             </li>

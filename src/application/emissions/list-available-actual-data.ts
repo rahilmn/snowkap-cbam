@@ -319,13 +319,22 @@ export async function listAvailableActualEmissionData(
     new Map<string, string>();
 
   if (grantorOrgIds.length > 0) {
+    // 2026-08-31: reads through app.sharing_counterparty_org_names()
+    // rather than `organizations` directly. A grantee has no membership
+    // in the grantor org, so a direct RLS-scoped read returns NO ROW and
+    // every SHARED row silently degraded to the "Unknown organization"
+    // placeholder below -- reproduced against the live production
+    // deployment, where an importer could not see which producer
+    // supplied the figures they were about to declare. The RPC returns
+    // ONLY (id, name), and only for a currently-ACTIVE, unexpired grant
+    // relationship, so revocation and expiry close it off automatically
+    // without disclosing the counterparty's full organizations row.
+    // See supabase/migrations/20260831100000_....sql.
     const { data: organizationRows, error: organizationError } =
       await supabase
-        .from("organizations")
-        .select(
-          "id, name",
-        )
-        .in("id", grantorOrgIds);
+        .rpc(
+          "sharing_counterparty_org_names",
+        );
 
     // A transport/PostgREST failure on this follow-up lookup must never
     // be indistinguishable from a fabricated placeholder name shown for

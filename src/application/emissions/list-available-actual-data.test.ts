@@ -125,6 +125,21 @@ function makeMockSupabase(
       recorder.fromCalls.push(table);
       return builder(table);
     },
+
+    // 2026-08-31: the grantor-org-name lookup moved from a direct
+    // `organizations` read to app.sharing_counterparty_org_names(),
+    // because a grantee has no membership in the grantor org and RLS
+    // therefore returned no row -- see the production finding in
+    // list-available-actual-data.ts. Keyed on "organizations" so every
+    // pre-existing fixture in this file keeps describing the same
+    // scenario it always did, with no test rewritten to match the
+    // implementation.
+    rpc: (fnName: string) => {
+      recorder.fromCalls.push(`rpc:${fnName}`);
+      return Promise.resolve(
+        tables.organizations ?? { data: null, error: null },
+      );
+    },
   } as never;
 }
 
