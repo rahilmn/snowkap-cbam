@@ -118,5 +118,58 @@ describe(
         );
       },
     );
+    // 2026-08-31 (P13 final adversarial review). These are the exact
+    // payloads that DEFEATED the original allowlist, reproduced in a real
+    // browser engine before the fix. The WHATWG URL parser strips ASCII
+    // tab/LF/CR from a URL BEFORE parsing, so a tab in the second
+    // position -- which the old pattern accepted, a tab being neither "/"
+    // nor a backslash -- turned "/<TAB>//evil.example" into
+    // "//evil.example": protocol-relative and off-origin.
+    //
+    // Built with String.fromCharCode rather than backslash escapes so the
+    // control character under test is unambiguous in the source and
+    // cannot be silently mangled by tooling.
+    const CONTROL_PAYLOADS: [string, string][] = [
+      ["tab", `/${String.fromCharCode(9)}//evil.example`],
+      ["line feed", `/${String.fromCharCode(10)}//evil.example`],
+      ["carriage return", `/${String.fromCharCode(13)}/evil.example`],
+      ["tab then backslash", `/${String.fromCharCode(9)}${String.fromCharCode(92)}evil.example`],
+      ["form feed", `/${String.fromCharCode(12)}//evil.example`],
+      ["vertical tab", `/${String.fromCharCode(11)}//evil.example`],
+      ["NUL", `/${String.fromCharCode(0)}//evil.example`],
+      ["space", `/ //evil.example`],
+    ];
+
+    it.each(CONTROL_PAYLOADS)(
+      "rejects a %s used to smuggle a protocol-relative URL past the allowlist",
+      (_label, payload) => {
+        expect(
+          isSafeRedirectPath(
+            payload,
+          ),
+        ).toBe(
+          false,
+        );
+      },
+    );
+
+    it.each([
+      "/accept-invitation",
+      "/shipments",
+      "/shipments/abc-123?tab=lines#why-this-number",
+      "/reset-password",
+      "/declarations/040e02af-608c-438b-8322-04fcad6626f6",
+    ])(
+      "still accepts the legitimate root-relative path %s",
+      (path) => {
+        expect(
+          isSafeRedirectPath(
+            path,
+          ),
+        ).toBe(
+          true,
+        );
+      },
+    );
   },
 );
