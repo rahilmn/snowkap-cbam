@@ -1487,6 +1487,108 @@ Railway outage and §11's R7/R9 memo remain the only two items changing
 the RELEASE BLOCKED classification (§37), and neither was touched this
 round, per standing instruction.
 
+### 16.11 Railway brought up for real, and the product verified against it (2026-08-30)
+
+The owner opened Railway dashboard access this round, which finally made
+§29's blocker diagnosable. Two distinct root causes were found — the second
+strictly worse than the first, and invisible until the first was fixed.
+
+**Root cause 1 — wrong branch (the 502).** Verified from the repository
+*before* touching Railway: `origin/main` is 228 commits behind, and its
+entire root tree is `.gitignore .vscode data docs package.json
+pnpm-lock.yaml pnpm-workspace.yaml scripts src supabase tsconfig.json` — no
+`Dockerfile`, no `railway.json`, no `next.config.ts`, no `app/`, no Next.js
+dependency. Its `package.json` declares `"main": "index.js"` with no
+`start` script. That is a complete, verifiable explanation for
+`Cannot find module '/app/index.js'`: no Dockerfile → Nixpacks → no start
+script → `node index.js` → crash → edge 502. The Railway dashboard then
+confirmed "Branch connected to production: **main**" visually. Fixed by
+pointing the service at `feature/full-product-build`.
+
+**A configuration wrinkle found en route**: Railway's Config-as-Code is
+deprecated, and *"starting 2026-08-28, services that have never used Config
+as Code cannot opt in"*. This service never had, so **`railway.json` is
+ignored by this deployment** — its builder, healthcheck path, timeout and
+restart policy had to be set manually in the dashboard. The repo's
+`railway.json` is now effectively documentation-only for this service. Any
+future claim that it drives deploy configuration should be read with that
+caveat.
+
+**Root cause 2 — the hosted database had no product schema (the false
+green).** With the branch fixed, `/api/health` immediately returned
+`{"status":"ok",...}`. That was a **false positive**. A direct read-only
+query against the hosted project found **6 tables** — `cbam_goods`,
+`countries`, `default_emission_values`, `production_routes`,
+`regulatory_datasets`, `regulatory_sources` — and a last applied migration
+of `20260827130000`. **Four of 57 migrations were applied. Zero product
+tables existed.** `/api/health` passed anyway because it checks only
+database reachability and the ACTIVE-dataset invariant, both satisfied by
+the regulatory foundation alone. Even the 5th *regulatory* migration
+(`20260828100000_authenticated_read_regulatory_data`) was missing. This is
+recorded prominently in §32 because a green health check that cannot
+detect a completely absent application schema is a monitoring gap worth
+knowing about, not just a one-off.
+
+**Migration applied with the protected dataset verified before and after.**
+Pre-flight analysis established that no pending migration mutates
+regulatory data: the only `UPDATE` against a regulatory table in the whole
+directory is in `20260827110000`, which was already applied and therefore
+not in the push set; every pending migration referencing regulatory tables
+only reads them or adds SELECT policies. A `--dry-run` confirmed exactly 53
+pending migrations. After applying: **21 tables**, RLS enabled on **21 of
+21**, `default_emission_values` still **12,540 rows**, exactly **1 ACTIVE**
+dataset (`2026-definitive-corrected`), and `pnpm regulatory:verify` →
+**RESULT: VALID** with full 12,540/12,540 field-level reconciliation
+against the hosted database. The protected dataset came through untouched.
+
+**Product verified against the live deployment** (`https://snowkap-cbam-production.up.railway.app`):
+
+| Check | Result |
+|---|---|
+| Sign-in | PASS |
+| Organization onboarding + capability selection | PASS |
+| Audit spine (`organization.created` recorded) | PASS |
+| Shipment creation | PASS |
+| CN/TARIC live search against real regulatory data | PASS (proves `authenticated_read_regulatory_data`) |
+| Regulatory resolution | PASS — `OTHER_COUNTRIES_FALLBACK` |
+| Calculation | PASS — 10 t x 0.280 = **2.8 tCO2e** |
+| "Why this number?" full chain | PASS — determination, trace, RULE-EE-001, reproducibility affordance |
+| Cross-tenant RLS (stranger vs 6 tables) | PASS — 0 rows everywhere |
+| IDOR by exact known UUID | PASS — `[]` for organizations/shipments/shipment_lines |
+| S12 determination forgery, by an *authorized owner* | PASS — rejected `42501`, real value `0.280` intact |
+| Service-role key in client bundle | PASS — absent (668KB / 14 scripts scanned) |
+
+The resolution result is doubly significant: `OTHER_COUNTRIES_FALLBACK` on
+India/TARIC `2507008080` is only reachable if the deployed build contains
+both the R7/R9 resolver fix (`6094593`) and the v7 validator migration
+(`20260829620000`) — so it simultaneously verifies the regulatory fix in
+production *and* establishes the deployed code version behaviourally,
+compensating for the unset `GIT_SHA` (§30).
+
+**New blocker found by deploying for real — signup is broken for real
+users.** Probing the Auth API directly returned
+`{"error_code":"over_email_send_rate_limit"}` on a valid address (and
+`email_address_invalid` for `@example.com`, which is simply a blocked test
+domain, not a defect). This establishes that **email confirmation is
+enabled with no custom SMTP configured**, so the project falls back to
+Supabase's built-in sender — heavily rate-limited and typically delivering
+only to project team members. **No real user can complete signup today.**
+This is adjacent to the known S3 finding but distinct and more severe: S3
+is "the confirmation gate is vacuous when disabled"; this is "signup fails
+outright when enabled without SMTP". Requires an owner decision plus SMTP
+credentials (Resend/SendGrid/SES). For validation purposes this round,
+confirmed test users were provisioned via the service-role admin API
+(`email_confirm: true`) — exactly how this repo's own integration suites
+provision users — which bypasses email without weakening any production
+setting.
+
+**Architecture note, disclosed not buried**: this makes one Supabase
+project serve as both regulatory-reference host and application database.
+That is consistent with the repo's single ordered migration sequence, but
+master plan §29 envisions separate Supabase projects per environment.
+Acceptable for reaching a verified deployment; should be revisited before
+real customer data.
+
 ## 19. Explainability
 
 Live-verified this session (§6): input → classification (CN8 match) →
@@ -1728,7 +1830,28 @@ correctly baked into a real, working production image. Container stopped
 cleanly (graceful shutdown within a 15s grace period, no forced kill
 needed) and the test image removed afterward.
 
-## 29. Railway deployment status — BLOCKED, confirmed down
+## 29. Railway deployment status — RESOLVED 2026-08-30 (history preserved below)
+
+> **RESOLVED.** Root cause was **the Railway service being connected to the
+> `main` branch**, which is 228 commits behind and contains no `Dockerfile`,
+> no `railway.json`, and no Next.js application at all — only the P0/P1
+> regulatory library. With no Dockerfile, Railway fell back to Nixpacks;
+> with no `start` script, Nixpacks used `main`'s `package.json` `"main":
+> "index.js"` field, producing `node index.js` → `Cannot find module
+> '/app/index.js'` → container death → edge 502. Every link in that chain
+> was verified from the repository before touching Railway, and then
+> confirmed visually in the dashboard. **No application code was changed.**
+> Switching the service to `feature/full-product-build` fixed it. Full
+> account in §16.11. The diagnostic history below is preserved as written,
+> including a wrong turn worth keeping.
+>
+> **Correction to the history below**: an earlier round of this report
+> asserted the `/app/index.js` error "did not originate from what is
+> currently committed here" because `Dockerfile`/`railway.json` both say
+> `node server.js`. That reasoning was sound but the conclusion was wrong —
+> it only checked `feature/full-product-build` and never checked `main`,
+> which is exactly the branch Railway was deploying. Recorded rather than
+> quietly amended.
 
 **`https://snowkap-cbam-production.up.railway.app` returned a persistent
 `502 Bad Gateway` on every check this session**, on every path tested
@@ -1838,18 +1961,49 @@ deploy logs, which this session has no access path to.
 
 ## 30. Deployed commit SHA
 
-**Unobservable.** `/api/health` never returned a response body (502, no
-JSON) on any check this session. Cannot compare against local HEAD (`28bc578`)
-or `origin/feature/full-product-build`.
+**Partially verified — behaviourally, not by SHA string.** `/api/health`
+now responds, but reports `git_sha: "unknown"`: the `GIT_SHA` Docker build
+arg is not wired to a Railway variable, so the deployed SHA is not
+self-reported. **Open item**: set `GIT_SHA=${{RAILWAY_GIT_COMMIT_SHA}}` in
+the Railway service variables; the `Dockerfile`'s existing `ARG GIT_SHA`
+will then surface it.
+
+**However, the deployed code version was positively established by
+behaviour**, which is arguably stronger evidence than a self-reported
+string: a live production line (India / TARIC `2507008080`) resolved via
+`OTHER_COUNTRIES_FALLBACK`. That outcome is only possible if the deployed
+build contains the R7 clause 2 / R9 resolver fix (`6094593`) **and** the
+v7 determination-validator migration (`20260829620000`) — before either,
+this exact input either stayed `UNRESOLVED/UNAVAILABLE` or failed the
+trigger outright. The "Why this number?" caption also rendered the wording
+introduced in `7fe5fe9`. So the deployment demonstrably includes commits
+through at least `7fe5fe9`.
 
 ## 31. Railway `/api/health` result
 
-**FAILED.** `502 Bad Gateway`, "Application failed to respond." See §29.
+**PASS (2026-08-30).**
+
+```json
+{"status":"ok","git_sha":"unknown","checks":{"database":"ok","active_regulatory_dataset":"ok"}}
+```
+
+HTTP 200. See §29 for the root-cause history and §16.11 for the full
+verification round.
 
 ## 32. Database / runtime result (Railway)
 
-**Unobservable** — see §29. (Local Docker's own `/api/health` result, a
-distinct and separately-labeled check, is in §28 and DID succeed.)
+**PASS.** Database connectivity from the Railway container: `ok`. Active
+regulatory dataset check: `ok` (exactly one ACTIVE
+`DEFAULT_EMISSION_VALUES` dataset, `2026-definitive-corrected`).
+
+**Important caveat about what this check does and does not prove** — found
+the hard way this round: `/api/health` validates only (a) database
+reachability and (b) the ACTIVE-dataset invariant. It touches **no product
+table**. It therefore returned a fully-green `status: "ok"` against a
+database that had **zero** product tables (see §16.11) — a genuine false
+positive for product readiness. Treat a green `/api/health` as
+"infrastructure and regulatory foundation are alive", never as "the
+application is usable".
 
 ## 33. Backup / restore result
 
@@ -1962,28 +2116,45 @@ Railway/staging/production verification that did not actually happen.
 
 # RELEASE BLOCKED
 
-**One of the two blockers this report has carried since its first version
-is now resolved. One remains.**
+**Both blockers this report carried since its first version are now
+resolved — R7/R9 earlier, and Railway this round (§16.11). A new blocker
+was found by deploying for real, and two Railway-dependent gates are now
+unblocked but not yet executed.**
 
-**Exact blocker, not disguised as a minor limitation:**
+**Exact blockers, not disguised as minor limitations:**
 
-1. **The Railway production deployment is down** (`502 Bad Gateway` /
-   "Application failed to respond", confirmed repeatedly, every path,
-   including a fresh check today — see §29's latest re-verification). This
-   alone makes every Railway-dependent item in §30–§32, §34, and the
-   production halves of §33/§26 impossible to complete from this session.
-   Requires the owner (or someone with Railway dashboard/CLI access) to
-   check deploy logs and fix the underlying container startup failure —
-   most likely a missing/misconfigured runtime environment variable, a
-   port-binding mismatch, or a Railway dashboard start-command override
-   that doesn't match this repo's own `Dockerfile`/`railway.json` (both of
-   which are internally consistent — `CMD ["node", "server.js"]` and
-   `startCommand: "node server.js"` agree, confirmed by two independent
-   production-config reviews; there is no `/app/index.js` or similar
-   mismatch anywhere in this repo's own deployment configuration, so if
-   Railway's own history shows an attempt to run a nonexistent entrypoint,
-   it did not originate from what is currently committed here). See §29's
-   diagnostic notes for the full account.
+1. **Signup is broken for real users** (found this round, §16.11). Email
+   confirmation is enabled on the hosted Supabase project with **no custom
+   SMTP configured**, so it falls back to Supabase's built-in sender —
+   which returned `over_email_send_rate_limit` on a first, single attempt
+   and in practice delivers only to project team members. **No real user
+   can register today.** Requires an owner decision plus SMTP credentials
+   (Resend / SendGrid / SES) configured in Supabase Auth. Distinct from,
+   and more severe than, the previously-known S3 finding.
+2. **Railway-dependent verification gates are unblocked but not yet
+   executed**: the production halves of §33 (backup/restore) and §34
+   (rollback rehearsal), plus the producer-journey, cross-org-sharing,
+   reporting/export and declaration-preparation journeys against the live
+   deployment. These were impossible while Railway was down; they are now
+   merely outstanding. Not a defect — unfinished verification.
+
+**Also outstanding, lower severity**: `GIT_SHA` is unwired, so the
+deployed commit is not self-reported by `/api/health` (§30 — deployed
+version was instead established behaviourally); and `railway.json` is
+ignored by this Railway service because Config-as-Code is deprecated and
+this service cannot opt in (§16.11), so deploy configuration lives only in
+the dashboard.
+
+**Resolved this round**: **the Railway 502**, root-caused to the service
+being connected to the `main` branch — 228 commits behind, containing no
+Dockerfile, no `railway.json`, and no application at all. Full account and
+the subsequent 53-migration schema fix in §16.11. `/api/health` now
+returns `status: "ok"` with database and regulatory-dataset checks green,
+and the core importer journey — sign-in through organization, shipment,
+CN/TARIC classification, regulatory resolution, calculation (2.8 tCO2e)
+and full "Why this number?" explainability — is verified working against
+the live deployment, alongside cross-tenant RLS, IDOR and S12
+forgery-resistance probes.
 
 **Resolved this round**: **the R7/R9 regulatory fallback contradiction**
 (§11, §16.2) — Commission Implementing Regulation (EU) 2025/2621, Annex I,
