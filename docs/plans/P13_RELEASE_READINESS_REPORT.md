@@ -1589,6 +1589,87 @@ master plan §29 envisions separate Supabase projects per environment.
 Acceptable for reaching a verified deployment; should be revisited before
 real customer data.
 
+### 16.12 Producer journey and cross-org sharing, verified live in production (2026-08-30)
+
+Continuing §16.11 against `https://snowkap-cbam-production.up.railway.app`
+with the same real hosted database. Test users were provisioned via the
+service-role admin API (`email_confirm: true`) because SMTP is unconfigured
+(§16.11) — **no production Auth setting was weakened to enable this**;
+confirmations and rate limits both remain on.
+
+**Producer journey — all PASS:**
+
+| Step | Evidence |
+|---|---|
+| Producer org onboarding | `PRODUCER_OPERATOR` capability set; **producer sidebar rendered**, confirming `deriveExperience()` live |
+| Operator registration | `Gujarat Clay Works (IN)`, `provenance = OPERATOR_PROVIDED` |
+| Installation registration | `Bhuj Calcination Plant (IN)` |
+| Emission data entry | 2026 / `2507008080` / v1, direct `0.155`, indirect `0.045`, EU METHOD |
+| **Incomplete-evidence gate** | Recorded as `DRAFT/UNVERIFIED/Incomplete` with *"Additional evidence is required before these actual emissions can be used as verified data"* — saved and editable, but explicitly NOT consumable |
+| Evidence upload | `verification-report.pdf` stored at org-scoped path `{org}/{emission_data}/{uuid}.pdf` with sha256 recorded |
+| Submit → Verify | `VERIFICATION_PENDING` → `VERIFIED` with `verifier_user_id` captured |
+| Activate | `ACTIVE / VERIFIED` — only now consumable |
+
+**Upload safety controls — verified live through the real route handler**
+(driven from inside an authenticated browser session, so the genuine
+Server-side route ran, not a mock):
+
+| Attempt | Result |
+|---|---|
+| `malware.exe`, `application/x-msdownload` | **415 `EXECUTABLE_EXTENSION`** |
+| `payload.exe` spoofing `application/pdf` MIME | **415 `EXECUTABLE_EXTENSION`** — extension check catches the MIME spoof |
+| genuine `verification-report.pdf` | 200, `fileId` returned |
+
+**Finding S7 verified for the first time ever.** The `evidence` Storage
+bucket on the hosted project carries exactly the controls migration
+`20260829510000` specifies: private, `file_size_limit = 20971520` (20 MiB),
+and a MIME allowlist of pdf/png/jpeg/docx/xlsx. §16.1 recorded S7 as "fixed
+in code but **cannot apply locally** … genuine end-to-end verification
+against a real Storage service remains outstanding, not fabricated as done
+here." That outstanding verification is now **done**, against real Storage.
+
+**Cross-org sharing — the full lifecycle, all PASS:**
+
+| Stage | Evidence |
+|---|---|
+| Grant issued | `INVITED`, `invited_email` set, `grantee_org_id` NULL (resolves on acceptance) |
+| **Pre-acceptance leak check** | grantee sees `emission_data` **0**, `evidence_files` **0**. The installation *profile* IS visible — via the explicitly purpose-named policy `installations_select_via_pending_sharing_grant_invitation`, so an invitee can see what they are being offered. Intentional and correctly scoped, not a leak: the sensitive payload stays hidden until acceptance. |
+| Acceptance | grant → `ACTIVE`, `grantee_org_id` resolved; invitation screen correctly named grantor, installation, expiry and receiving org |
+| Grantee read access | `emission_data` **1** row; stranger org still **0** |
+| **Grantee is read-only** | UPDATE → 0 rows, DELETE → 0 rows, `direct_specific` still `0.155` |
+| Consumption | line determination → `ACTUAL`, snapshot carries `sharing_grant_id` provenance, frozen `direct = 0.155`, frozen `verification = VERIFIED` |
+| Dual-org audit | producer: `sharing_grant.issued`, `sharing_grant.data_consumed`; importer: `sharing_grant.accepted`, `emission_determination.redetermined` |
+| Calculation from shared data | **2.0 tCO2e** = 10 t x (0.155 + 0.045) — arithmetic verified |
+| **Append-only history** | the original DEFAULT result (2.8 tCO2e) is preserved alongside the new ACTUAL result, not overwritten |
+| **Revocation** | grantee immediately sees `emission_data` **0**, `installations` **0**, `evidence_files` **0** |
+| **Historical integrity after revocation** | both calculation rows still present; ACTUAL result still `2 tCO2e`; frozen snapshot still `direct 0.155 / VERIFIED`. Nothing clawed back — exactly the §9 guarantee. |
+
+One methodology note, stated plainly: the revocation itself was applied as
+a direct `status = 'REVOKED'` update rather than through the producer's
+revoke Server Action (which has its own unit coverage). What was being
+verified here is the RLS/consequence half — access denial and historical
+survival — and that half is genuinely end-to-end.
+
+**Two UI findings, both real, neither a security issue:**
+
+1. **Seven sidebar items are dead links.** `components/shell/sidebar.tsx`
+   defines them with no `href`, so they render as inert placeholders:
+   producer *Dashboard*, *Production data*, *Evidence*, *Verification*;
+   importer *Calculations*, *Installations*; plus *Settings*. The
+   underlying features are not missing — evidence upload and the whole
+   verification lifecycle both work, inline on `/emission-data` — but the
+   navigation advertises destinations that go nowhere, and `/verification`
+   returns a 404. For a release candidate this is a visible quality gap.
+2. **"Unknown organization" confirmed live, and narrower than documented.**
+   §16.1 listed *"a grantee can never resolve the grantor org's name
+   (Unknown organization everywhere)"* as a MEDIUM finding. Live, the name
+   resolves **correctly** on the accept-invitation screen, but shows
+   "Unknown organization" in the `/emissions` shared-in table and in the
+   line's actual-data picker. So the finding is real but scoped to those
+   two surfaces, not universal. For a product whose value proposition is
+   provenance, an importer being unable to see who supplied the emissions
+   figure they are about to declare is worth fixing before go-live.
+
 ## 19. Explainability
 
 Live-verified this session (§6): input → classification (CN8 match) →
