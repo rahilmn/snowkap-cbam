@@ -131,3 +131,71 @@ describe(
     );
   },
 );
+
+describe(
+  "recordAuditEvent payload bounds (P13 remaining-findings review, 2026-08-31)",
+  () => {
+    it(
+      "refuses an oversize payload without attempting the insert",
+      async () => {
+        // Wall 1 of two. Wall 2 is
+        // 20260831140000_p13_review_audit_events_payload_bounds.sql's
+        // audit_events_payload_size_ck, which is the one that actually
+        // stops a direct PostgREST insert -- this guard exists so the
+        // application fails deterministically and identically rather
+        // than discovering the bound as an opaque constraint error.
+        const { client, getCapturedPayload } =
+          mockSupabase();
+
+        const result =
+          await recordAuditEvent(
+            client,
+            {
+              orgId: "org-1" as never,
+              actorUserId: "user-1" as never,
+              eventType: "shipment.created",
+              aggregateType: "SHIPMENT",
+              aggregateId: "ship-1",
+              payload: { filler: "x".repeat(9000) },
+            },
+          );
+
+        expect(result).toEqual(
+          { ok: false },
+        );
+
+        // Never reached the database.
+        expect(getCapturedPayload()).toBeUndefined();
+      },
+    );
+
+    it(
+      "still accepts a payload comfortably under the bound",
+      async () => {
+        const { client } =
+          mockSupabase();
+
+        const result =
+          await recordAuditEvent(
+            client,
+            {
+              orgId: "org-1" as never,
+              actorUserId: "user-1" as never,
+              eventType: "shipment.created",
+              aggregateType: "SHIPMENT",
+              aggregateId: "ship-1",
+              // The largest payload this application has ever actually
+              // written in production is 390 bytes (measured across 27
+              // rows, 2026-08-31); this is larger than that and still
+              // far under the 8192 bound.
+              payload: { filler: "x".repeat(1000) },
+            },
+          );
+
+        expect(result).toEqual(
+          { ok: true },
+        );
+      },
+    );
+  },
+);

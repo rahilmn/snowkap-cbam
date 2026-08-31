@@ -40,10 +40,37 @@ export interface RecordAuditEventInput {
  * still belongs in a SECURITY DEFINER RPC for the specific cases that
  * genuinely need it, as create_organization_with_owner() already does.
  */
+/**
+ * Mirrors audit_events_payload_size_ck
+ * (20260831140000_p13_review_audit_events_payload_bounds.sql). Kept
+ * numerically identical to the CHECK on purpose: this is Wall 1 of the
+ * two-wall pattern, and a Wall 1 that disagrees with Wall 2 is worse
+ * than no Wall 1 at all, because it makes the database the thing that
+ * surprises you.
+ *
+ * audit_events is append-only by design -- no UPDATE and no DELETE
+ * policy exists -- so anything written here is also unremovable, which
+ * is why it is bounded rather than merely monitored.
+ */
+const MAX_AUDIT_PAYLOAD_BYTES = 8192;
+
 export async function recordAuditEvent(
   supabase: SupabaseClient,
   input: RecordAuditEventInput,
 ): Promise<{ ok: boolean }> {
+  // Measured the same way the CHECK measures it -- UTF-8 bytes of the
+  // JSON text, not character count and not the TOAST-compressed size
+  // pg_column_size would report (which compressible filler can game).
+  if (
+    new TextEncoder().encode(
+      JSON.stringify(input.payload ?? {}),
+    ).length > MAX_AUDIT_PAYLOAD_BYTES
+  ) {
+    return {
+      ok: false,
+    };
+  }
+
   const { error } =
     await supabase
       .from("audit_events")
