@@ -89,25 +89,70 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Stop local Supabase
-        if: always()
-        run: pnpm exec supabase stop
+      # 2026-08-31 (P13 remaining-findings review). This step used to sit
+      # HERE, before Playwright ran -- so every Playwright job in this
+      # repository's history executed with no Supabase backend. The three
+      # journey specs (importer, producer, cross-org sharing) self-skip
+      # without one, which means they have never actually been green in
+      # CI: the job passed because they did not run, not because they
+      # worked. It now runs AFTER Playwright, at the bottom of this job.
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
-      # Builds the app and runs the Playwright smoke suite against it
+      # playwright.config.ts resolves the app's Supabase credentials from
+      # .env.local, then .env -- neither of which exists on a CI runner,
+      # so without this the specs would still self-skip even with
+      # Supabase up. These are the local demo credentials `supabase
+      # start` generates: they are identical on every machine that has
+      # ever run it, are already allowlisted in this workflow's own
+      # secret scan below for exactly that reason, and grant nothing
+      # beyond the ephemeral container this job just started. Written
+      # with `>>` from `supabase status -o env` rather than echoed, so no
+      # value is printed to the job log.
+      - name: Write .env.local for the E2E app build (local Supabase)
+        run: |
+          set -euo pipefail
+          eval "$(pnpm exec supabase status -o env)"
+          {
+            echo "SUPABASE_URL=${API_URL}"
+            echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}"
+            echo "NEXT_PUBLIC_SUPABASE_URL=${API_URL}"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON_KEY}"
+          } >> .env.local
+          echo "Wrote .env.local pointing at the local Supabase this job started."
+
+      # Builds the app and runs the WHOLE Playwright suite against it
       # (playwright.config.ts's webServer builds+starts the app itself).
-      # No Supabase secrets are configured here -- the health-check test
-      # skips itself accordingly (see tests/e2e/shell.spec.ts); every
-      # other smoke test (shell rendering, navigation, theme toggle,
-      # responsive behavior, keyboard a11y, reduced motion) needs no
-      # backend and runs for real. Full E2E against live data is a
-      # separate, secret-bearing gate (docs/plans/MASTER_PLAN.md §31),
-      # not yet wired -- it needs a staging deployment (Phase 2
-      # precondition not yet met; see Phase 2 evidence).
-      - name: Build and run Playwright smoke suite
+      #
+      # Comment rewritten 2026-08-31: it previously said "No Supabase
+      # secrets are configured here -- the health-check test skips itself
+      # accordingly", which was accurate when written and had quietly
+      # become the description of a gap. With Supabase now running for
+      # this step and .env.local written above, the three journey specs
+      # (importer, producer, cross-org sharing) execute for real against
+      # a live local backend instead of skipping.
+      #
+      # playwright.config.ts's webServer.env additionally sets the two
+      # rate-limit bypass keys, so the suite's own sign-up volume does
+      # not self-trip the production limiters. That bypass requires a
+      # build-time flag which no production image is ever built with --
+      # see src/infrastructure/rate-limit/rate-limiter.ts.
+      #
+      # Still NOT covered here, stated plainly: E2E against a real
+      # STAGING deployment with hosted data (MASTER_PLAN.md §31's
+      # secret-bearing gate). This runs against ephemeral local Supabase,
+      # which is a genuine backend but not a deployed environment.
+      - name: Build and run Playwright suite (smoke + full journeys)
         run: pnpm exec playwright test
+
+      # Moved here 2026-08-31: Supabase must outlive the Playwright run,
+      # or the journey specs skip themselves and this job goes green
+      # without having tested anything. `if: always()` so the container
+      # is still torn down when the suite fails.
+      - name: Stop local Supabase
+        if: always()
+        run: pnpm exec supabase stop
 
       - name: Upload Playwright report
         if: always()

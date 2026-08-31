@@ -80,7 +80,7 @@ test.describe(
         // for all nine, is what makes this test describe reality.
         for (
           const { label, role } of [
-            { label: "Dashboard", role: "button" as const },
+            { label: "Dashboard", role: "link" as const },
             { label: "Shipments", role: "link" as const },
             { label: "Emissions", role: "link" as const },
             { label: "Calculations", role: "button" as const },
@@ -91,10 +91,22 @@ test.describe(
             { label: "Declarations", role: "link" as const },
           ]
         ) {
+          // Disabled nav items carry an sr-only " (not available yet)"
+          // suffix (components/shell/sidebar.tsx), so that IS their
+          // accessible name. Asserting the full name keeps `exact` and
+          // additionally proves the disabled affordance is announced
+          // rather than the control being silently inert. (Corrected
+          // 2026-08-31: this spec still expected the bare label, and had
+          // never run in CI to catch it.)
+          const expectedName =
+            role === "button"
+              ? `${label} (not available yet)`
+              : label;
+
           await expect(
             page.getByRole(
               role,
-              { name: label, exact: true },
+              { name: expectedName, exact: true },
             ),
           ).toBeVisible();
         }

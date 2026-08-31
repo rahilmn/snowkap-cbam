@@ -76,7 +76,7 @@ test.describe(
           role: "link" | "button";
         }[] =
           [
-            { label: "Dashboard", role: "button" },
+            { label: "Dashboard", role: "link" },
             { label: "Shipments", role: "link" },
             { label: "Emissions", role: "link" },
             { label: "Calculations", role: "button" },
@@ -90,10 +90,23 @@ test.describe(
         for (
           const { label, role } of importerNavItems
         ) {
+          // Disabled nav items carry an sr-only " (not available yet)"
+          // suffix (components/shell/sidebar.tsx), so that IS their
+          // accessible name -- a screen-reader user hears the reason
+          // rather than hitting a silently inert control. Asserting the
+          // full name keeps `exact` (no accidental substring matches)
+          // and additionally proves the disabled affordance is actually
+          // announced. (Corrected 2026-08-31: these specs still expected
+          // the bare label, and had never run in CI to catch it.)
+          const expectedName =
+            role === "button"
+              ? `${label} (not available yet)`
+              : label;
+
           await expect(
             primaryNav.getByRole(
               role,
-              { name: label, exact: true },
+              { name: expectedName, exact: true },
             ),
           ).toBeVisible();
         }
