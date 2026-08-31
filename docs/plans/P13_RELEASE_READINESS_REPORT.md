@@ -1670,6 +1670,82 @@ survival — and that half is genuinely end-to-end.
    provenance, an importer being unable to see who supplied the emissions
    figure they are about to declare is worth fixing before go-live.
 
+### 16.13 Reporting, exports, and the live UI/responsive/a11y sweep (2026-08-31)
+
+**Both UI findings from §16.12 fixed and verified live** (commit `585c569`):
+
+- **"Unknown organization" root-caused -- and it was never an application
+  bug.** `list-available-actual-data.ts` already performed a follow-up
+  `organizations` lookup and deliberately degraded to the placeholder only
+  when that query SUCCEEDS but an id is absent. That is exactly what
+  happened: RLS returns no row, because a grantee has no membership in the
+  grantor org, and `organization_visible_via_pending_invitation` covers
+  only the PENDING window -- which is precisely why the name resolved on
+  `/accept-invitation` and vanished the moment the grant went ACTIVE.
+  Fixed with `public.sharing_counterparty_org_names()` (SECURITY DEFINER,
+  returns ONLY `(id, name)`, gated on a currently-ACTIVE unexpired grant in
+  either direction). Deliberately NOT fixed by widening `organizations`
+  RLS, which would have disclosed the counterparty's whole row
+  (`eori_number`, `cbam_declarant_status`, slug). Verified live: importer
+  resolves "P13 Production Producer Ltd"; a stranger org gets `[]`; the
+  importer still cannot read the producer's full row.
+- **Sidebar placeholders -- earlier characterisation corrected.** These
+  were never "dead links": they already rendered as `<button disabled>`,
+  which assistive tech announces correctly. The real defect was purely
+  visual -- identical styling to enabled items. Now dimmed (opacity 0.6)
+  with `title` and an sr-only "(not available yet)". *Dashboard*, which
+  does have a real route, is now wired to `/`.
+
+**Reporting and exports -- verified live against persisted data:**
+
+| Check | Result |
+|---|---|
+| Period report | 1 shipment / 1 line / 1-of-1 calculated, **total 2 tCO2e** |
+| Cross-check vs `calculation_results` | **exact match** |
+| Breakdowns | by CN/TARIC, origin, route, and determination method (ACTUAL) |
+| Completeness section | "Every line in this period is determined and calculated" |
+| CSV export | verified by intercepting the Blob: every field matches the database, incl. engine `1.2.0` and `2` tCO2e, with full provenance columns |
+| XLSX export | HTTP 200, valid OOXML |
+| Official-filing claim | correctly disclaimed on-screen as "not a replica of the official CBAM registry filing form" |
+
+**XLSX numeric precision -- specifically checked, and it is right.** The
+route writes authoritative figures as **text cells** (`numFmt '@'`) to
+preserve `DecimalString` precision, and provides separate, explicitly
+labelled "(approx, for charting)" numeric columns, with an embedded note
+stating that OOXML has no arbitrary-precision numeric cell type so a
+numeric cell can only hold an IEEE-754 double. That is the correct
+treatment for a regulated numeric domain, not an accident.
+
+**Two near-misses worth recording, because both would have been false
+findings had they not been checked:**
+
+1. *"No focus indicators."* Programmatic `el.focus()` showed no ring on
+   any control. But `:focus-visible` does not activate for programmatic
+   focus. Re-tested with a real Tab keypress: `:focus-visible` matches,
+   with a solid 1.6px `rgb(184,184,192)` outline against `rgb(10,10,11)` --
+   very high contrast. **Focus indicators work.**
+2. *"Export CSV is a dead button."* Clicking produced zero network
+   requests. But the source shows it is a deliberate **client-side**
+   `Blob` + `createObjectURL` download with no server round-trip, and this
+   environment blocks script-driven downloads. Verified by intercepting
+   `URL.createObjectURL`: a correct 339-byte CSV was produced. **The
+   button works.**
+
+**Responsive sweep (live, real deployment):**
+
+| Aspect | Result |
+|---|---|
+| Page-level horizontal overflow at 375px | **none** -- no element exceeds the viewport |
+| Wide tables | correctly scroll inside their own container, per the §26 rule |
+| **Mobile navigation** | **GAP** -- the sidebar is `display:none` below `md` and there is no drawer, hamburger or bottom bar. Its 9 links exist in the DOM but are unreachable. The org switcher is also absent. A mobile user can only move between screens by typing URLs. |
+| Theme | an explicit user choice correctly wins over the OS `prefers-color-scheme`; persisted in `localStorage` under `snowkap-theme` |
+| Logo | official asset renders correctly at mobile and desktop, both themes |
+
+The mobile-navigation gap is honestly documented in `sidebar.tsx`'s own
+comment as deferred to a later UI phase, but for a release candidate it is
+a material limitation and is listed as such in §35 rather than left as a
+source-code aside.
+
 ## 19. Explainability
 
 Live-verified this session (§6): input → classification (CN8 match) →
@@ -2122,8 +2198,21 @@ this platform's remaining limitations and are not repeated here;
 covers everything else: items §16's audit didn't scope into, plus this
 report's own directly-observed gaps.
 
-- Railway production deployment is down (502) — §29, the sole remaining
-  blocker.
+- ~~Railway production deployment is down (502)~~ — **RESOLVED** (§16.11).
+- **No mobile navigation.** Below the `md` breakpoint the sidebar is
+  `display:none` with no drawer/hamburger/bottom-bar replacement, and the
+  org switcher is absent too, so a phone user can only move between
+  screens by typing URLs. The layout itself is sound at 375px (no
+  horizontal overflow; tables scroll in their own containers) — this is a
+  navigation gap, not a layout break. Documented as deferred in
+  `sidebar.tsx`, listed here because it is material for a release
+  candidate (§16.13).
+- **Seven sidebar entries are placeholders** (producer *Production data*,
+  *Evidence*, *Verification*; importer *Calculations*, *Installations*;
+  *Settings*). They are correctly `disabled` and now visibly dimmed
+  (§16.13), and the underlying capabilities are not missing — evidence
+  upload and the whole verification lifecycle work inline on
+  `/emission-data` — but `/verification` itself 404s.
 - ~~R7/R9 regulatory fallback contradiction~~ — **RESOLVED**, a later
   round (`6094593`) — see §11. No longer a blocker or a limitation.
 - EU-origin scope gate — deliberately unaddressed, already escalated in the
