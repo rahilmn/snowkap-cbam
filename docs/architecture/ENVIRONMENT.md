@@ -58,14 +58,14 @@ against `.env.example`" below for what qualifies).
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Build-time (inlined) | Client-exposed (safe by design — RLS-enforced) | `browser-client.ts:31`, `server-client.ts:39`, `proxy.ts:44` | none — must be set | **Must differ** |
 | `APP_URL` | Runtime | Server-only | `app/team/actions.ts:214` | unset (falls back to trusted-local-host header detection) | **Must differ** (staging/production domains differ) |
 | `NODE_ENV` | Runtime (Next.js/Node-managed) | Server-only | `browser-client.ts:77`, `server-client.ts:82`, `proxy.ts:72`, `switch-org-action.ts:53`, `next.config.ts:6` (a fifth, distinct purpose — gates whether the CSP/security headers apply their stricter production shape, not the cookie-security purpose the other four share) | `development` (set by `next dev`) | Safe to share — same value (`production`) in both |
-| `GIT_SHA` | Build-time ARG, then baked as runtime `ENV` | Server-only | `next.config.ts:203`, `app/status/page.tsx:147`, `app/api/health/route.ts:63` | unset → `"dev"` | N/A — unique per deploy by nature (the commit SHA), not a shared/differ question |
+| `GIT_SHA` | Build-time ARG, then baked as runtime `ENV` | Server-only | `next.config.ts:214-217`, `app/status/page.tsx:151`, `app/api/health/route.ts:87` | unset → `"dev"` | N/A — unique per deploy by nature (the commit SHA), not a shared/differ question |
 | `PORT` | Runtime (platform-managed) | Server-only | consumed by the Next standalone `server.js` itself, not application source | `3000` (Dockerfile `ENV PORT=3000`) | Safe to share |
 | `HOSTNAME` | Runtime (platform-managed) | Server-only | consumed by the Next standalone `server.js` itself | `0.0.0.0` (Dockerfile `ENV HOSTNAME=0.0.0.0`) | Safe to share |
 | `SUPABASE_LOCAL_URL` | Runtime, test-only | Server-only | 13 files: 4 `tests/integration/*-isolation.test.ts` + 6 other `tests/integration/*.test.ts` + 3 `scripts/perf/*.ts` (full list in §4 below) | `http://127.0.0.1:54321` | N/A — local/CI dev tooling only, never staging/production |
 | `SUPABASE_LOCAL_ANON_KEY` | Runtime, test-only | Server-only | 11 files: all 10 test files above, plus `scripts/perf/measure-p11-perf.ts` (a read-only perf pass — it does need the anon key; `seed-p11-perf-setup.ts`/`cleanup-p11-perf.ts` don't) | fixed public Supabase CLI demo JWT | N/A |
 | `SUPABASE_LOCAL_SERVICE_ROLE_KEY` | Runtime, test-only | Server-only | 12 files: all 10 test files above, plus `scripts/perf/{seed-p11-perf-setup,cleanup-p11-perf}.ts` (writes/teardown need it; `measure-p11-perf.ts` doesn't) | fixed public Supabase CLI demo JWT | N/A |
 | `SUPABASE_LOCAL_JWT_SECRET` | Runtime, test-only | Server-only | 1 file: `tests/integration/organizations-isolation.test.ts:61` (mints a raw session token directly, bypassing GoTrue's grant flow, for one email-confirmation test) | the fixed public Supabase CLI local `JWT_SECRET` (`supabase status` prints it verbatim for a fresh local project) | N/A — local/CI dev tooling only, never staging/production |
-| `CI` | Runtime, test-only | Server-only | `playwright.config.ts:18,19,47` | unset locally | N/A — set automatically by GitHub Actions, never configured by hand |
+| `CI` | Runtime, test-only | Server-only | `playwright.config.ts:104,179` | unset locally | N/A — set automatically by GitHub Actions, never configured by hand |
 | `DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS` | Runtime, test-only | Server-only | `src/infrastructure/rate-limit/rate-limiter.ts` (every limiter instance checks it once at creation) | unset (real rate limiting always applies) | N/A — set only by `playwright.config.ts`'s own `webServer.env`; **never set this anywhere near production** |
 
 That's **16** environment variables actually read by this codebase.
@@ -228,12 +228,12 @@ is correct, not a gap.
 A Docker build **ARG**, promoted to a runtime **ENV** in both the
 `build` and `run` stages of the [`Dockerfile`](../../Dockerfile) (lines
 27–28 and 52–53) — this is deliberately not `.env`-configured; it comes
-from the deploying commit itself. `next.config.ts:203` reads it at build
+from the deploying commit itself. `next.config.ts:214-217` reads it at build
 time to derive the client-exposed `NEXT_PUBLIC_GIT_SHA` (see the
 dedicated section below). Two runtime call sites read it directly,
 server-side, for deployment visibility (master plan §32: "GIT_SHA in
-footer/status"): `app/status/page.tsx:147` (the System/status screen)
-and `app/api/health/route.ts:63` (the `/api/health` response body,
+footer/status"): `app/status/page.tsx:151` (the System/status screen)
+and `app/api/health/route.ts:87` (the `/api/health` response body,
 which Railway's healthcheck and any deployment-verification tooling can
 read). Both default to the literal string `"dev"` when unset — this is
 what a local `pnpm dev`/`pnpm build` run sees, since nothing passes
@@ -264,7 +264,7 @@ sufficient -- it currently is not.
 ### `PORT` / `HOSTNAME`
 
 Set in the [`Dockerfile`](../../Dockerfile)'s run stage
-(`ENV PORT=3000`, line 51; `ENV HOSTNAME=0.0.0.0`, line 52) and consumed
+(`ENV PORT=3000`, line 68; `ENV HOSTNAME=0.0.0.0`, line 69) and consumed
 by Next's generated standalone `server.js` itself (`.next/standalone/`),
 not by any file in this repo's own source — there is no
 `process.env.PORT` or `process.env.HOSTNAME` read in `src/`, `app/`, or
@@ -283,8 +283,8 @@ Dockerfile's default of `3000` is what's exposed either way.
 
 ### `SUPABASE_LOCAL_URL` / `SUPABASE_LOCAL_ANON_KEY` / `SUPABASE_LOCAL_SERVICE_ROLE_KEY`
 
-Optional overrides for the ten local-Postgres-backed consumers — seven
-test files plus three perf scripts, not ten test files — that default
+Optional overrides for the thirteen local-Postgres-backed consumers — ten
+test files plus three perf scripts, not thirteen test files — that default
 to the fixed values `supabase start` always prints for a fresh local
 project: `http://127.0.0.1:54321` for the URL, and two deterministic
 demo JWTs (derived from the equally-public default local `JWT_SECRET`
@@ -333,10 +333,43 @@ three variables above.
 
 ### `CI`
 
-Read in `playwright.config.ts:18,19,47` to toggle
-`forbidOnly`/`retries`/`reuseExistingServer` — the standard convention
+Read in `playwright.config.ts:104,179` to toggle
+`forbidOnly` and `reuseExistingServer` — `retries` became
+unconditional on 2026-08-30 (`playwright.config.ts:114`) and is no
+longer CI-conditioned. The standard convention
 GitHub Actions (and most CI platforms) set automatically to `true` on
 every run; nothing in this repo sets it by hand, locally or otherwise.
+
+### `E2E_RATE_LIMIT_BYPASS_BUILD` (build-time) / `NEXT_PUBLIC_E2E_RATE_LIMIT_BYPASS_BUILD` (its source)
+
+Added 2026-08-31. The second half of the two-key E2E rate-limit bypass
+described in the next section, and the half that makes it safe.
+
+`NEXT_PUBLIC_E2E_RATE_LIMIT_BYPASS_BUILD` is read **at build time** by
+`next.config.ts:236`, which emits it into the bundle as the inlined
+constant `E2E_RATE_LIMIT_BYPASS_BUILD` via Next's `env` block — the same
+mechanism `NEXT_PUBLIC_GIT_SHA` uses. `rate-limiter.ts` requires that
+constant to be `"true"` *in addition to* the runtime flag below.
+
+Why it exists: the bypass used to be a single runtime env read, so one
+stray variable on the production service disabled rate limiting across
+every auth, invitation and upload endpoint at once. A `NODE_ENV` guard
+would not have helped — the Playwright harness runs `pnpm build && pnpm
+start`, a real production build, so `NODE_ENV` is `"production"` there
+too. What actually separates the harness from the deploy is who ran the
+**build**.
+
+Verified rather than assumed: on a clean production build, zero files in
+either `.next/server` or the `.next/standalone` tree the Dockerfile ships
+contain the runtime flag's name at all — the branch is dead-code
+eliminated. The same build with the flag set retains it. (A plain
+`NEXT_PUBLIC_`-prefixed read was tried first and Turbopack left it as a
+live `process.env` lookup in the server chunk, which is why this goes
+through `next.config.ts`'s `env` block instead.)
+
+Set only in `playwright.config.ts`'s `webServer.env`. **Never set it on
+Railway or any deployed environment** — doing so would re-arm the
+runtime flag below.
 
 ### `DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS`
 
@@ -362,13 +395,13 @@ config value if it turned up somewhere it shouldn't.
 
 ### `NEXT_PUBLIC_GIT_SHA`
 
-Defined in `next.config.ts:202` (`env: { NEXT_PUBLIC_GIT_SHA:
-process.env.GIT_SHA ?? "dev" }`) — this makes it a real, build-time
+Defined in `next.config.ts:201` (`env: { NEXT_PUBLIC_GIT_SHA:
+process.env.GIT_SHA?.trim() || process.env.RAILWAY_GIT_COMMIT_SHA?.trim() || "dev" }`) — this makes it a real, build-time
 client-exposed variable in principle, per the Dockerfile's own comment
 ("surfaces it as `NEXT_PUBLIC_GIT_SHA`"). In practice, no component or
 route in this codebase currently reads
 `process.env.NEXT_PUBLIC_GIT_SHA` — both places that display the
-version (`app/status/page.tsx:147`, `app/api/health/route.ts:63`) read
+version (`app/status/page.tsx:151`, `app/api/health/route.ts:87`) read
 the server-only `GIT_SHA` directly instead, since both are server-side
 code with no need for a client-inlined copy. It's documented here for
 completeness (it does exist as a real env var Next.js produces) but
