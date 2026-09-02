@@ -73,12 +73,63 @@ interface AuditEventRow {
   payload: Record<string, unknown> | null;
 }
 
+/**
+ * 2026-09-03 (P14). The name map now comes from
+ * public.sharing_counterparty_org_names(), whose result set spans EVERY
+ * org the authenticated USER has a grant relationship with, in BOTH
+ * directions -- not the orgs this ACTIVE org granted to. It must
+ * therefore never be treated as a bare id -> name map by an org-scoped
+ * screen.
+ *
+ * Concretely, without the per-grant gate below: a user who belongs to
+ * producer org A and importer org B, where B is a grantee of org V,
+ * would see A's /sharing/status name V on an INVITED, never-accepted
+ * DIRECT grant that A itself issued naming V -- because V is in the
+ * user's map for an entirely unrelated reason. That is the sham-grant
+ * disclosure shape 20260829320000 exists to close, re-opened at the
+ * application layer.
+ *
+ * So the name is admitted only when THIS grant independently justifies
+ * it: a live ACTIVE grant, or one provably accepted through the
+ * bootstrap path (invited_email set AND grantee_org_id resolved, which
+ * only accept_sharing_grant_invitation() can produce -- see
+ * 20260902150000). The predicate deliberately mirrors direction 2 of
+ * that function, so the SQL and the TypeScript cannot drift into
+ * disagreeing about what a grantor may see.
+ */
+function granteeNameIsDisclosable(
+  grant: SharingGrant,
+  now: Date,
+): boolean {
+  if (grant.grantee_org_id === null) {
+    return false;
+  }
+
+  const unexpired =
+    grant.expires_at === null ||
+    new Date(grant.expires_at) > now;
+
+  if (grant.status === "ACTIVE" && unexpired) {
+    return true;
+  }
+
+  return (
+    grant.invited_email !== null &&
+    (
+      grant.status === "ACTIVE" ||
+      grant.status === "REVOKED" ||
+      grant.status === "EXPIRED"
+    )
+  );
+}
+
 function resolveGranteeLabel(
   grant: SharingGrant,
   orgNameById: Map<string, string>,
+  now: Date,
 ): string {
   const resolvedName =
-    grant.grantee_org_id
+    grant.grantee_org_id && granteeNameIsDisclosable(grant, now)
       ? orgNameById.get(grant.grantee_org_id)
       : undefined;
 
@@ -134,12 +185,16 @@ function toConsumptionEvent(
  * history (P7-D3's 'sharing_grant.data_consumed' audit_events rows)
  * for that specific grant.
  *
- * Grantee-org name resolution depends on
- * organizations_select_via_own_issued_sharing_grant
- * (20260829320000_p7d4_shared_data_status_grantee_visibility.sql) --
- * without it this lookup would come back empty for every direct grant,
- * same as issued-grants-list.tsx's own pre-existing "Direct grant"
- * placeholder documents. Consumption events depend on nothing new --
+ * Grantee-org name resolution goes through
+ * public.sharing_counterparty_org_names() (20260831100000, widened by
+ * 20260902150000), NOT through a direct `organizations` read: a grantor
+ * has no membership in its grantee's org. The RPC returns only
+ * (id, name), spans both grant directions and every org the USER
+ * belongs to, and is therefore re-gated per grant by
+ * granteeNameIsDisclosable -- see its doc comment for the cross-org
+ * disclosure that gate prevents. A never-accepted grant still shows
+ * "Pending invite: {email}", same as issued-grants-list.tsx's own
+ * pre-existing placeholder documents. Consumption events depend on nothing new --
  * audit_events_select_own_org (20260828070000) already lets the
  * grantor read their own org's audit_events rows; confirmed live via
  * the grantor's own authenticated client (not just service-role) in
@@ -225,11 +280,20 @@ export async function listSharedDataStatus(
           .select("id, name")
           .in("id", installationIds),
 
+        // 2026-09-03 (P14): resolved through the counterparty RPC rather
+        // than a direct `organizations` read. A grantor has no
+        // membership in its grantee's org, so the direct read depended
+        // entirely on organizations_select_via_own_issued_sharing_grant
+        // -- which is gated to status = 'ACTIVE', so the moment a grant
+        // was revoked the producer's own transparency screen stopped
+        // being able to name the organization it had shared with. That
+        // RLS policy is deliberately left exactly as it is (it governs
+        // the FULL row -- eori_number, cbam_declarant_status, slug); the
+        // NAME alone now comes from the SECURITY DEFINER function, which
+        // returns only (id, name) and carries its own acceptance proof.
+        // resolveGranteeLabel re-gates every row per grant.
         granteeOrgIds.length > 0
-          ? supabase
-              .from("organizations")
-              .select("id, name")
-              .in("id", granteeOrgIds)
+          ? supabase.rpc("sharing_counterparty_org_names")
           : Promise.resolve({ data: [] as OrgNameRow[], error: null }),
 
         supabase
@@ -288,6 +352,12 @@ export async function listSharedDataStatus(
     }
   }
 
+  // One clock reading for the whole page, so two grants that lapse
+  // either side of an evaluation cannot render inconsistently within a
+  // single render.
+  const now =
+    new Date();
+
   return grants.map(
     (grant) => (
       {
@@ -298,6 +368,7 @@ export async function listSharedDataStatus(
           resolveGranteeLabel(
             grant,
             orgNameById,
+            now,
           ),
         consumptionEvents:
           eventsByGrantId.get(grant.id) ?? [],

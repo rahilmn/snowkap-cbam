@@ -326,10 +326,17 @@ export async function listAvailableActualEmissionData(
     // placeholder below -- reproduced against the live production
     // deployment, where an importer could not see which producer
     // supplied the figures they were about to declare. The RPC returns
-    // ONLY (id, name), and only for a currently-ACTIVE, unexpired grant
-    // relationship, so revocation and expiry close it off automatically
-    // without disclosing the counterparty's full organizations row.
-    // See supabase/migrations/20260831100000_....sql.
+    // ONLY (id, name), never the counterparty's full organizations row.
+    //
+    // 2026-09-03 (P14): that function is no longer gated on a
+    // currently-ACTIVE, unexpired grant -- a grantee now resolves its
+    // grantor's name for a grant of any status, because a frozen
+    // determination outlives the grant and must stay attributable
+    // (20260902150000). That does NOT widen what this function offers:
+    // the ACTIVE + unexpired grant filter above is this module's own,
+    // and it alone decides which datasets are selectable. The RPC only
+    // ever supplies names for rows this function has already decided the
+    // caller may see.
     const { data: organizationRows, error: organizationError } =
       await supabase
         .rpc(

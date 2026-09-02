@@ -225,6 +225,7 @@ describe(
               methodology: "EU_METHOD",
               provenance: "OWN",
               grantor_organization_name: null,
+              sharing_grant_status: null,
               staleness: "CURRENT",
             },
           ],
@@ -580,6 +581,186 @@ describe(
 
         expect(shipmentLinesSelect?.filters).toContainEqual(
           ["determination_method", "ACTUAL"],
+        );
+      },
+    );
+
+    /**
+     * 2026-09-03 (P14). Reproduced in production before these were
+     * written: sharing grant 942ba281 (ABC -> SNOWKAP) was revoked at
+     * 15:28:55 on 2026-09-02, and the importer's determinations overview
+     * immediately began rendering "Shared by Unknown organization" as the
+     * attributed source of a frozen, already-calculated ACTUAL
+     * determination. This function resolves the grantor through the GRANT
+     * ROW rather than through emission_data precisely so the label
+     * survives revocation; the name did not, because the RPC behind it
+     * was gated on status = 'ACTIVE'. These pin the fix at both layers.
+     */
+    it(
+      "keeps naming the grantor after the sharing grant is REVOKED -- the frozen determination outlives the grant, and so must its provenance label",
+      async () => {
+        const result =
+          await listActualDeterminedLines(
+            makeMockSupabase(
+              {
+                shipment_lines: {
+                  data: [
+                    actualLineRow({
+                      emission_determination: {
+                        method: "ACTUAL",
+                        snapshot: sharedSnapshot,
+                      },
+                    }),
+                  ],
+                  error: null,
+                },
+                shipments: { data: [shipmentRow], error: null },
+                emission_data: { data: [], error: null },
+                sharing_grants: {
+                  data: [
+                    {
+                      id: "grant-1",
+                      grantor_org_id: "org-2",
+                      status: "REVOKED",
+                    },
+                  ],
+                  error: null,
+                },
+                organizations: {
+                  data: [{ id: "org-2", name: "Acme Steel Producer" }],
+                  error: null,
+                },
+              },
+            ),
+            orgId,
+          );
+
+        expect(result[0]?.grantor_organization_name).toBe(
+          "Acme Steel Producer",
+        );
+
+        // The label names the past accurately; this names the present
+        // accurately, so a reader is not left to assume the sharing
+        // relationship is still live.
+        expect(result[0]?.sharing_grant_status).toBe(
+          "REVOKED",
+        );
+      },
+    );
+
+    it(
+      "keeps naming the grantor after the sharing grant has EXPIRED",
+      async () => {
+        const result =
+          await listActualDeterminedLines(
+            makeMockSupabase(
+              {
+                shipment_lines: {
+                  data: [
+                    actualLineRow({
+                      emission_determination: {
+                        method: "ACTUAL",
+                        snapshot: sharedSnapshot,
+                      },
+                    }),
+                  ],
+                  error: null,
+                },
+                shipments: { data: [shipmentRow], error: null },
+                emission_data: { data: [], error: null },
+                sharing_grants: {
+                  data: [
+                    {
+                      id: "grant-1",
+                      grantor_org_id: "org-2",
+                      status: "EXPIRED",
+                    },
+                  ],
+                  error: null,
+                },
+                organizations: {
+                  data: [{ id: "org-2", name: "Acme Steel Producer" }],
+                  error: null,
+                },
+              },
+            ),
+            orgId,
+          );
+
+        expect(result[0]?.grantor_organization_name).toBe(
+          "Acme Steel Producer",
+        );
+
+        expect(result[0]?.sharing_grant_status).toBe(
+          "EXPIRED",
+        );
+      },
+    );
+
+    it(
+      "never narrows the sharing_grants lookup by status -- a terminal grant must still resolve its own grantor",
+      async () => {
+        // The regression this guards is a filter, not an output: if a
+        // future change re-adds .eq("status", "ACTIVE") here, the two
+        // tests above would still pass against a mock that ignores
+        // filters, while production silently reverted to "Unknown
+        // organization". Assert the query shape itself.
+        const recorder =
+          { fromCalls: [] as string[], ops: [] as Op[] };
+
+        await listActualDeterminedLines(
+          makeMockSupabase(
+            {
+              shipment_lines: {
+                data: [
+                  actualLineRow({
+                    emission_determination: {
+                      method: "ACTUAL",
+                      snapshot: sharedSnapshot,
+                    },
+                  }),
+                ],
+                error: null,
+              },
+              shipments: { data: [shipmentRow], error: null },
+              emission_data: { data: [], error: null },
+              sharing_grants: {
+                data: [
+                  {
+                    id: "grant-1",
+                    grantor_org_id: "org-2",
+                    status: "REVOKED",
+                  },
+                ],
+                error: null,
+              },
+              organizations: {
+                data: [{ id: "org-2", name: "Acme Steel Producer" }],
+                error: null,
+              },
+            },
+            recorder,
+          ),
+          orgId,
+        );
+
+        const grantsSelect =
+          recorder.ops.find(
+            (op) => op.table === "sharing_grants",
+          );
+
+        expect(grantsSelect).toBeDefined();
+
+        expect(
+          grantsSelect?.filters.map(([column]) => column),
+        ).not.toContain(
+          "status",
+        );
+
+        expect(
+          grantsSelect?.filters.map(([column]) => column),
+        ).not.toContain(
+          "expires_at",
         );
       },
     );

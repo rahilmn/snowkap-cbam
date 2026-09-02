@@ -248,13 +248,35 @@ function DeterminedLinesTable(
                 </td>
 
                 <td className="px-4 py-2.5">
-                  <Badge
-                    tone={PROVENANCE_TONE[line.provenance]}
-                  >
-                    {line.provenance === "OWN"
-                      ? "Own data"
-                      : `Shared by ${line.grantor_organization_name}`}
-                  </Badge>
+                  <div className="flex flex-col gap-1">
+                    <Badge
+                      tone={PROVENANCE_TONE[line.provenance]}
+                    >
+                      {line.provenance === "OWN"
+                        ? "Own data"
+                        : `Shared by ${line.grantor_organization_name}`}
+                    </Badge>
+
+                    {/*
+                      The frozen snapshot stays valid and attributable
+                      after the grant ends -- that is what freezing it is
+                      for -- but the reader should not have to guess that
+                      the sharing relationship behind a historical number
+                      is still live. Names the past accurately above, the
+                      present accurately here.
+                    */}
+                    {line.sharing_grant_status === "REVOKED" ? (
+                      <span className="text-[11px] text-[var(--text-tertiary)]">
+                        Access since revoked
+                      </span>
+                    ) : null}
+
+                    {line.sharing_grant_status === "EXPIRED" ? (
+                      <span className="text-[11px] text-[var(--text-tertiary)]">
+                        Access since expired
+                      </span>
+                    ) : null}
+                  </div>
                 </td>
 
                 <td className="px-4 py-2.5">

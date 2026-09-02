@@ -50,6 +50,10 @@ import type {
   ActualSnapshotStaleness,
 } from "../../domain/emissions/check-actual-snapshot-staleness";
 
+import type {
+  SharingGrantStatus,
+} from "../../domain/sharing/types";
+
 /**
  * One row of the importer's cross-shipment "Emissions" overview (master
  * plan §27 screen 15: "determinations overview ... read-only, grant-
@@ -76,6 +80,14 @@ export interface ActualDeterminedLineOverviewRow {
   // is used); always null for an OWN row.
   grantor_organization_name: string | null;
 
+  // 2026-09-03 (P14). The grant's CURRENT status, carried so the UI can
+  // be honest about the present without misrepresenting the past: the
+  // frozen snapshot stays valid and attributable after revocation (that
+  // is the whole point of freezing it), but a reader deserves to know
+  // that the sharing relationship behind it has since ended. Null for an
+  // OWN row.
+  sharing_grant_status: SharingGrantStatus | null;
+
   staleness: ActualSnapshotStaleness;
 }
 
@@ -85,6 +97,7 @@ type ActualDeterminedShipmentLine =
   };
 
 interface SharingGrantGrantorLookupRow {
+  status: SharingGrantStatus;
   id: string;
   grantor_org_id: string;
 }
@@ -314,12 +327,15 @@ export async function listActualDeterminedLines(
   const grantorOrgIdBySharingGrantId =
     new Map<string, string>();
 
+  const grantStatusBySharingGrantId =
+    new Map<string, SharingGrantStatus>();
+
   if (sharingGrantIds.length > 0) {
     const { data: grantRows, error: grantError } =
       await supabase
         .from("sharing_grants")
         .select(
-          "id, grantor_org_id",
+          "id, grantor_org_id, status",
         )
         .in("id", sharingGrantIds);
 
@@ -336,6 +352,11 @@ export async function listActualDeterminedLines(
         row.id,
         row.grantor_org_id,
       );
+
+      grantStatusBySharingGrantId.set(
+        row.id,
+        row.status,
+      );
     }
   }
 
@@ -350,13 +371,24 @@ export async function listActualDeterminedLines(
     new Map<string, string>();
 
   if (grantorOrgIds.length > 0) {
-    // 2026-08-31: see the identical change in list-available-actual-data.ts
-    // for the full reasoning -- a grantee has no membership in the
-    // grantor org, so a direct RLS-scoped `organizations` read returned
-    // no row and every SHARED line degraded to "Unknown organization"
-    // on the live deployment. app.sharing_counterparty_org_names()
-    // returns only (id, name), gated on a currently-ACTIVE, unexpired
-    // grant.
+    // 2026-08-31: a grantee has no membership in the grantor org, so a
+    // direct RLS-scoped `organizations` read returned no row and every
+    // SHARED line degraded to "Unknown organization" on the live
+    // deployment. public.sharing_counterparty_org_names() returns only
+    // (id, name).
+    //
+    // 2026-09-03 (P14): that function used to be gated on a
+    // currently-ACTIVE, unexpired grant, which defeated this function's
+    // own design -- resolving the grantor through the GRANT ROW rather
+    // than through emission_data exists precisely so the label survives
+    // revocation, and the name then did not. Reproduced in production
+    // (grant 942ba281, revoked 15:28:55 on 2026-09-02): a frozen,
+    // already-calculated ACTUAL determination rendered "Shared by
+    // Unknown organization". 20260902150000 widens direction 1 (grantee
+    // asking for its grantor's name) to any status, which is
+    // self-disclosure by the grantor. The comment above is retained
+    // because the join path it justifies is still the right one; only
+    // its final clause was overtaken.
     const { data: organizationRows, error: organizationError } =
       await supabase
         .rpc(
@@ -415,6 +447,10 @@ export async function listActualDeterminedLines(
         methodology: snapshot.methodology,
         provenance,
         grantor_organization_name: grantorOrganizationName,
+        sharing_grant_status:
+          snapshot.sharing_grant_id === null
+            ? null
+            : grantStatusBySharingGrantId.get(snapshot.sharing_grant_id) ?? null,
         staleness: stalenessByLineId[line.id] ?? "CURRENT",
       },
     );

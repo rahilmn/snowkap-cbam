@@ -11,6 +11,30 @@ import {
 const orgId =
   "org-1" as never;
 
+/**
+ * 2026-09-03 (P14). A bootstrap grant that was genuinely ACCEPTED and
+ * then revoked: invited_email retained, grantee_org_id resolved. Only
+ * public.accept_sharing_grant_invitation() can produce that combination
+ * -- a bootstrap row starts with grantee_org_id NULL, the ordinary
+ * grantee-accept policy cannot populate it, and (since 20260902150000) a
+ * BEFORE INSERT trigger forbids minting the shape directly. It is
+ * therefore the acceptance proof the grantor-side disclosure rule keys
+ * on, and it is the only shape the product own UI can create.
+ */
+const acceptedThenRevokedBootstrapGrantRow =
+  {
+    id: "grant-4",
+    grantor_org_id: "org-1",
+    grantee_org_id: "org-3",
+    invited_email: "ops@contoso.example.com",
+    installation_id: "installation-1",
+    status: "REVOKED",
+    created_by_user_id: "admin-1",
+    expires_at: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:05:00Z",
+  };
+
 const directGrantRow =
   {
     id: "grant-1",
@@ -63,6 +87,7 @@ const pendingBootstrapGrantRow =
  */
 function makeMockSupabase(
   tables: Record<string, { data: unknown; error: unknown }>,
+  recorder: { fromCalls: string[] } = { fromCalls: [] },
 ) {
   function builder(
     table: string,
@@ -85,7 +110,26 @@ function makeMockSupabase(
   }
 
   return {
-    from: (table: string) => builder(table),
+    from: (table: string) => {
+      recorder.fromCalls.push(table);
+      return builder(table);
+    },
+
+    // 2026-09-03 (P14): the grantee-org-name lookup moved from a direct
+    // `organizations` read to public.sharing_counterparty_org_names(),
+    // because a grantor has no membership in its grantee's org and the
+    // RLS policy that used to carry it is gated to status = 'ACTIVE' --
+    // so the producer's own transparency screen stopped being able to
+    // name the org it had shared with the moment a grant was revoked.
+    // Keyed on "organizations" here so every existing fixture in this
+    // file keeps its exact meaning, matching the same convention in
+    // list-available-actual-data.test.ts.
+    rpc: (fnName: string) => {
+      recorder.fromCalls.push(`rpc:${fnName}`);
+      return Promise.resolve(
+        tables.organizations ?? { data: null, error: null },
+      );
+    },
   } as never;
 }
 
@@ -170,14 +214,44 @@ describe(
       },
     );
 
+    /**
+     * 2026-09-03 (P14). This test previously used revokedGrantRow -- a
+     * REVOKED DIRECT grant -- to express "history is not hidden once
+     * revoked". The intent was right; the fixture was not, for two
+     * reasons.
+     *
+     * First, it asserted behaviour production never had. The name map it
+     * was handed came from an RLS-scoped organizations read, and
+     * organizations_select_via_own_issued_sharing_grant is gated to
+     * status = ACTIVE -- so in production this exact scenario returned no
+     * row and rendered "Unknown organization". The test passed only
+     * because the mock supplied a map the real query could not.
+     *
+     * Second, and the reason the fixture cannot simply be kept: a
+     * REVOKED direct grant is indistinguishable from the sham-grant
+     * attack 20260829320000 closed. An attacker who knows a victim org
+     * uuid can insert an INVITED direct grant naming it (status is forced
+     * INVITED at insert) and then revoke their own grant. If a terminal
+     * direct grant disclosed its grantee name, that sequence would turn a
+     * known uuid into the victim organization name, with no acceptance
+     * and no notice.
+     *
+     * So the intent is preserved with a fixture that carries acceptance
+     * proof -- which is also the only shape the product own UI can create
+     * -- and the direct-grant boundary is pinned explicitly below rather
+     * than left implicit.
+     */
     it(
-      "still resolves the grantee org's name for a REVOKED grant -- history is not hidden once revoked",
+      "still resolves the grantee org name for a REVOKED grant the grantee genuinely accepted -- history is not hidden once revoked",
       async () => {
         const result =
           await listSharedDataStatus(
             makeMockSupabase(
               {
-                sharing_grants: { data: [revokedGrantRow], error: null },
+                sharing_grants: {
+                  data: [acceptedThenRevokedBootstrapGrantRow],
+                  error: null,
+                },
                 installations: {
                   data: [{ id: "installation-1", name: "Duisburg Plant" }],
                   error: null,
@@ -197,7 +271,86 @@ describe(
         );
 
         expect(result[0]!.granteeLabel).toBe(
-          "Contoso Imports Ltd",
+          "Contoso Imports Ltd (accepted via invite to ops@contoso.example.com)",
+        );
+      },
+    );
+
+    it(
+      "does NOT resolve the grantee org name for a REVOKED DIRECT grant -- it carries no acceptance proof, and a self-issued self-revoked sham grant must never name a victim",
+      async () => {
+        const result =
+          await listSharedDataStatus(
+            makeMockSupabase(
+              {
+                sharing_grants: { data: [revokedGrantRow], error: null },
+                installations: {
+                  data: [{ id: "installation-1", name: "Duisburg Plant" }],
+                  error: null,
+                },
+                // The RPC legitimately returns this name for an unrelated
+                // reason: its result set spans every org the USER has any
+                // grant relationship with, in both directions. That is
+                // exactly why the label must re-gate per grant instead of
+                // trusting the map.
+                organizations: {
+                  data: [{ id: "org-3", name: "Contoso Imports Ltd" }],
+                  error: null,
+                },
+                audit_events: { data: [], error: null },
+              },
+            ),
+            orgId,
+          );
+
+        expect(result[0]!.grant.status).toBe(
+          "REVOKED",
+        );
+
+        expect(result[0]!.granteeLabel).toBe(
+          "Unknown organization",
+        );
+      },
+    );
+
+    it(
+      "resolves grantee names through the counterparty RPC, never through a direct organizations read",
+      async () => {
+        // A grantor has no membership in its grantee org, so a direct
+        // read is RLS-empty by construction. Pinning the call shape stops
+        // a future refactor from quietly reintroducing one and
+        // rediscovering "Unknown organization" in production.
+        const recorder =
+          { fromCalls: [] as string[] };
+
+        await listSharedDataStatus(
+          makeMockSupabase(
+            {
+              sharing_grants: {
+                data: [acceptedThenRevokedBootstrapGrantRow],
+                error: null,
+              },
+              installations: {
+                data: [{ id: "installation-1", name: "Duisburg Plant" }],
+                error: null,
+              },
+              organizations: {
+                data: [{ id: "org-3", name: "Contoso Imports Ltd" }],
+                error: null,
+              },
+              audit_events: { data: [], error: null },
+            },
+            recorder,
+          ),
+          orgId,
+        );
+
+        expect(recorder.fromCalls).toContain(
+          "rpc:sharing_counterparty_org_names",
+        );
+
+        expect(recorder.fromCalls).not.toContain(
+          "organizations",
         );
       },
     );
