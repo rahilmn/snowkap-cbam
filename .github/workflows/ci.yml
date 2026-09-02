@@ -98,10 +98,42 @@ jobs:
       # to actually become reachable for any reason, this step fails
       # LOUDLY, rather than the isolation suites silently skipping
       # again and the job staying green regardless.
+      # 2026-09-02. `supabase start` pulls ~10 container images from
+      # public.ecr.aws on a cold runner, and GitHub-hosted runners share
+      # egress IPs, so that registry returns `toomanyrequests: Rate
+      # exceeded` intermittently. Both of this workflow's first two runs
+      # on the deploy branch failed there -- not on any test.
+      #
+      # The retry below is deliberately scoped to the IMAGE PULL, an
+      # external dependency with a known transient failure mode. NOTHING
+      # in the test, build or scan steps is retried: a red test is a
+      # finding, and re-running until it passes would destroy the signal
+      # this workflow exists to provide.
+      #
+      # If all attempts fail the job still fails LOUDLY, and still fails
+      # on the reachability probe rather than letting the isolation
+      # suites self-skip into a false green -- the property the original
+      # step was written to guarantee is preserved exactly.
       - name: Start local Supabase (so cross-org isolation suites run for real)
         run: |
           set -euo pipefail
-          pnpm exec supabase start
+
+          started=0
+          for attempt in 1 2 3; do
+            if pnpm exec supabase start; then
+              started=1
+              break
+            fi
+            echo "::warning::supabase start failed on attempt ${attempt} (usually a public.ecr.aws pull rate limit). Cleaning up and retrying."
+            pnpm exec supabase stop --no-backup || true
+            sleep $(( attempt * 30 ))
+          done
+
+          if [ "${started}" -ne 1 ]; then
+            echo "::error::Local Supabase failed to start after 3 attempts -- the cross-org isolation suites would silently self-skip instead of running. Failing the job rather than letting that happen quietly."
+            exit 1
+          fi
+
           if ! curl -sf --max-time 5 http://127.0.0.1:54321/auth/v1/health >/dev/null; then
             echo "::error::Local Supabase did not come up reachable at 127.0.0.1:54321 -- the cross-org isolation suites would silently self-skip instead of running. Failing the job rather than letting that happen quietly."
             exit 1
