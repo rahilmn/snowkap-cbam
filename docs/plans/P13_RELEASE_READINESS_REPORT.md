@@ -4655,3 +4655,113 @@ membership, no product data:
 Disclosed rather than left silent; deletable at any time.
 
 **SMTP: PASS.**
+
+---
+
+## 64. CI INTEGRATION GATE — GREEN (2026-09-02)
+
+The integration/security/RLS and E2E gate now runs, for the first time in
+this repository's history, against the deploy branch.
+
+### 64.1 The run
+
+| | |
+|---|---|
+| Run ID | **33637049603** |
+| URL | https://github.com/rahilmn/snowkap-cbam/actions/runs/33637049603 |
+| Commit | **`d264aaf58b23269ce6fa0dec9b606d27d74a554b`** |
+| Branch | `feature/full-product-build` (the deploy branch) |
+| Conclusion | **success** |
+| Duration | 13:39:22Z → 13:44:31Z |
+
+| Job | Result |
+|---|---|
+| `fast-gates` (no containers) | **success** — 1244 passed / 150 skipped |
+| `build-and-test` (real Supabase) | **success** |
+
+**Counts in the integration job, matching local exactly:**
+
+```
+Test Files  122 passed | 2 skipped (124)
+Tests      1380 passed | 14 skipped (1394)
+Playwright   24 passed (1.3m)
+ACTIVE regulatory rows: 12540
+```
+
+The 150-vs-14 skip difference between the two jobs is the point: in
+`fast-gates` the Supabase-backed suites self-skip by design; in
+`build-and-test` they **run**.
+
+### 64.2 Three problems, only one of which was the registry
+
+**(1) Registry — external, solved.** `public.ecr.aws` rate-limits
+GitHub-hosted runners' shared egress IPs (`toomanyrequests: Rate
+exceeded`), sustained across three retries hours apart.
+`SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io` redirects the pulls to
+Docker Hub, which hosts the same images. Verified: the log now shows
+`docker.io/supabase/*` and zero rate-limit errors. **No credentials
+required** — the alternative remediations (authenticated ECR Public
+pulls, a registry mirror, a self-hosted runner) all needed owner action
+and are not needed.
+
+**(2) Dataset ordering — the real reason it never worked.** The registry
+limit was masking it. `supabase start` replays all 63 migrations in one
+pass, and `20260827110000` (**protected**) asserts a DRAFT dataset of
+12,540 rows already exists. That data comes from the Python pipeline,
+which needs a running database, which only exists after migrations. On a
+fresh database the ordering is circular. `supabase start` also **tears
+the stack down** when a migration fails, so it cannot be sequenced by
+letting the first pass fail.
+
+Resolved by deterministic deferral: apply only the two migrations that
+create the regulatory tables, regenerate the canonical dataset from the
+**committed** workbook, load it, then apply the remaining 61. Nothing is
+fabricated and no migration content is edited — only the order in which
+the CLI is handed them.
+
+**(3) Storage — a verification gap closed as a side effect.**
+`config.toml` ships `[storage] enabled = false` for a machine-specific
+reason on the developer host, so `storage.buckets` never exists and four
+storage-touching migrations were marked applied via `supabase migration
+repair`, leaving their policies "shim-verified only" (§16.1/S7). CI
+enables Storage, so **those four migrations now apply for real and the
+evidence-storage RLS is genuinely exercised**. The committed default is
+untouched.
+
+### 64.3 What this immediately caught
+
+Enabling Storage made `producer-journey.spec.ts` fail: it asserted the
+evidence upload **fails**, encoding the developer host's limitation as
+the expected result. With real Storage the upload succeeds.
+
+Fixed by branching on a **live probe** of the storage endpoint, so each
+environment asserts its own real outcome. The success branch is new
+coverage — including that the Verify gate **releases** once evidence is
+attached, which matters as much as asserting it blocks: a gate that
+never opens is indistinguishable from a broken control.
+
+A hard assertion of exactly 12,540 ACTIVE regulatory rows runs before
+any test, so the suites can never execute against partial regulatory
+data and pass quietly.
+
+**No test was skipped, weakened or replaced at any point.**
+
+### 64.4 Residual limitation, precisely stated
+
+The underlying defect is **not** fixed: the migration set is not
+self-sufficient on a fresh database, because a protected migration
+depends on out-of-band data loading. CI now sequences around it. A real
+fix is a protected-zone change (either the activation migration
+tolerating an absent dataset, or a migration loading it) and needs an
+owner decision.
+
+Also unproven: whether Storage would come up on the developer host. The
+committed default remains `false` there.
+
+### 64.5 One self-inflicted error, disclosed
+
+Commit `df3f0bc` embedded a nested heredoc whose `\1` backreference was
+written into `ci.yml` as a literal control character (0x01), making the
+workflow invalid YAML, and it was pushed. Caught by my own validator
+immediately after and corrected in `9c05df4`. Recorded rather than
+amended away.
