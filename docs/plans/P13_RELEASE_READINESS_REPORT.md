@@ -4564,3 +4564,94 @@ should be part of the standing release evidence, not a one-off.
 
 **SMTP: delivery PASS, consumption still NOT VERIFIED**, and now blocked
 on Auth URL Configuration rather than on sending.
+
+---
+
+## 63. SMTP — PASS. Delivered AND consumed, both email types (2026-09-02)
+
+After three configuration corrections — SMTP **username** (§60),
+`APP_URL` scheme (§61.3), and Auth **Site URL + Redirect URLs** (§62) —
+the full email path works and has been exercised end to end.
+
+### 63.1 Confirmation email
+
+```
+signup                -> HTTP 200
+Resend  12:45:27      "Confirm your email address"
+                       to delivered+cbam-confirm@resend.dev   event=DELIVERED
+link                   type=signup
+                       redirect_to=https://snowkap-cbam-production.up.railway.app
+consumed              -> HTTP 303 See Other
+                       Location: https://snowkap-cbam-production.up.railway.app
+                                 #access_token=<redacted>&refresh_token=<redacted>&type=signup
+account               email_confirmed_at = 2026-09-02 12:45:49
+                      last_sign_in_at    = 2026-09-02 12:45:49
+```
+
+### 63.2 Password-reset email
+
+```
+recover               -> HTTP 200
+Resend  12:42:10      "Reset your password"   event=DELIVERED
+link                   type=recovery
+                       redirect_to=https://snowkap-cbam-production.up.railway.app
+                                   /auth/callback?next=/reset-password
+consumed              -> HTTP 303 See Other, tokens issued, type=recovery
+account               email_confirmed_at = 2026-09-02 12:42:44
+                      last_sign_in_at    = 2026-09-02 12:42:44
+```
+
+### 63.3 Why this satisfies "delivered AND consumed"
+
+Not inferred from a 200. Each step is independently evidenced:
+
+- **Delivered** — Resend's own `last_event=delivered`, not merely `sent`.
+- **Link correct** — the `redirect_to` was read out of the *delivered
+  message body*, and points at production, not `localhost`.
+- **Consumed** — following the link returns `303` with real
+  `access_token`/`refresh_token`, i.e. the single-use token was spent and
+  a session issued.
+- **Effect on the account** — `email_confirmed_at` and `last_sign_in_at`
+  moved in the database at exactly the consumption timestamps. This is
+  the part a 200 cannot fake.
+
+A second consumption of an already-used token correctly returned
+`otp_expired`, confirming single-use semantics.
+
+### 63.4 Configuration of record (all verified working)
+
+| Setting | Value |
+|---|---|
+| Host | `smtp.resend.com` |
+| Port | `587` |
+| Username | `resend` (literal) |
+| Sender | `noreply@snowkap.co.in` |
+| Auth email rate limit | 30/h |
+| Site URL | `https://snowkap-cbam-production.up.railway.app` |
+| Redirect URLs | admits the production origin |
+| `APP_URL` (Railway) | `https://snowkap-cbam-production.up.railway.app` |
+| `/api/health` | `status: ok`, `app_url: ok` |
+
+### 63.5 Scope of this result, stated precisely
+
+**Verified:** the production email path — Supabase Auth → Resend →
+delivery → link → token consumption → session — works for both
+confirmation and recovery.
+
+**Not covered by this evidence:** rendering and click-through in a real
+consumer mail client (Gmail/Outlook), and deliverability to an ordinary
+inbox rather than Resend's sink. Those are properties of the recipient
+side, not of this system, and remain the owner's real-user check (§46)
+— which is now unblocked.
+
+### 63.6 Test artifacts
+
+Two accounts created, both at Resend's sink, no organization, no
+membership, no product data:
+
+- `delivered@resend.dev` — confirmed
+- `delivered+cbam-confirm@resend.dev` — confirmed
+
+Disclosed rather than left silent; deletable at any time.
+
+**SMTP: PASS.**
