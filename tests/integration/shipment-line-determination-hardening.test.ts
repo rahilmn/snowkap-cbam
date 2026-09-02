@@ -2554,5 +2554,194 @@ describe.skipIf(!localSupabaseReachable)(
         );
       },
     );
+
+    // ------------------------------------------------------------
+    // v9 (20260902090000) -- route binding and UNLISTED semantics.
+    // See docs/regulatory/DETERMINATION_VALIDATOR_SEMANTICS_DECISION_MEMO.md
+    // ------------------------------------------------------------
+
+    interface RouteSpecificFixture {
+      cnCode: string;
+      originIso2: string;
+      routeIndicator: string;
+      determination: Record<string, unknown>;
+    }
+
+    async function loadUniqueRouteSpecificRecord(): Promise<RouteSpecificFixture | null> {
+      // A record that is route-SPECIFIC and is the ONLY usable
+      // (AVAILABLE) record for its (country, trade code) -- i.e. exactly
+      // what the resolver legitimately selects for a route-blank line,
+      // and exactly what v6..v8 rejected.
+      const { data } =
+        await serviceClient
+          .from("default_emission_values")
+          .select(
+            "dataset_id, source_sheet, source_row, source_trade_code, emission_unit, direct_value, direct_status, indirect_value, indirect_status, total_value, total_status, countries!inner(name, iso2), production_routes!inner(source_route_indicator), regulatory_datasets!inner(version, status)",
+          )
+          .eq("regulatory_datasets.status", "ACTIVE")
+          .eq("total_status", "AVAILABLE")
+          .limit(400);
+
+      for (const row of data ?? []) {
+        const country =
+          row.countries as unknown as { name: string; iso2: string };
+
+        const route =
+          row.production_routes as unknown as { source_route_indicator: string | null };
+
+        if (!route?.source_route_indicator) {
+          continue;
+        }
+
+        const { count } =
+          await serviceClient
+            .from("default_emission_values")
+            .select("id", { count: "exact", head: true })
+            .eq("dataset_id", row.dataset_id)
+            .eq("source_trade_code", row.source_trade_code)
+            .eq("total_status", "AVAILABLE");
+
+        if (count !== 1) {
+          continue;
+        }
+
+        const datasets =
+          row.regulatory_datasets as unknown as { version: string };
+
+        return {
+          cnCode: row.source_trade_code.replace(/\s+/g, ""),
+          originIso2: country.iso2,
+          routeIndicator: route.source_route_indicator,
+          determination:
+            determinationFrom(
+              {
+                dataset_id: row.dataset_id,
+                dataset_version: datasets.version,
+                source_sheet: row.source_sheet,
+                source_row: row.source_row,
+                source_trade_code: row.source_trade_code,
+                origin_country_name: country.name,
+                origin_country_iso2: country.iso2,
+                source_production_route_code: route.source_route_indicator,
+                emission_unit: row.emission_unit,
+                direct_value: row.direct_value,
+                direct_status: row.direct_status,
+                indirect_value: row.indirect_value,
+                indirect_status: row.indirect_status,
+                total_value: row.total_value,
+                total_status: row.total_status,
+              } as RealRecord,
+            ),
+        };
+      }
+
+      return null;
+    }
+
+    it(
+      "accepts a UNIQUE route-specific record on a line that declares NO route -- the resolver legitimately selects it (B1)",
+      async () => {
+        const fixture =
+          await loadUniqueRouteSpecificRecord();
+
+        if (!fixture) {
+          throw new Error(
+            "No unique route-specific AVAILABLE record found in the ACTIVE dataset -- fixture assumption broken.",
+          );
+        }
+
+        // v6..v8 rejected this by string-comparing the record's route
+        // against the line's declared route. The resolver's own rule
+        // (resolve-default-value.ts usableExact) admits a route-specific
+        // record when no route is requested, provided it is unique --
+        // and R10 makes uniqueness, not route equality, the safeguard.
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .insert(
+              {
+                shipment_id: shipmentId,
+                org_id: importerOrgId,
+                line_number: Math.floor(Math.random() * 1_000_000),
+                cn_code: fixture.cnCode,
+                cn_code_level: fixture.cnCode.length > 8 ? "TARIC10" : "CN8",
+                origin_country: fixture.originIso2,
+                production_route_indicator: null,
+                net_mass_tonnes: "10",
+                emission_determination: fixture.determination,
+              },
+            );
+
+        expect(error).toBeNull();
+      },
+    );
+
+    it(
+      "still REJECTS a route-specific record when the line declares a DIFFERENT route -- v6's protection is retained",
+      async () => {
+        const fixture =
+          await loadUniqueRouteSpecificRecord();
+
+        if (!fixture) {
+          throw new Error(
+            "No unique route-specific AVAILABLE record found in the ACTIVE dataset -- fixture assumption broken.",
+          );
+        }
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .insert(
+              {
+                shipment_id: shipmentId,
+                org_id: importerOrgId,
+                line_number: Math.floor(Math.random() * 1_000_000),
+                cn_code: fixture.cnCode,
+                cn_code_level: fixture.cnCode.length > 8 ? "TARIC10" : "CN8",
+                origin_country: fixture.originIso2,
+                // A route the record does not belong to.
+                production_route_indicator:
+                  fixture.routeIndicator === "(A)" ? "(B)" : "(A)",
+                net_mass_tonnes: "10",
+                emission_determination: fixture.determination,
+              },
+            );
+
+        expect(error).not.toBeNull();
+      },
+    );
+
+    it(
+      "REJECTS a LISTED country claiming country_mapping UNLISTED -- a check that did not exist before v9 (B2)",
+      async () => {
+        const forged =
+          JSON.parse(
+            JSON.stringify(
+              determinationFrom(recordA),
+            ),
+          ) as { resolution: Record<string, unknown> };
+
+        forged.resolution.country_mapping =
+          { status: "UNLISTED" };
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .insert(
+              {
+                shipment_id: shipmentId,
+                org_id: importerOrgId,
+                line_number: Math.floor(Math.random() * 1_000_000),
+                cn_code: recordA.source_trade_code.replace(/\s+/g, ""),
+                cn_code_level: "CN8",
+                origin_country: recordA.origin_country_iso2,
+                net_mass_tonnes: "10",
+                emission_determination: forged,
+              },
+            );
+
+        expect(error).not.toBeNull();
+      },
+    );
   },
 );
