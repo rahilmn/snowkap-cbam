@@ -217,6 +217,68 @@ describe(
     );
 
     it(
+      "rejects a name of nothing but whitespace, rather than storing it (P14, F9)",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        const result =
+          await createOperatorAction(
+            { status: "idle" },
+            formData(
+              { name: "   ", country: "DE" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Enter an operator name.",
+          },
+        );
+
+        expect(createOperatorMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "strips surrounding whitespace from a name before it is stored (P14, F9)",
+      async () => {
+        // Production carries "ABC test plant " with a trailing space
+        // today. It then appears with that space in every picker label,
+        // every export, and every frozen provenance reference -- a
+        // difference no human can see and every string comparison can.
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        createOperatorMock.mockResolvedValueOnce(
+          { status: "OK", operator: {} },
+        );
+
+        await createOperatorAction(
+          { status: "idle" },
+          formData(
+            { name: "  Acme Steelworks  ", country: "DE" },
+          ),
+        );
+
+        expect(createOperatorMock).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          expect.objectContaining(
+            { name: "Acme Steelworks" },
+          ),
+        );
+      },
+    );
+
+    it(
       "returns the schema's name message when name is empty",
       async () => {
         checkMock.mockReturnValueOnce(

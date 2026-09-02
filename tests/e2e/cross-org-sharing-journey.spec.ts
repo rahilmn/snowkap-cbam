@@ -765,21 +765,28 @@ test.describe(
                 producerPage.getByText("REVOKED", { exact: true }),
               ).toBeVisible();
 
-              // resolveGranteeLabel (list-shared-data-status.ts): once
-              // status !== 'ACTIVE', the P7-D4 RLS policy
-              // (organizations_select_via_own_issued_sharing_grant, gated
-              // to status = 'ACTIVE') no longer admits resolving the
-              // grantee org's name -- but invited_email is still set on
-              // this bootstrap grant (never cleared by REVOKE, per
-              // transitionSharingGrant's own pure, additive branch), so
-              // the label falls back to "Pending invite: {email}", not a
-              // deleted or blanked row. Proven live here, not assumed
-              // from either the RLS migration's comment (which predicted
-              // "Unknown organization") or the page's own doc comment --
-              // this codebase's actual resolveGranteeLabel function is
-              // the source of truth this assertion was derived from.
+              // 2026-09-03 (P14). This assertion previously expected
+              // the label to DEGRADE after revocation, to
+              // "Pending invite: {email}" -- the grantee org's name
+              // could no longer be resolved once the grant left ACTIVE,
+              // because the naming function was gated on a live grant.
+              //
+              // Migration 20260902150000 changed that deliberately: a
+              // grant that was genuinely ACCEPTED keeps naming the
+              // organization that accepted it, for any status. A frozen
+              // determination outlives the grant it was read through,
+              // and a figure an importer has already declared has to
+              // stay attributable to whoever supplied it -- losing the
+              // name at exactly the moment the relationship ends is the
+              // opposite of what an audit trail is for.
+              //
+              // The email stays in the label too, because this grant was
+              // issued to an address rather than to a known org, and
+              // that is part of how it came about.
               await expect(
-                producerPage.getByText(`Shared with Pending invite: ${importerEmail}`),
+                producerPage.getByText(
+                  `Shared with ${importerOrgName} (accepted via invite to ${importerEmail})`,
+                ),
               ).toBeVisible();
 
               // No consumption ever happened (see this file's own

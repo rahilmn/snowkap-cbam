@@ -767,6 +767,14 @@ describe(
           { allowed: true, retryAfterMs: 0 },
         );
 
+        // 2026-09-03 (P14, F5): the action resolves an OrgContext now,
+        // so revokeInvitation can check the caller's role, pin the write
+        // to the ACTIVE organization, and attribute the audit event it
+        // writes.
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1", user_id: "u-1", role: "ADMIN" } },
+        );
+
         revokeInvitationMock.mockResolvedValueOnce(
           { status: "PERSIST_FAILED" },
         );
@@ -791,10 +799,50 @@ describe(
     );
 
     it(
+      "tells a MEMBER who can revoke, rather than showing a generic failure (P14, F5)",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1", user_id: "u-1", role: "ADMIN" } },
+        );
+
+        revokeInvitationMock.mockResolvedValueOnce(
+          { status: "PERMISSION_DENIED" },
+        );
+
+        const result =
+          await revokeInvitationAction(
+            { status: "idle" },
+            formData(
+              { invitationId: "invitation-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Only an ADMIN or OWNER can revoke an invitation.",
+          },
+        );
+      },
+    );
+
+    it(
       "calls revokeInvitation and returns idle when it succeeds",
       async () => {
         checkMock.mockReturnValueOnce(
           { allowed: true, retryAfterMs: 0 },
+        );
+
+        // 2026-09-03 (P14, F5): the action resolves an OrgContext now,
+        // so revokeInvitation can check the caller's role, pin the write
+        // to the ACTIVE organization, and attribute the audit event it
+        // writes.
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1", user_id: "u-1", role: "ADMIN" } },
         );
 
         revokeInvitationMock.mockResolvedValueOnce(

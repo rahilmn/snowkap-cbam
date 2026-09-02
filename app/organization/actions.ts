@@ -55,7 +55,13 @@ const updateOrganizationLimiter =
 const updateOrganizationSchema =
   z.object({
     name:
-      z.string().min(1, "Enter an organization name."),
+            // 2026-09-03 (P14, F9). .trim() BEFORE .min(1), so a name of
+      // nothing but spaces is rejected rather than stored. Production
+      // carries "ABC test plant " with a trailing space today, which
+      // then appears with it in every picker label, every export and
+      // every frozen provenance reference -- a difference no human can
+      // see and every string comparison can.
+      z.string().trim().min(1, "Enter an organization name."),
 
     eoriNumber:
       z.string().optional(),

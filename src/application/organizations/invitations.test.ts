@@ -19,6 +19,25 @@ const orgId =
 const invitationId =
   "inv-1" as never;
 
+// 2026-09-03 (P14, F5). revokeInvitation now takes an OrgContext: it
+// checks the caller's role, pins the write to the ACTIVE organization,
+// and attributes the audit event it writes.
+const adminContext =
+  {
+    org_id: "org-1",
+    user_id: "u-1",
+    role: "ADMIN",
+    capabilities: ["IMPORTER_DECLARANT"],
+  } as never;
+
+const memberContext =
+  {
+    org_id: "org-1",
+    user_id: "u-2",
+    role: "MEMBER",
+    capabilities: ["IMPORTER_DECLARANT"],
+  } as never;
+
 function mockUserScopedSupabase(
   {
     insertResult,
@@ -59,25 +78,38 @@ function mockUserScopedSupabase(
           }
         ),
 
+        // 2026-09-03 (P14, F5): three .eq() calls now -- id, org_id and
+        // status -- because the update is pinned to the ACTIVE
+        // organization as well as to the row.
         update: () => (
           {
             eq: () => (
               {
                 eq: () => (
                   {
-                    select: () =>
-                      Promise.resolve(
-                        {
-                          data:
-                            updateError
-                              ? null
-                              : Array.from(
-                                  { length: updateRowsAffected },
-                                  () => ({ id: "row" }),
-                                ),
-                          error: updateError,
-                        },
-                      ),
+                    eq: () => (
+                      {
+                        select: () =>
+                          Promise.resolve(
+                            {
+                              data:
+                                updateError
+                                  ? null
+                                  : Array.from(
+                                      { length: updateRowsAffected },
+                                      () => (
+                                        {
+                                          id: "row",
+                                          email: "invitee@example.com",
+                                          role: "MEMBER",
+                                        }
+                                      ),
+                                    ),
+                              error: updateError,
+                            },
+                          ),
+                      }
+                    ),
                   }
                 ),
               }
@@ -294,6 +326,7 @@ describe(
             mockUserScopedSupabase(
               { updateError: null },
             ),
+            adminContext,
             invitationId,
           );
 
@@ -311,11 +344,35 @@ describe(
             mockUserScopedSupabase(
               { updateError: { message: "denied" } },
             ),
+            adminContext,
             invitationId,
           );
 
         expect(result).toEqual(
           { status: "PERSIST_FAILED" },
+        );
+      },
+    );
+
+    it(
+      "refuses a MEMBER outright, rather than reporting a generic failure (P14, F5)",
+      async () => {
+        // RLS already blocked this, so it was never a security hole --
+        // but a MEMBER got PERSIST_FAILED, which the UI renders as
+        // "something went wrong. Please try again." for a refusal that
+        // will never succeed on retry. Naming it lets the screen say
+        // who actually can.
+        const result =
+          await revokeInvitation(
+            mockUserScopedSupabase(
+              { updateError: null },
+            ),
+            memberContext,
+            invitationId,
+          );
+
+        expect(result).toEqual(
+          { status: "PERMISSION_DENIED" },
         );
       },
     );
@@ -331,6 +388,7 @@ describe(
             mockUserScopedSupabase(
               { updateError: null, updateRowsAffected: 0 },
             ),
+            adminContext,
             invitationId,
           );
 

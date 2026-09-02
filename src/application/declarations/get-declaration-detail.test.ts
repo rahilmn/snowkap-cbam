@@ -45,6 +45,9 @@ const shipmentSummaryRow =
  */
 function makeMockSupabase(
   tables: Record<string, { data: unknown; error: unknown } | { data: unknown; error: unknown }[]>,
+  // 2026-09-03 (P14): every `.in()` filter, in order, so the member
+  // batching can be asserted rather than inferred from a row count.
+  inFilters: { table: string; values: unknown }[] = [],
 ) {
   const cursors: Record<string, number> =
     {};
@@ -79,7 +82,10 @@ function makeMockSupabase(
       select: () => chain,
       eq: () => chain,
       neq: () => chain,
-      in: () => chain,
+      in: (_column: string, values: unknown) => {
+        inFilters.push({ table, values });
+        return chain;
+      },
       maybeSingle: () =>
         Promise.resolve(
           nextResult(table),
@@ -194,6 +200,105 @@ describe(
               },
             ),
             "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result).toBeNull();
+      },
+    );
+
+    it(
+      "batches the member-shipment lookup instead of building one enormous filter (P14)",
+      async () => {
+        /**
+         * PostgREST puts filters in the query string, so a single
+         * unbounded `.in()` over every member id builds a URL the
+         * gateway eventually refuses. This was that query, and its
+         * `error` was never destructured either -- see the failure case
+         * below for what that produced.
+         */
+        const memberIds =
+          Array.from(
+            { length: 250 },
+            (_unused, index) => `ship-${index}`,
+          );
+
+        const inFilters: { table: string; values: unknown }[] =
+          [];
+
+        await getDeclarationDetail(
+          makeMockSupabase(
+            {
+              declarations: [
+                {
+                  data: declarationRow(
+                    { member_shipment_ids: memberIds },
+                  ),
+                  error: null,
+                },
+                { data: null, error: null },
+                { data: null, error: null },
+              ],
+              shipments: {
+                data: [],
+                error: null,
+              },
+            },
+            inFilters,
+          ),
+          orgId as never,
+          "decl-1" as never,
+        );
+
+        const shipmentBatches =
+          inFilters.filter(
+            (filter) => filter.table === "shipments",
+          );
+
+        // 250 ids at a batch size of 200: two calls, 200 then 50 --
+        // never one call with 250.
+        expect(
+          shipmentBatches.map(
+            (batch) => (batch.values as unknown[]).length,
+          ),
+        ).toEqual(
+          [200, 50],
+        );
+      },
+    );
+
+    it(
+      "returns null, never a short member list, when a member batch fails (P14)",
+      async () => {
+        /**
+         * The defect this closes, and the more important half.
+         *
+         * The query's `error` was never destructured and its result went
+         * through `?? []`. So a refused request produced an EMPTY member
+         * list, and a FILED_RECORDED declaration rendered "No member
+         * shipments yet." on its own provenance screen -- the one page
+         * whose entire job is to show what was filed.
+         *
+         * A partial or empty membership list is worse than no page,
+         * because it reads as complete. Failing closed is the only
+         * honest option for a compliance record.
+         */
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  { data: declarationRow(), error: null },
+                  { data: null, error: null },
+                  { data: null, error: null },
+                ],
+                shipments: {
+                  data: null,
+                  error: { message: "URI too long" },
+                },
+              },
+            ),
+            orgId as never,
             "decl-1" as never,
           );
 

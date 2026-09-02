@@ -316,6 +316,19 @@ const resolveEmissionsLimiter =
     LINE_MUTATION_RATE_LIMIT,
   );
 
+// 2026-09-03 (P14, F6). This action was the only one in this file
+// without a limiter, and it is the most expensive thing here: it
+// re-runs the whole engine and, for an ACTUAL determination, re-derives
+// the good's sector through the regulatory repository -- several reads
+// per call, all of them uncached. An unlimited loop over it is a
+// self-inflicted denial of service against the org's own dashboard, and
+// there is no legitimate reason to ask the same question thirty times
+// in ten minutes.
+const verifyReproducibilityLimiter =
+  createInMemoryRateLimiter(
+    LINE_MUTATION_RATE_LIMIT,
+  );
+
 const determineFromActualDataLimiter =
   createInMemoryRateLimiter(
     LINE_MUTATION_RATE_LIMIT,
@@ -1154,6 +1167,27 @@ export async function verifyCalculationReproducibilityAction(
   _previousState: ReproductionActionState,
   formData: FormData,
 ): Promise<ReproductionActionState> {
+  // Checked FIRST, before any parsing or I/O -- same ordering every
+  // sibling action in this file uses, so a rejected request costs
+  // nothing.
+  const rateLimitResult =
+    verifyReproducibilityLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    const retryAfterSeconds =
+      Math.ceil(rateLimitResult.retryAfterMs / 1000);
+
+    return {
+      status: "error",
+      message:
+        `Too many attempts. Try again in ${retryAfterSeconds} ` +
+        `${retryAfterSeconds === 1 ? "second" : "seconds"}.`,
+    };
+  }
+
   const parsed =
     verifyCalculationReproducibilitySchema.safeParse(
       {

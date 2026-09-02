@@ -725,11 +725,36 @@ export async function revokeInvitationAction(
   const supabase =
     await getServerSupabaseClient();
 
+  // 2026-09-03 (P14, F5): revoking now takes an OrgContext, so it can
+  // check the caller's role, pin the write to the ACTIVE organization
+  // rather than any org RLS would admit, and attribute the audit event
+  // it now writes.
+  const orgSummary =
+    await getCurrentOrgSummary(
+      supabase,
+      await getPreferredOrgId(),
+    );
+
+  if (!orgSummary) {
+    return {
+      status: "error",
+      message: "You are not a member of an organization.",
+    };
+  }
+
   const result =
     await revokeInvitation(
       supabase,
+      orgSummary.context,
       parsed.data.invitationId as never,
     );
+
+  if (result.status === "PERMISSION_DENIED") {
+    return {
+      status: "error",
+      message: "Only an ADMIN or OWNER can revoke an invitation.",
+    };
+  }
 
   if (result.status === "PERSIST_FAILED") {
     return {

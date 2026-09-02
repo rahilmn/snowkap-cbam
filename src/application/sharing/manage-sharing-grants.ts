@@ -394,7 +394,14 @@ export type SharingGrantActionResult =
         | "NOT_FOUND"
         | "FETCH_FAILED"
         | "PERSIST_FAILED"
-        | "PERMISSION_DENIED";
+        | "PERMISSION_DENIED"
+        // 2026-09-03 (P14, F7): symmetry with issueSharingGrant's own
+        // capability gate. Unreachable in practice -- an org that does
+        // not hold PRODUCER_OPERATOR can never be a grantor -- but the
+        // authorization matrix for the pair now reads the same, so a
+        // future change to how grantors come about cannot leave one
+        // half ungated.
+        | "CAPABILITY_NOT_HELD";
     };
 
 /**
@@ -536,6 +543,23 @@ export async function revokeSharingGrant(
     return {
       status: "REJECTED",
       reason: "PERMISSION_DENIED",
+    };
+  }
+
+  // 2026-09-03 (P14, F7). Symmetry with issueSharingGrant, which has
+  // carried this check since it was written.
+  //
+  // Classified honestly as a follow-up rather than a security fix: the
+  // grantor_org_id comparison below already makes this unreachable, since
+  // an organization that does not hold PRODUCER_OPERATOR can never be a
+  // grantor in the first place. What it buys is that the authorization
+  // matrix for this function reads the same as its sibling's, so a
+  // future change to how grantors come about cannot silently leave one
+  // of the pair ungated.
+  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+    return {
+      status: "REJECTED",
+      reason: "CAPABILITY_NOT_HELD",
     };
   }
 

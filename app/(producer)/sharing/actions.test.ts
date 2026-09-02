@@ -558,8 +558,14 @@ describe(
     );
 
     it(
-      "returns the generic error message when revokeSharingGrant rejects",
+      "tells a MEMBER who can revoke, rather than showing a generic failure (P14, F7)",
       async () => {
+        // 2026-09-03. This asserted the generic
+        // "Something went wrong. Please try again." for
+        // PERMISSION_DENIED -- which sends a MEMBER round the retry loop
+        // for a refusal that will never succeed. The assertion is
+        // retargeted, not weakened: the generic message still covers
+        // every reason that genuinely is unexpected, asserted below.
         checkMock.mockReturnValueOnce(
           { allowed: true, retryAfterMs: 0 },
         );
@@ -570,6 +576,38 @@ describe(
 
         revokeSharingGrantMock.mockResolvedValueOnce(
           { status: "REJECTED", reason: "PERMISSION_DENIED" },
+        );
+
+        const result =
+          await revokeSharingGrantAction(
+            { status: "idle" },
+            formData(
+              { grantId: "grant-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "Only an ADMIN or OWNER can revoke a sharing grant.",
+          },
+        );
+      },
+    );
+
+    it(
+      "still falls back to the generic message for a genuinely unexpected rejection",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "org-1" } },
+        );
+
+        revokeSharingGrantMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "PERSIST_FAILED" },
         );
 
         const result =

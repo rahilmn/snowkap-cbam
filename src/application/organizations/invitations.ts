@@ -13,6 +13,15 @@ import type {
   OrganizationId,
 } from "../../domain/shared/ids";
 
+import {
+  hasAdminAccess,
+  type OrgContext,
+} from "./org-context";
+
+import {
+  recordAuditEvent,
+} from "../audit/record-audit-event";
+
 export type InviteMemberResult =
   | { status: "OK"; invitationId: InvitationId }
   | { status: "OK_MAGIC_LINK_SENT"; invitationId: InvitationId }
@@ -106,6 +115,47 @@ export async function inviteMember(
   const invitationId =
     inserted.id as InvitationId;
 
+  // 2026-09-03 (P14, F5). Inviting is the ONLY way into an
+  // organization, and an invitation carries a ROLE -- an ADMIN
+  // invitation grants administrative access to everything the
+  // organization can see, including producers' shared emissions data.
+  //
+  // The audit trail recorded membership.role_changed, .deactivated,
+  // .reactivated and .removed -- every change to a membership that
+  // already existed -- and nothing about how one came to exist. It
+  // could be read end to end without ever showing how an administrator
+  // became one.
+  //
+  // Written before the email is attempted, and deliberately not
+  // conditional on it: the invitation ROW exists at this point and can
+  // be accepted, whether or not any mail is ever delivered. An audit
+  // event that appeared only when SMTP happened to work would be worse
+  // than none, because its absence would mean nothing.
+  //
+  // The actor is read from the session rather than passed in, matching
+  // this function's existing signature, which takes no OrgContext (RLS
+  // on the insert above is what proves the caller is an admin).
+  const {
+    data: { user: actor },
+  } = await userScopedSupabase.auth.getUser();
+
+  if (actor) {
+    await recordAuditEvent(
+      userScopedSupabase,
+      {
+        orgId: params.orgId,
+        actorUserId: actor.id as never,
+        eventType: "membership.invitation_created",
+        aggregateType: "MEMBERSHIP",
+        aggregateId: invitationId as never,
+        payload: {
+          invited_email: normalizedEmail,
+          invited_role: params.role,
+        },
+      },
+    );
+  }
+
   const { error: sendError } =
     await adminSupabase.auth.admin.inviteUserByEmail(
       normalizedEmail,
@@ -174,6 +224,10 @@ export async function inviteMember(
 
 export type RevokeInvitationResult =
   | { status: "OK" }
+  // 2026-09-03 (P14, F5). A MEMBER attempting to revoke used to get
+  // PERSIST_FAILED -- "something went wrong" for a refusal that will
+  // never succeed on retry. Named so the UI can say who CAN do it.
+  | { status: "PERMISSION_DENIED" }
   | { status: "PERSIST_FAILED" };
 
 /**
@@ -196,8 +250,24 @@ export type RevokeInvitationResult =
  */
 export async function revokeInvitation(
   supabase: SupabaseClient,
+  context: OrgContext,
   invitationId: InvitationId,
 ): Promise<RevokeInvitationResult> {
+  // 2026-09-03 (P14, F5). Three things this function did not do.
+  //
+  // It took no OrgContext, so it could not check the caller's role
+  // (RLS did, which is why this was never a security hole) and could
+  // not attribute an audit event. It was not pinned to an organization,
+  // so it relied entirely on RLS to scope the write. And it wrote no
+  // audit event at all: revoking an invitation -- withdrawing a grant
+  // of access to an organization, possibly at ADMIN role -- left no
+  // trace of who did it or when.
+  if (!hasAdminAccess(context)) {
+    return {
+      status: "PERMISSION_DENIED",
+    };
+  }
+
   const { data: updated, error } =
     await supabase
       .from("organization_invitations")
@@ -208,17 +278,50 @@ export async function revokeInvitation(
         "id",
         invitationId,
       )
+      // Pinned to the ACTIVE organization, not merely to one the caller
+      // belongs to. RLS admits any org the user is an admin of; this
+      // makes the write mean what the screen the user is looking at
+      // says it means.
+      .eq(
+        "org_id",
+        context.org_id,
+      )
       .eq(
         "status",
         "PENDING",
       )
-      .select("id");
+      // Read back, because PostgREST reports no error for an UPDATE
+      // that RLS or the status filter matched to zero rows -- without
+      // this, a write that never happened returned OK.
+      .select("id, email, role");
 
   if (error || !updated || updated.length === 0) {
     return {
       status: "PERSIST_FAILED",
     };
   }
+
+  const revoked =
+    updated[0] as { id: string; email: string; role: string };
+
+  await recordAuditEvent(
+    supabase,
+    {
+      orgId: context.org_id,
+      actorUserId: context.user_id,
+      eventType: "membership.invitation_revoked",
+      // MEMBERSHIP with the INVITATION's id, exactly as
+      // accept_organization_invitation already does, so the whole
+      // invite -> accept -> role-change -> remove story stays one
+      // queryable aggregate type.
+      aggregateType: "MEMBERSHIP",
+      aggregateId: revoked.id as never,
+      payload: {
+        invited_email: revoked.email,
+        invited_role: revoked.role,
+      },
+    },
+  );
 
   return {
     status: "OK",

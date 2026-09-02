@@ -257,9 +257,19 @@ export async function revokeSharingGrantAction(
     );
 
   if (result.status === "REJECTED") {
+    // 2026-09-03 (P14, F7): the two authorization refusals get their own
+    // wording. "Something went wrong. Please try again." is actively
+    // misleading for a refusal that will never succeed on retry -- it
+    // sends a MEMBER round the loop instead of telling them to ask an
+    // administrator.
     return {
       status: "error",
-      message: "Something went wrong. Please try again.",
+      message:
+        result.reason === "PERMISSION_DENIED"
+          ? "Only an ADMIN or OWNER can revoke a sharing grant."
+          : result.reason === "CAPABILITY_NOT_HELD"
+            ? "Your organization is not set up as a CBAM producer/operator."
+            : "Something went wrong. Please try again.",
     };
   }
 

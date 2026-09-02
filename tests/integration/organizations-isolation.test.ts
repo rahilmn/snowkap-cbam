@@ -2713,5 +2713,81 @@ describe.skipIf(!localSupabaseReachable)(
         );
       },
     );
+
+    describe(
+      "invitation audit events (P14, F5)",
+      () => {
+        /**
+         * Inviting is the only way into an organization, and an
+         * invitation carries a ROLE -- an ADMIN invitation grants
+         * administrative access to everything the organization can see,
+         * including producers' shared emissions data.
+         *
+         * The audit trail recorded every change to a membership that
+         * already existed and nothing about how one came to exist, so it
+         * could be read end to end without ever showing how an
+         * administrator became one. Two new event types close that, and
+         * the audit catalog is an allowlist -- so this proves the
+         * database actually ACCEPTS them, which is the half a unit test
+         * cannot reach.
+         */
+        it(
+          "accepts membership.invitation_created and membership.invitation_revoked",
+          async () => {
+            for (
+              const eventType of [
+                "membership.invitation_created",
+                "membership.invitation_revoked",
+              ]
+            ) {
+              const { error } =
+                await clientA
+                  .from("audit_events")
+                  .insert(
+                    {
+                      org_id: orgAId,
+                      actor_type: "USER",
+                      actor_user_id: userAId,
+                      event_type: eventType,
+                      aggregate_type: "MEMBERSHIP",
+                      aggregate_id: orgAId,
+                      payload: {
+                        invited_email: "invitee@example.com",
+                        invited_role: "MEMBER",
+                      },
+                    },
+                  );
+
+              expect(error).toBeNull();
+            }
+          },
+        );
+
+        it(
+          "still refuses an event type the catalog does not name",
+          async () => {
+            // The other half. A catalog that accepts everything is not a
+            // catalog, and a typo that silently persists is a hole in a
+            // record whose whole value is that it is complete.
+            const { error } =
+              await clientA
+                .from("audit_events")
+                .insert(
+                  {
+                    org_id: orgAId,
+                    actor_type: "USER",
+                    actor_user_id: userAId,
+                    event_type: "membership.invitation_invented",
+                    aggregate_type: "MEMBERSHIP",
+                    aggregate_id: orgAId,
+                    payload: {},
+                  },
+                );
+
+            expect(error).not.toBeNull();
+          },
+        );
+      },
+    );
   },
 );

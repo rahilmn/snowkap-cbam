@@ -81,6 +81,75 @@ interface LineageRow {
  * caller's active org should never be able to confirm a foreign
  * declaration id exists).
  */
+/**
+ * How many shipment ids go into one `.in()` filter.
+ *
+ * PostgREST puts filters in the QUERY STRING, so a large `.in()` builds
+ * a very long URL and the gateway eventually refuses it outright.
+ * Matched to list-period-shipment-lines.ts's own constant, which was
+ * chosen for the same reason on the same shape of query.
+ */
+const MEMBER_ID_BATCH_SIZE =
+  200;
+
+/**
+ * The member shipments of a declaration, batched, with the error
+ * actually checked.
+ *
+ * 2026-09-03 (P14). This was a single unbounded `.in("id", memberIds)`
+ * whose `error` was never destructured, and whose result went through
+ * `?? []`. Past roughly two hundred members the gateway refused the URL,
+ * `data` came back null, the `?? []` turned that into an empty list, and
+ * a FILED_RECORDED declaration rendered "No member shipments yet." on
+ * its own provenance screen -- the one page whose entire job is to show
+ * what was filed.
+ *
+ * Two changes, and the second matters more than the first: the query is
+ * batched so the URL stays reasonable, and a failure returns null so the
+ * caller can refuse to render rather than quietly showing a short list.
+ * Silence about a fetch failure on a compliance record is the defect;
+ * the length limit was only what made it visible.
+ */
+async function fetchMemberShipments(
+  supabase: SupabaseClient,
+  memberIds: readonly string[],
+): Promise<ShipmentSummaryRow[] | null> {
+  if (memberIds.length === 0) {
+    return [];
+  }
+
+  const rows: ShipmentSummaryRow[] =
+    [];
+
+  for (
+    let offset = 0;
+    offset < memberIds.length;
+    offset += MEMBER_ID_BATCH_SIZE
+  ) {
+    const batch =
+      memberIds.slice(
+        offset,
+        offset + MEMBER_ID_BATCH_SIZE,
+      );
+
+    const { data, error } =
+      await supabase
+        .from("shipments")
+        .select("id, reference, status")
+        .in("id", batch);
+
+    if (error || !data) {
+      return null;
+    }
+
+    rows.push(
+      ...(data as ShipmentSummaryRow[]),
+    );
+  }
+
+  return rows;
+}
+
 export async function getDeclarationDetail(
   supabase: SupabaseClient,
   orgId: OrganizationId,
@@ -112,20 +181,16 @@ export async function getDeclarationDetail(
     declaration.member_shipment_ids;
 
   const [
-    { data: shipmentRows },
+    memberShipmentRows,
     { data: predecessorRow },
     { data: successorRow },
   ] =
     await Promise.all(
       [
-        memberIds.length > 0
-          ? supabase
-              .from("shipments")
-              .select("id, reference, status")
-              .in("id", memberIds)
-          : Promise.resolve(
-              { data: [] as ShipmentSummaryRow[] },
-            ),
+        fetchMemberShipments(
+          supabase,
+          memberIds,
+        ),
 
         declaration.supersedes_declaration_id
           ? supabase
@@ -146,8 +211,15 @@ export async function getDeclarationDetail(
       ],
     );
 
+  // Fail CLOSED. A declaration is a compliance record and its own
+  // membership is the substance of it -- a partial list is worse than
+  // no page at all, because it reads as complete.
+  if (memberShipmentRows === null) {
+    return null;
+  }
+
   const memberShipments: DeclarationMemberShipmentSummary[] =
-    ((shipmentRows ?? []) as ShipmentSummaryRow[])
+    memberShipmentRows
       .map(
         (shipmentRow) => (
           {
