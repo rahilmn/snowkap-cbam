@@ -2,7 +2,13 @@
 // non-"use server" file.
 
 export interface LineActionState {
-  status: "idle" | "error";
+  // "unchanged" (2026-09-03, P14): the action ran, found that doing what
+  // was asked would produce a result materially identical to what the
+  // line already carries, and deliberately did nothing. That is neither
+  // a success worth confirming nor a failure worth alarming about, and
+  // collapsing it into "error" would tell the user something went wrong
+  // when nothing did. It renders neutral.
+  status: "idle" | "unchanged" | "error";
   message?: string;
 
   // Set only alongside status "idle" -- the action itself succeeded

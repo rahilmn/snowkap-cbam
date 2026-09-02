@@ -28,6 +28,10 @@ import {
   cnScopeCoversCnCode,
 } from "../../domain/emissions/cn-scope-covers-code";
 
+import type {
+  CandidateActualDetermination,
+} from "../../domain/emissions/actual-determination-is-unchanged";
+
 import {
   EMISSION_DATA_COLUMNS,
   toEmissionData,
@@ -74,6 +78,34 @@ export interface AvailableActualEmissionDataOption {
   grantor_organization_name: string | null;
 }
 
+/**
+ * What listAvailableActualEmissionData returns: the options a caller may
+ * render, plus the SERVER-ONLY facts needed to decide whether choosing
+ * one would actually change anything.
+ *
+ * The two are separate because they have different audiences.
+ * `options` is the client's; `candidatesById` never leaves the server.
+ * It carries the verifier's user id, and for a SHARED row that is a
+ * member of ANOTHER organization -- an identity this product does not
+ * expose across an org boundary (see the "Why this number?" panel's own
+ * rule about never rendering another org's user identity). It is here
+ * so the no-op decision is made once, on the server, from the same
+ * facts the write path compares; a client-side comparison over the
+ * public option fields would silently disagree with the server about
+ * evidence, verifier and grant.
+ */
+export interface AvailableActualEmissionDataListing {
+  options: AvailableActualEmissionDataOption[];
+  candidatesById: Map<string, CandidateActualDetermination>;
+}
+
+function emptyListing(): AvailableActualEmissionDataListing {
+  return {
+    options: [],
+    candidatesById: new Map(),
+  };
+}
+
 interface InstallationLookupRow {
   id: string;
   name: string;
@@ -81,6 +113,7 @@ interface InstallationLookupRow {
 }
 
 interface SharingGrantLookupRow {
+  id: string;
   installation_id: string;
   expires_at: string | null;
 }
@@ -198,7 +231,7 @@ export async function listAvailableActualEmissionData(
   supabase: SupabaseClient,
   orgId: OrganizationId,
   cnCode: string | null,
-): Promise<AvailableActualEmissionDataOption[]> {
+): Promise<AvailableActualEmissionDataListing> {
   const { data, error } =
     await supabase
       .from("emission_data")
@@ -210,7 +243,7 @@ export async function listAvailableActualEmissionData(
       .order("created_at", { ascending: false });
 
   if (error || !data) {
-    return [];
+    return emptyListing();
   }
 
   const records =
@@ -219,34 +252,51 @@ export async function listAvailableActualEmissionData(
     );
 
   if (records.length === 0) {
-    return [];
+    return emptyListing();
   }
 
+  // `id` as well as the filter columns: a SHARED determination freezes
+  // the grant it was read through (ActualEmissionSnapshot.
+  // sharing_grant_id), and the no-op decision has to compare it -- the
+  // same record read through a RE-ISSUED grant is a genuinely different
+  // provenance and must be redeterminable. At most one ACTIVE grant can
+  // exist per (installation, grantee): the partial unique index
+  // sharing_grants_installation_grantee_active_uq, which
+  // determine-from-actual-data.ts relies on for the same lookup.
   const { data: grantRows, error: grantError } =
     await supabase
       .from("sharing_grants")
       .select(
-        "installation_id, expires_at",
+        "id, installation_id, expires_at",
       )
       .eq("grantee_org_id", orgId)
       .eq("status", "ACTIVE");
 
   if (grantError) {
-    return [];
+    return emptyListing();
   }
 
   const now =
     new Date();
 
+  const liveGrants =
+    ((grantRows ?? []) as SharingGrantLookupRow[])
+      .filter(
+        (grant) => grant.expires_at === null || new Date(grant.expires_at) > now,
+      );
+
   const grantedInstallationIds =
     new Set(
-      ((grantRows ?? []) as SharingGrantLookupRow[])
-        .filter(
-          (grant) => grant.expires_at === null || new Date(grant.expires_at) > now,
-        )
-        .map(
-          (grant) => grant.installation_id,
-        ),
+      liveGrants.map(
+        (grant) => grant.installation_id,
+      ),
+    );
+
+  const grantIdByInstallationId =
+    new Map<string, string>(
+      liveGrants.map(
+        (grant) => [grant.installation_id, grant.id],
+      ),
     );
 
   const scopedRecords =
@@ -255,7 +305,7 @@ export async function listAvailableActualEmissionData(
     );
 
   if (scopedRecords.length === 0) {
-    return [];
+    return emptyListing();
   }
 
   // CN-scope filter: only offer a record whose declared cn_scope actually
@@ -274,7 +324,7 @@ export async function listAvailableActualEmissionData(
         );
 
   if (cnScopedRecords.length === 0) {
-    return [];
+    return emptyListing();
   }
 
   const installationIds =
@@ -293,7 +343,7 @@ export async function listAvailableActualEmissionData(
       .in("id", installationIds);
 
   if (installationError || !installationRows) {
-    return [];
+    return emptyListing();
   }
 
   const installationById =
@@ -354,7 +404,7 @@ export async function listAvailableActualEmissionData(
     // installations) fails the entire picker closed, not just the rows
     // that specific query would have enriched.
     if (organizationError) {
-      return [];
+      return emptyListing();
     }
 
     for (const row of (organizationRows ?? []) as OrganizationNameLookupRow[]) {
@@ -367,6 +417,9 @@ export async function listAvailableActualEmissionData(
 
   const options: AvailableActualEmissionDataOption[] =
     [];
+
+  const candidatesById =
+    new Map<string, CandidateActualDetermination>();
 
   for (const record of cnScopedRecords) {
     const installation =
@@ -389,6 +442,34 @@ export async function listAvailableActualEmissionData(
     const isOwn =
       record.entered_by_org_id === orgId;
 
+    // Only a VERIFIED record with a recorded verifier can be the source
+    // of a determination at all (determine-from-actual-data.ts treats a
+    // VERIFIED row with a null verifier_user_id as a data-integrity
+    // failure, and refuses). A record in that state gets no candidate,
+    // so nothing is ever reported as an unchanged no-op when the write
+    // path would in fact refuse it for a different, more serious
+    // reason.
+    if (record.verifier_user_id) {
+      candidatesById.set(
+        record.id,
+        {
+          emission_data_id: record.id,
+          emission_data_version: record.version,
+          installation_id: record.installation_id,
+          direct_specific: record.direct_specific,
+          indirect_specific: record.indirect_specific,
+          emission_unit: record.emission_unit,
+          methodology: record.methodology,
+          verifier_user_id: record.verifier_user_id,
+          evidence_file_ids: record.evidence_file_ids,
+          sharing_grant_id:
+            isOwn
+              ? null
+              : (grantIdByInstallationId.get(record.installation_id) ?? null) as never,
+        },
+      );
+    }
+
     options.push(
       {
         emission_data_id: record.id,
@@ -409,5 +490,8 @@ export async function listAvailableActualEmissionData(
     );
   }
 
-  return options;
+  return {
+    options,
+    candidatesById,
+  };
 }

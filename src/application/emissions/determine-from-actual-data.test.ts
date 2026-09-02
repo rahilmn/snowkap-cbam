@@ -1194,6 +1194,288 @@ describe(
     );
 
     describe(
+      "nothing would change (P14)",
+      () => {
+        /**
+         * Production carries a redetermination whose previous and new
+         * determinations are byte-identical (grant 942ba281,
+         * 2026-09-02): a real user pressed the button twice and got a
+         * second audit event, a second cross-org consumption record on
+         * the producer's stream, and a recalculation obligation, for no
+         * change at all.
+         *
+         * These fix the shape of the guard, not just its existence --
+         * an id-only guard would pass the first case and fail the rest,
+         * and the rest are the ones that matter.
+         */
+        const ownOrgSnapshotOf =
+          (
+            overrides: Record<string, unknown> = {},
+          ) => (
+            {
+              method: "ACTUAL",
+              snapshot: {
+                emission_data_id: "emission-data-1",
+                emission_data_version: 1,
+                installation_id: "installation-1",
+                resolved_at: "2026-02-01T00:00:00.000Z",
+                values: {
+                  direct_specific: "1.5",
+                  indirect_specific: "0.2",
+                },
+                emission_unit: "tCO2e/t",
+                methodology: "EU_METHOD",
+                verification: {
+                  status: "VERIFIED",
+                  verifier_user_id: "admin-1",
+                },
+                evidence_file_ids: ["evidence-1"],
+                sharing_grant_id: null,
+                ...overrides,
+              },
+            }
+          );
+
+        it(
+          "rejects with ALREADY_DETERMINED_FROM_THIS_DATASET and writes nothing at all",
+          async () => {
+            const recorder: Recorder =
+              { fromCalls: [], ops: [] };
+
+            const result =
+              await redetermineLineFromActualData(
+                makeMockSupabase(
+                  {
+                    shipment_lines: [
+                      {
+                        data: {
+                          ...lineRow,
+                          emission_determination: ownOrgSnapshotOf(),
+                        },
+                        error: null,
+                      },
+                      { data: updatedLineRow, error: null },
+                    ],
+                    emission_data: { data: verifiedActiveRow, error: null },
+                  },
+                  recorder,
+                ),
+                memberContext(),
+                lineId,
+                emissionDataId,
+              );
+
+            expect(result).toEqual(
+              {
+                status: "REJECTED",
+                reason: "ALREADY_DETERMINED_FROM_THIS_DATASET",
+              },
+            );
+
+            // No update, no audit event, no consumption RPC. A no-op
+            // that still writes an audit trail is not a no-op.
+            expect(
+              recorder.ops.filter(
+                (op) => op.op === "update" || op.op === "insert",
+              ),
+            ).toEqual(
+              [],
+            );
+
+            expect(
+              recorder.fromCalls.filter(
+                (table) => table === "audit_events",
+              ),
+            ).toEqual(
+              [],
+            );
+
+            expect(
+              recorder.ops.filter(
+                (op) => op.table.startsWith("rpc:"),
+              ),
+            ).toEqual(
+              [],
+            );
+          },
+        );
+
+        it(
+          "proceeds when evidence has been attached to the record since the snapshot was frozen",
+          async () => {
+            // The frozen snapshot no longer matches the live evidence
+            // set, and the v10 validator compares them byte-for-byte --
+            // so the line is sitting in a state the database would now
+            // reject, and redetermination is the only repair. An
+            // id-only guard would refuse it.
+            const result =
+              await redetermineLineFromActualData(
+                makeMockSupabase(
+                  {
+                    shipment_lines: [
+                      {
+                        data: {
+                          ...lineRow,
+                          emission_determination: ownOrgSnapshotOf(),
+                        },
+                        error: null,
+                      },
+                      { data: updatedLineRow, error: null },
+                    ],
+                    emission_data: {
+                      data: {
+                        ...verifiedActiveRow,
+                        evidence_file_ids: ["evidence-1", "evidence-2"],
+                      },
+                      error: null,
+                    },
+                  },
+                ),
+                memberContext(),
+                lineId,
+                emissionDataId,
+              );
+
+            expect(result.status).toBe(
+              "DETERMINED",
+            );
+          },
+        );
+
+        it(
+          "proceeds, and records consumption, when the same record is now read through a re-issued grant",
+          async () => {
+            // Grant A revoked, grant B issued for the same
+            // installation. The values are identical; the provenance of
+            // the read is not. Suppressing this would suppress the
+            // GRANTOR's own record that their data was read again.
+            const recorder: Recorder =
+              { fromCalls: [], ops: [] };
+
+            const result =
+              await redetermineLineFromActualData(
+                makeMockSupabase(
+                  {
+                    shipment_lines: [
+                      {
+                        data: {
+                          ...lineRow,
+                          emission_determination: ownOrgSnapshotOf(
+                            { sharing_grant_id: "grant-old" },
+                          ),
+                        },
+                        error: null,
+                      },
+                      { data: updatedLineRow, error: null },
+                    ],
+                    emission_data: {
+                      data: { ...verifiedActiveRow, entered_by_org_id: "org-2" },
+                      error: null,
+                    },
+                    sharing_grants: {
+                      data: { id: "grant-1", expires_at: null },
+                      error: null,
+                    },
+                  },
+                  recorder,
+                  {
+                    data: [
+                      { result_status: "OK", result_audit_event_id: "audit-event-1" },
+                    ],
+                    error: null,
+                  },
+                ),
+                memberContext(),
+                lineId,
+                emissionDataId,
+              );
+
+            expect(result.status).toBe(
+              "DETERMINED",
+            );
+
+            expect(
+              recorder.ops.some(
+                (op) => op.table === "rpc:record_shared_data_consumption",
+              ),
+            ).toBe(
+              true,
+            );
+          },
+        );
+
+        it(
+          "reports DATA_INTEGRITY_ERROR, never the no-op, for a VERIFIED record with no verifier",
+          async () => {
+            // Ordering matters: a record whose verification attribution
+            // is missing is corrupt, and that has to win over "nothing
+            // changed" -- otherwise a corrupt record is reported to the
+            // user as a harmless no-op.
+            const result =
+              await redetermineLineFromActualData(
+                makeMockSupabase(
+                  {
+                    shipment_lines: [
+                      {
+                        data: {
+                          ...lineRow,
+                          emission_determination: ownOrgSnapshotOf(),
+                        },
+                        error: null,
+                      },
+                      { data: updatedLineRow, error: null },
+                    ],
+                    emission_data: {
+                      data: { ...verifiedActiveRow, verifier_user_id: null },
+                      error: null,
+                    },
+                  },
+                ),
+                memberContext(),
+                lineId,
+                emissionDataId,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "DATA_INTEGRITY_ERROR" },
+            );
+          },
+        );
+
+        it(
+          "does not apply to a first determination -- that path reports ALREADY_DETERMINED",
+          async () => {
+            const result =
+              await determineLineFromActualData(
+                makeMockSupabase(
+                  {
+                    shipment_lines: [
+                      {
+                        data: {
+                          ...lineRow,
+                          emission_determination: ownOrgSnapshotOf(),
+                        },
+                        error: null,
+                      },
+                      { data: updatedLineRow, error: null },
+                    ],
+                    emission_data: { data: verifiedActiveRow, error: null },
+                  },
+                ),
+                memberContext(),
+                lineId,
+                emissionDataId,
+              );
+
+            expect(result).toEqual(
+              { status: "REJECTED", reason: "ALREADY_DETERMINED" },
+            );
+          },
+        );
+      },
+    );
+
+    describe(
       "capability gate",
       () => {
         it(

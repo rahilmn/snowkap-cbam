@@ -33,8 +33,12 @@ import {
 } from "../../../../src/application/calculations/get-latest-calculations";
 
 import {
+  markActualOptionsForLine,
+  type ActualEmissionDataOptionForLine,
+} from "../../../../src/application/emissions/mark-actual-options-for-line";
+
+import {
   listAvailableActualEmissionData,
-  type AvailableActualEmissionDataOption,
 } from "../../../../src/application/emissions/list-available-actual-data";
 
 import {
@@ -140,12 +144,27 @@ export default async function ShipmentDetailPage(
       ),
     );
 
-  const availableActualDataByLineId: Record<string, AvailableActualEmissionDataOption[]> =
+  // Marked PER LINE, on the server: whether choosing a dataset would
+  // change anything depends on what that particular line already
+  // carries, and the decision is made here from facts the client never
+  // receives (the record's evidence set, its verifier -- who for shared
+  // data is a member of another organization -- and the grant it is
+  // read through). Only the resulting boolean is sent, so the disabled
+  // control and the server's own refusal cannot disagree.
+  const availableActualDataByLineId: Record<string, ActualEmissionDataOptionForLine[]> =
     {};
 
   for (const line of shipment.lines) {
+    const listing =
+      optionsByCnCode.get(line.cn_code);
+
     availableActualDataByLineId[line.id] =
-      optionsByCnCode.get(line.cn_code) ?? [];
+      listing === undefined
+        ? []
+        : markActualOptionsForLine(
+            listing,
+            line.emission_determination,
+          );
   }
 
   // Which ACTUAL-determined lines now have newer producer data available

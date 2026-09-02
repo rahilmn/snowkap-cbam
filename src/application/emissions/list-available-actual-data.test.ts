@@ -51,7 +51,11 @@ const installationRows =
 
 const activeGrantForInstallation2 =
   [
-    { installation_id: "installation-2", expires_at: null },
+    {
+      id: "grant-installation-2",
+      installation_id: "installation-2",
+      expires_at: null,
+    },
   ];
 
 const grantorOrgRows =
@@ -161,7 +165,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [
             {
               emission_data_id: "emission-data-1",
@@ -198,7 +202,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [
             expect.objectContaining(
               {
@@ -232,7 +236,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [],
         );
       },
@@ -259,7 +263,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [],
         );
       },
@@ -282,7 +286,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result.map((option) => option.provenance)).toEqual(
+        expect(result.options.map((option) => option.provenance)).toEqual(
           ["OWN", "SHARED"],
         );
       },
@@ -335,7 +339,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [],
         );
       },
@@ -359,7 +363,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [],
         );
 
@@ -386,7 +390,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [],
         );
       },
@@ -407,7 +411,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [],
         );
       },
@@ -436,7 +440,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result[0]?.reporting_period).toEqual(
+        expect(result.options[0]?.reporting_period).toEqual(
           { kind: "QUARTERLY", year: 2025, quarter: 3 },
         );
       },
@@ -457,7 +461,7 @@ describe(
             "25232100",
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [],
         );
       },
@@ -478,11 +482,11 @@ describe(
             "7208100099",
           );
 
-        expect(result).toHaveLength(
+        expect(result.options).toHaveLength(
           1,
         );
 
-        expect(result[0]?.emission_data_id).toBe(
+        expect(result.options[0]?.emission_data_id).toBe(
           "emission-data-1",
         );
       },
@@ -531,7 +535,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [
             expect.objectContaining(
               { grantor_organization_name: "Unknown organization" },
@@ -558,7 +562,7 @@ describe(
             matchingCnCode,
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [],
         );
       },
@@ -586,7 +590,7 @@ describe(
             null,
           );
 
-        expect(result.map((option) => option.emission_data_id)).toEqual(
+        expect(result.options.map((option) => option.emission_data_id)).toEqual(
           ["emission-data-1", "emission-data-3"],
         );
       },
@@ -608,7 +612,7 @@ describe(
             null,
           );
 
-        expect(result).toEqual(
+        expect(result.options).toEqual(
           [],
         );
       },
@@ -636,6 +640,153 @@ describe(
           recorder.fromCalls.includes("organizations"),
         ).toBe(
           false,
+        );
+      },
+    );
+
+    describe(
+      "no-op candidates (P14)",
+      () => {
+        /**
+         * The picker returns, alongside the options a caller may
+         * render, the server-only facts needed to decide whether
+         * choosing one would change anything -- see
+         * AvailableActualEmissionDataListing's own doc comment for why
+         * they are separate.
+         */
+        it(
+          "carries the grant a SHARED record is read through, so a re-issued grant is not mistaken for a no-op",
+          async () => {
+            const result =
+              await listAvailableActualEmissionData(
+                makeMockSupabase(
+                  {
+                    emission_data: {
+                      data: [
+                        { ...sharedRow },
+                      ],
+                      error: null,
+                    },
+                    sharing_grants: {
+                      data: [
+                        {
+                          id: "grant-live",
+                          installation_id: "installation-2",
+                          expires_at: null,
+                        },
+                      ],
+                      error: null,
+                    },
+                    installations: {
+                      data: [
+                        {
+                          id: "installation-2",
+                          name: "Partner Plant",
+                          country: "IN",
+                        },
+                      ],
+                      error: null,
+                    },
+                    organizations: {
+                      data: [
+                        { id: "org-2", name: "Partner Producer" },
+                      ],
+                      error: null,
+                    },
+                  },
+                ),
+                orgId,
+                matchingCnCode,
+              );
+
+            expect(
+              result.candidatesById.get("emission-data-2")?.sharing_grant_id,
+            ).toBe(
+              "grant-live",
+            );
+          },
+        );
+
+        it(
+          "carries null for an OWN record, matching what a determination would freeze",
+          async () => {
+            const result =
+              await listAvailableActualEmissionData(
+                makeMockSupabase(
+                  {
+                    emission_data: {
+                      data: [
+                        { ...ownRow },
+                      ],
+                      error: null,
+                    },
+                    sharing_grants: { data: [], error: null },
+                    installations: {
+                      data: [
+                        {
+                          id: "installation-1",
+                          name: "Steel Works A",
+                          country: "DE",
+                        },
+                      ],
+                      error: null,
+                    },
+                  },
+                ),
+                orgId,
+                matchingCnCode,
+              );
+
+            expect(
+              result.candidatesById.get("emission-data-1")?.sharing_grant_id,
+            ).toBeNull();
+          },
+        );
+
+        it(
+          "offers no candidate for a VERIFIED record with no recorded verifier",
+          async () => {
+            // determine-from-actual-data.ts treats that shape as a
+            // data-integrity failure and refuses. Producing a candidate
+            // for it would let the UI report a harmless no-op where the
+            // server will in fact report something more serious.
+            const result =
+              await listAvailableActualEmissionData(
+                makeMockSupabase(
+                  {
+                    emission_data: {
+                      data: [
+                        { ...ownRow, verifier_user_id: null },
+                      ],
+                      error: null,
+                    },
+                    sharing_grants: { data: [], error: null },
+                    installations: {
+                      data: [
+                        {
+                          id: "installation-1",
+                          name: "Steel Works A",
+                          country: "DE",
+                        },
+                      ],
+                      error: null,
+                    },
+                  },
+                ),
+                orgId,
+                matchingCnCode,
+              );
+
+            expect(result.options).toHaveLength(
+              1,
+            );
+
+            expect(
+              result.candidatesById.has("emission-data-1"),
+            ).toBe(
+              false,
+            );
+          },
         );
       },
     );

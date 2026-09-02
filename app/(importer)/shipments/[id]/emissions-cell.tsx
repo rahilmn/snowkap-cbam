@@ -2,6 +2,7 @@
 
 import {
   useActionState,
+  useState,
 } from "react";
 
 import {
@@ -33,8 +34,12 @@ import type {
 } from "../../../../src/domain/shipments/types";
 
 import type {
-  AvailableActualEmissionDataOption,
-} from "../../../../src/application/emissions/list-available-actual-data";
+  ActualEmissionDataOptionForLine,
+} from "../../../../src/application/emissions/mark-actual-options-for-line";
+
+import {
+  ActualDataPreview,
+} from "./actual-data-preview";
 
 import type {
   ActualSnapshotStaleness,
@@ -92,7 +97,7 @@ function defaultResolutionButtonLabel(
  * data this is without needing a separate lookup UI.
  */
 function formatActualDataOptionLabel(
-  option: AvailableActualEmissionDataOption,
+  option: ActualEmissionDataOptionForLine,
 ): string {
   // 2026-08-31 (P13 Bucket C/D sweep): the dataset's own REPORTING PERIOD
   // is now part of the label.
@@ -147,7 +152,7 @@ export function EmissionsCell(
     shipmentId: string;
     line: ShipmentLine;
     editable: boolean;
-    availableActualData: AvailableActualEmissionDataOption[];
+    availableActualData: ActualEmissionDataOptionForLine[];
     staleness: ActualSnapshotStaleness | undefined;
     resolveState: ResolveEmissionsActionState;
     resolveFormAction: (formData: FormData) => void;
@@ -163,6 +168,28 @@ export function EmissionsCell(
       determineFromActualDataAction,
       initialLineActionState,
     );
+
+  // Controlled, so the preview below and the state of the action button
+  // both follow the selection. Empty means nothing has been chosen and
+  // the action is not offered at all -- there is no default dataset,
+  // because there is no dataset it would be safe to pick on the user's
+  // behalf.
+  const [selectedEmissionDataId, setSelectedEmissionDataId] =
+    useState<string>("");
+
+  const selectedOption =
+    availableActualData.find(
+      (option) =>
+        option.emission_data_id === selectedEmissionDataId,
+    ) ?? null;
+
+  // Decided on the SERVER (markActualOptionsForLine), never by comparing
+  // ids here: the comparison covers the record's evidence set, its
+  // verifier and the grant it is read through, none of which reach the
+  // client. A client-side id comparison would disagree with the server
+  // in exactly the cases that matter.
+  const selectionChangesNothing =
+    selectedOption?.matches_current_determination === true;
 
   const determination =
     line.emission_determination;
@@ -254,7 +281,7 @@ export function EmissionsCell(
       {editable && availableActualData.length > 0 ? (
         <form
           action={actualDataFormAction}
-          className="flex items-center gap-1.5"
+          className="flex flex-col items-start gap-1.5"
         >
           <input
             type="hidden"
@@ -271,14 +298,15 @@ export function EmissionsCell(
           <select
             name="emissionDataId"
             required
-            defaultValue=""
-            className="h-8 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-2 text-xs text-[var(--text-primary)]"
+            aria-label="Choose a verified dataset"
+            value={selectedEmissionDataId}
+            onChange={(event) =>
+              setSelectedEmissionDataId(event.target.value)
+            }
+            className="h-8 max-w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-2 text-xs text-[var(--text-primary)]"
           >
-            <option
-              value=""
-              disabled
-            >
-              Use actual data…
+            <option value="">
+              Choose a verified dataset...
             </option>
 
             {availableActualData.map(
@@ -293,15 +321,73 @@ export function EmissionsCell(
             )}
           </select>
 
-          <Button
-            type="submit"
-            variant="ghost"
-            size="sm"
-            loading={actualDataPending}
-          >
-            Use this data
-          </Button>
+          {selectedOption ? (
+            <ActualDataPreview
+              option={selectedOption}
+              declaredOriginCountry={line.origin_country}
+            />
+          ) : null}
+
+          {selectionChangesNothing ? (
+            <p className="text-xs text-[var(--text-secondary)]">
+              This line is already determined from that exact dataset.
+              Choosing it again would change nothing.
+            </p>
+          ) : null}
+
+          {actualSnapshot && !selectionChangesNothing ? (
+            // Replacing an existing determination is a change of the
+            // regulatory basis of a figure that may already have been
+            // calculated, so it asks first and says what it replaces.
+            // A FIRST determination is not confirmed: there is nothing
+            // to lose, the preview above already shows exactly what will
+            // be frozen, and a dialog on every first use would train
+            // people to dismiss the one that matters.
+            <ConfirmSubmitButton
+              variant="primary"
+              size="sm"
+              pending={actualDataPending}
+              disabled={selectedOption === null}
+              confirm={
+                {
+                  title: "Replace this line's emission determination?",
+                  description:
+                    "This line currently carries a verified actual-data determination. Replacing it freezes a new snapshot of the dataset you selected. The line's calculation becomes stale until you recalculate, and the change is recorded in the audit trail together with the determination it replaced.",
+                  children:
+                    selectedOption ? (
+                      <ActualDataPreview
+                        option={selectedOption}
+                        declaredOriginCountry={line.origin_country}
+                      />
+                    ) : undefined,
+                  confirmLabel: "Replace determination",
+                  cancelLabel: "Keep current determination",
+                }
+              }
+            >
+              Determine from actual data
+            </ConfirmSubmitButton>
+          ) : (
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              loading={actualDataPending}
+              disabled={selectedOption === null || selectionChangesNothing}
+            >
+              Determine from actual data
+            </Button>
+          )}
         </form>
+      ) : null}
+
+      {actualDataState.status === "unchanged" ? (
+        // Neutral, not danger: nothing went wrong and nothing was
+        // damaged. The line already says what the user was asking it to
+        // say.
+        <p className="text-xs text-[var(--text-secondary)]">
+          {actualDataState.message}
+        </p>
       ) : null}
 
       {actualDataState.status === "error" ? (

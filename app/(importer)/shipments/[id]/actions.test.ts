@@ -41,10 +41,16 @@ vi.mock(
   ),
 );
 
+// 2026-09-03 (P14): promoted from a bare stub to a real spy, so a
+// no-op outcome can be asserted to revalidate NOTHING. A path that
+// changed no server state must not tell Next.js that it did.
+const revalidatePathMock =
+  vi.fn();
+
 vi.mock(
   "next/cache",
   () => (
-    { revalidatePath: () => undefined }
+    { revalidatePath: (...args: unknown[]) => revalidatePathMock(...args) }
   ),
 );
 
@@ -857,6 +863,60 @@ describe(
 );
 
 describe(
+  "determineFromActualDataAction: nothing would change (P14)",
+  () => {
+    it(
+      "reports the no-op as \"unchanged\", not as an error, and revalidates nothing",
+      async () => {
+        allowRateLimit();
+        resolveOrgSummaryOnce();
+        revalidatePathMock.mockClear();
+
+        // The action tries determineLineFromActualData first and
+        // upgrades to redetermine on ALREADY_DETERMINED, so the no-op
+        // arrives from the redetermine call.
+        determineLineFromActualDataMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "ALREADY_DETERMINED" },
+        );
+
+        redetermineLineFromActualDataMock.mockResolvedValueOnce(
+          {
+            status: "REJECTED",
+            reason: "ALREADY_DETERMINED_FROM_THIS_DATASET",
+          },
+        );
+
+        const result =
+          await determineFromActualDataAction(
+            { status: "idle" },
+            formData(
+              {
+                lineId: "line-1",
+                shipmentId: "shipment-1",
+                emissionDataId: "emission-data-1",
+              },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "unchanged",
+            message:
+              "This line is already determined from that exact dataset and version -- nothing was changed.",
+          },
+        );
+
+        // Nothing changed, so nothing is revalidated. Telling Next.js
+        // to re-render a route whose data did not move is a lie about
+        // server state, and it is what makes a no-op look like a
+        // successful write in the UI.
+        expect(revalidatePathMock).not.toHaveBeenCalled();
+      },
+    );
+  },
+);
+
+describe(
   "determineFromActualDataAction REJECTED-reason mapping and cross-org warning",
   () => {
     const DETERMINE_FROM_ACTUAL_DATA_REJECTION_CASES: Array<[string, string]> = [
@@ -868,13 +928,22 @@ describe(
         "EMISSION_DATA_NOT_FOUND",
         "That actual-emissions dataset could not be found, or is no longer visible to your organization.",
       ],
+      // 2026-09-03 (P14). Both of these are, overwhelmingly, the same
+      // event seen from two code paths: the producer revoked the grant
+      // in the window between the read that authorized the dataset and
+      // the write that freezes it -- a window the confirmation dialog
+      // now sits inside. DATA_INTEGRITY_ERROR arrives when the
+      // follow-up grant lookup finds nothing live; SHIPMENT_NOT_EDITABLE
+      // arrives when the v10 determination validator raises 42501. From
+      // the user's side both mean "reload and try again", and neither
+      // means "contact support".
       [
         "DATA_INTEGRITY_ERROR",
-        "This dataset could not be used due to a data integrity problem. Please contact support.",
+        "That dataset is no longer shared with your organization, or the shipment is locked. Reload the line and try again.",
       ],
       [
         "SHIPMENT_NOT_EDITABLE",
-        "This shipment is locked or void and can no longer be edited.",
+        "That dataset is no longer shared with your organization, or the shipment is locked. Reload the line and try again.",
       ],
       [
         "CAPABILITY_NOT_HELD",

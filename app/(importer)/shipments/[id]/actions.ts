@@ -816,11 +816,29 @@ function determineFromActualDataRejectionMessageFor(
     case "EMISSION_DATA_NOT_FOUND":
       return "That actual-emissions dataset could not be found, or is no longer visible to your organization.";
 
+    // 2026-09-03 (P14). "Contact support" was the wrong instruction for
+    // the case that actually produces this.
+    //
+    // fetchAuthorizedEmissionData returns DATA_INTEGRITY_ERROR when RLS
+    // proved a live grant exists (that is the only way the emission_data
+    // row could have been read) and the follow-up query for that same
+    // grant then found nothing live -- overwhelmingly because the
+    // producer revoked it in the window between the two reads. That
+    // window is now wider, because the confirmation dialog sits inside
+    // it. The user's own next step is to reload, not to open a support
+    // ticket.
     case "DATA_INTEGRITY_ERROR":
-      return "This dataset could not be used due to a data integrity problem. Please contact support.";
+      return "That dataset is no longer shared with your organization, or the shipment is locked. Reload the line and try again.";
 
+    // Same wording, same reason: the v10 determination validator raises
+    // 42501, which this path reports as SHIPMENT_NOT_EDITABLE, both for
+    // a genuinely locked shipment AND when the frozen snapshot no longer
+    // matches a record the caller may still read. From here the two are
+    // indistinguishable, and "locked or void" alone would send the user
+    // looking for a problem with the shipment when the problem is the
+    // grant.
     case "SHIPMENT_NOT_EDITABLE":
-      return "This shipment is locked or void and can no longer be edited.";
+      return "That dataset is no longer shared with your organization, or the shipment is locked. Reload the line and try again.";
 
     case "CAPABILITY_NOT_HELD":
       return "Your organization is not set up as a CBAM importer/declarant.";
@@ -934,6 +952,23 @@ export async function determineFromActualDataAction(
         parsed.data.lineId as never,
         parsed.data.emissionDataId as never,
       );
+  }
+
+  // 2026-09-03 (P14). Nothing changed, so nothing is revalidated.
+  //
+  // Deliberately NOT an error: nothing went wrong and nothing was
+  // damaged -- the line already says exactly what the user was asking it
+  // to say. Calling revalidatePath here would also be dishonest, since
+  // no server state changed; the test asserts it is not called.
+  if (
+    result.status === "REJECTED" &&
+    result.reason === "ALREADY_DETERMINED_FROM_THIS_DATASET"
+  ) {
+    return {
+      status: "unchanged",
+      message:
+        "This line is already determined from that exact dataset and version -- nothing was changed.",
+    };
   }
 
   if (result.status === "REJECTED") {
@@ -1082,7 +1117,9 @@ const verifyCalculationReproducibilitySchema =
 /**
  * The on-demand half of P8's reproduction-proof contract (master plan
  * §17/§21 -- "same inputs + engine_version => byte-identical output,
- * re-provable on demand"; the CI-side half is a separate test against
+ * re-provable on demand"; the CI-side half, which did not exist until
+ * 2026-09-03 despite this comment, is now
+ * tests/integration/calculation-reproduction.test.ts against
  * reproduceCalculationResult directly, not this action). Follows
  * calculateLineAction's exact auth/org-context shape -- same
  * getServerSupabaseClient / getCurrentOrgSummary / getUser sequence --

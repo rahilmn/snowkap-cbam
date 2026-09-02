@@ -10,6 +10,10 @@ import {
 } from "../../../components/ui/badge";
 
 import {
+  ConfirmSubmitButton,
+} from "../../../components/ui/confirm-submit-button";
+
+import {
   Button,
 } from "../../../components/ui/button";
 
@@ -424,20 +428,50 @@ function TransitionButton(
         value={action}
       />
 
-      <Button
-        type="submit"
-        variant={variant}
-        size="sm"
-        loading={pending}
-        disabled={blocked}
-        title={
-          blocked
-            ? EVIDENCE_INCOMPLETE_NOTICE
-            : state.status === "error" ? state.message : undefined
-        }
-      >
-        {label}
-      </Button>
+      {/*
+        * 2026-09-03 (P14, dialog #16). ACTIVATE is a CROSS-PARTY state
+        * transition: it supersedes whatever record was ACTIVE for this
+        * installation and period, and every importer holding a live
+        * grant immediately begins reading the new figures, with their
+        * existing determinations marked stale. SUBMIT_FOR_VERIFICATION
+        * and DISCARD are not confirmed -- the first is reversible
+        * (REJECT returns the record to a submittable state) and the
+        * second already carries its own dialog at the call site.
+        */}
+      {action === "ACTIVATE" && !blocked ? (
+        <ConfirmSubmitButton
+          variant={variant}
+          size="sm"
+          pending={pending}
+          title={state.status === "error" ? state.message : undefined}
+          confirm={
+            {
+              title: "Activate this record?",
+              description:
+                "Activating supersedes the record currently active for this installation and period. Any importer you have shared this installation with immediately begins reading these figures instead, and their existing determinations are marked stale until they redetermine.",
+              confirmLabel: "Activate",
+              cancelLabel: "Cancel",
+            }
+          }
+        >
+          {label}
+        </ConfirmSubmitButton>
+      ) : (
+        <Button
+          type="submit"
+          variant={variant}
+          size="sm"
+          loading={pending}
+          disabled={blocked}
+          title={
+            blocked
+              ? EVIDENCE_INCOMPLETE_NOTICE
+              : state.status === "error" ? state.message : undefined
+          }
+        >
+          {label}
+        </Button>
+      )}
 
       {state.status === "error" ? (
         <p className="mt-1 max-w-48 text-right text-xs text-[var(--color-danger-700)]">
@@ -485,20 +519,47 @@ function VerifyButton(
         value={emissionDataId}
       />
 
-      <Button
-        type="submit"
-        variant={variant}
-        size="sm"
-        loading={pending}
-        disabled={blocked}
-        title={
-          blocked
-            ? EVIDENCE_INCOMPLETE_NOTICE
-            : state.status === "error" ? state.message : undefined
-        }
-      >
-        {label}
-      </Button>
+      {/*
+        * 2026-09-03 (P14, dialog #15). Verifying is irreversible in the
+        * shape this product offers: availableActions gives a VERIFIED
+        * record no path back -- only ACTIVATE and DISCARD -- and once
+        * verified, removeEvidenceFile refuses to detach the evidence
+        * behind it (upload-evidence.ts, and the RLS in 20260829560000).
+        * It is also the gate that makes the record activatable and
+        * therefore shareable with an importer. Blocked (incomplete
+        * evidence) keeps the plain disabled button: there is nothing to
+        * confirm about an action that cannot run.
+        */}
+      {blocked ? (
+        <Button
+          type="submit"
+          variant={variant}
+          size="sm"
+          loading={pending}
+          disabled
+          title={EVIDENCE_INCOMPLETE_NOTICE}
+        >
+          {label}
+        </Button>
+      ) : (
+        <ConfirmSubmitButton
+          variant={variant}
+          size="sm"
+          pending={pending}
+          title={state.status === "error" ? state.message : undefined}
+          confirm={
+            {
+              title: "Verify this emission data record?",
+              description:
+                "Verification cannot be undone from this screen -- a verified record offers no path back to unverified. The evidence attached to it can no longer be removed, and the record becomes activatable, which is what makes it visible to importers you share the installation with.",
+              confirmLabel: "Verify record",
+              cancelLabel: "Cancel",
+            }
+          }
+        >
+          {label}
+        </ConfirmSubmitButton>
+      )}
 
       {state.status === "error" ? (
         <p className="mt-1 max-w-48 text-right text-xs text-[var(--color-danger-700)]">

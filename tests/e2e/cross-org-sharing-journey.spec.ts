@@ -603,17 +603,20 @@ test.describe(
               await expect(importerPage.getByRole("cell", { name: cnCode })).toBeVisible();
 
               // emissions-cell.tsx only renders the
-              // <select name="emissionDataId"> / "Use this data" form at
-              // all when availableActualData.length > 0 -- with zero
-              // VERIFIED rows visible to this org (own or shared), that
-              // whole block is genuinely absent from the DOM, not merely
-              // empty inside an open dropdown.
+              // <select name="emissionDataId"> / "Determine from actual
+              // data" form at all when availableActualData.length > 0 --
+              // with zero VERIFIED rows visible to this org (own or
+              // shared), that whole block is genuinely absent from the
+              // DOM, not merely empty inside an open dropdown.
               await expect(
                 importerPage.locator('select[name="emissionDataId"]'),
               ).toHaveCount(0);
 
               await expect(
-                importerPage.getByRole("button", { name: "Use this data" }),
+                importerPage.getByRole(
+                  "button",
+                  { name: "Determine from actual data" },
+                ),
               ).toHaveCount(0);
             },
           );
@@ -625,13 +628,51 @@ test.describe(
                 "/sharing",
               );
 
+              const grantItem =
+                producerPage.getByRole("listitem").filter({ hasText: installationName });
+
+              // Revoking is irreversible -- a REVOKED grant is terminal
+              // and the producer must issue a new one to share again --
+              // so it asks first (P14 dialog #1).
               await producerPage.getByRole(
                 "button",
                 { name: `Revoke access for ${installationName}` },
               ).click();
 
-              const grantItem =
-                producerPage.getByRole("listitem").filter({ hasText: installationName });
+              const revokeDialog =
+                producerPage.getByRole(
+                  "dialog",
+                  { name: `Revoke access for ${installationName}?` },
+                );
+
+              await expect(revokeDialog).toBeVisible();
+
+              // Cancel first. A confirmation that cannot be declined is
+              // decoration, and this asserts the grant is genuinely
+              // untouched by opening the dialog.
+              await revokeDialog.getByRole(
+                "button",
+                { name: "Keep sharing" },
+              ).click();
+
+              await expect(revokeDialog).toBeHidden();
+
+              await expect(
+                grantItem.getByText("ACTIVE", { exact: true }),
+              ).toBeVisible();
+
+              await producerPage.getByRole(
+                "button",
+                { name: `Revoke access for ${installationName}` },
+              ).click();
+
+              await producerPage.getByRole(
+                "dialog",
+                { name: `Revoke access for ${installationName}?` },
+              ).getByRole(
+                "button",
+                { name: "Revoke access" },
+              ).click();
 
               await expect(
                 grantItem.getByText("REVOKED", { exact: true }),

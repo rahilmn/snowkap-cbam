@@ -97,7 +97,7 @@ export default async function EmissionsPage() {
     );
 
   const sharedInData =
-    availableActualData.filter(
+    availableActualData.options.filter(
       (option) => option.provenance === "SHARED",
     );
 

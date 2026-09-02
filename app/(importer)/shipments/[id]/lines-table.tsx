@@ -53,8 +53,8 @@ import type {
 } from "../../../../src/application/calculations/get-latest-calculations";
 
 import type {
-  AvailableActualEmissionDataOption,
-} from "../../../../src/application/emissions/list-available-actual-data";
+  ActualEmissionDataOptionForLine,
+} from "../../../../src/application/emissions/mark-actual-options-for-line";
 
 import type {
   ActualSnapshotStaleness,
@@ -81,7 +81,7 @@ export function LinesTable(
     lines: ShipmentLine[];
     editable: boolean;
     latestCalculations: Record<string, LatestLineCalculation>;
-    availableActualDataByLineId: Record<string, AvailableActualEmissionDataOption[]>;
+    availableActualDataByLineId: Record<string, ActualEmissionDataOptionForLine[]>;
     actualDeterminationStaleness: Record<string, ActualSnapshotStaleness>;
   },
 ) {
@@ -166,7 +166,7 @@ function LineRow(
     line: ShipmentLine;
     editable: boolean;
     latestCalculation: LatestLineCalculation | undefined;
-    availableActualData: AvailableActualEmissionDataOption[];
+    availableActualData: ActualEmissionDataOptionForLine[];
     staleness: ActualSnapshotStaleness | undefined;
   },
 ) {

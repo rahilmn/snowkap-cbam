@@ -272,9 +272,32 @@ test.describe(
         await test.step(
           "declare: mark ready and record filed (LOCK)",
           async () => {
+            // Marking a declaration ready freezes its shipment set and
+            // is the step before recording it filed, so it asks first
+            // (P14 dialog #11).
             await page.getByRole("button", { name: "Mark ready" }).click();
 
-            await expect(page.getByText("READY", { exact: true })).toBeVisible();
+            const markReadyDialog =
+              page.getByRole(
+                "dialog",
+                { name: "Mark this declaration ready?" },
+              );
+
+            await expect(markReadyDialog).toBeVisible();
+
+            await markReadyDialog.getByRole(
+              "button",
+              { name: "Mark ready" },
+            ).click();
+
+            // Scoped to the declaration's own status, not a bare
+            // getByText: the member shipment is ALSO READY at this point
+            // in the journey, so an unscoped "READY" would pass whether
+            // or not this action did anything -- which is exactly how a
+            // never-confirmed dialog slipped through unnoticed.
+            await expect(
+              page.getByLabel("Filing reference"),
+            ).toBeVisible();
 
             await page.getByLabel("Filing reference").fill(filedReference);
 

@@ -17,6 +17,10 @@ import {
 } from "../../domain/emissions/snapshot-completeness";
 
 import {
+  actualDeterminationIsUnchanged,
+} from "../../domain/emissions/actual-determination-is-unchanged";
+
+import {
   cnScopeCoversCnCode,
 } from "../../domain/emissions/cn-scope-covers-code";
 
@@ -60,6 +64,16 @@ import {
 export type DetermineFromActualDataRejectionReason =
   | "LINE_NOT_FOUND"
   | "ALREADY_DETERMINED"
+  // 2026-09-03 (P14). Redetermining from a record that would freeze a
+  // snapshot materially identical to the one the line already carries.
+  // Reachable only from redetermineLineFromActualData: the
+  // first-determination path returns ALREADY_DETERMINED long before
+  // this is evaluated. See actualDeterminationIsUnchanged for why this
+  // is a full-snapshot comparison and not id + version -- an id-only
+  // guard would refuse the redetermination that repairs a snapshot the
+  // v10 validator has come to reject, and would suppress the grantor's
+  // consumption audit event under a re-issued grant.
+  | "ALREADY_DETERMINED_FROM_THIS_DATASET"
   | "EMISSION_DATA_NOT_FOUND"
   | "DATA_INTEGRITY_ERROR"
   | "SHIPMENT_NOT_EDITABLE"
@@ -449,6 +463,47 @@ async function performDetermination(
     };
   }
 
+  // 2026-09-03 (P14). Nothing would change.
+  //
+  // Production carries a redetermination whose previous and new
+  // determinations are identical (grant 942ba281, 2026-09-02): a real
+  // user pressed the button twice and got a second audit event, a
+  // second cross-org consumption record on the producer's stream, and a
+  // recalculation obligation, for no change at all.
+  //
+  // Placed AFTER the verifier_user_id check on purpose: a record whose
+  // verification attribution is missing is a data-integrity failure,
+  // and that must win over "nothing changed" -- otherwise a corrupt
+  // record would be reported as a harmless no-op. Ordering is pinned by
+  // a test.
+  //
+  // Guarded on allowOverwrite only for clarity; the first-determination
+  // path returns ALREADY_DETERMINED far above and can never reach here
+  // with a non-null current determination.
+  if (
+    options.allowOverwrite &&
+    actualDeterminationIsUnchanged(
+      line.emission_determination,
+      {
+        emission_data_id: record.id,
+        emission_data_version: record.version,
+        installation_id: record.installation_id,
+        direct_specific: record.direct_specific,
+        indirect_specific: record.indirect_specific,
+        emission_unit: record.emission_unit,
+        methodology: record.methodology,
+        verifier_user_id: record.verifier_user_id,
+        evidence_file_ids: record.evidence_file_ids,
+        sharing_grant_id: sharingGrantId,
+      },
+    )
+  ) {
+    return {
+      status: "REJECTED",
+      reason: "ALREADY_DETERMINED_FROM_THIS_DATASET",
+    };
+  }
+
   const snapshot: ActualEmissionSnapshot =
     {
       emission_data_id: record.id,
@@ -723,6 +778,27 @@ export async function determineLineFromActualData(
  * still fully recoverable from the payload (and from the persisted
  * emission_determination.method itself), so nothing about method-level
  * detail is lost by sharing the event_type.
+ *
+ * RECORDED LIMITATION, stated rather than left to be discovered: this
+ * path has NO compare-and-swap. determineLineFromActualData's UPDATE
+ * carries .is("emission_determination", null), which the database
+ * enforces against a concurrent second submit; this one deliberately
+ * omits it, because overwriting is the whole point. The consequence is
+ * a genuine lost update: two redeterminations racing on the same line
+ * both commit, the second silently wins, and BOTH audit events name the
+ * same `previous_determination` -- so the audit trail describes a
+ * history that did not happen, showing one of the two determinations as
+ * having replaced something it never replaced.
+ *
+ * Not fixed here, and not silently tolerated either: the fix is a CAS on
+ * the current determination's own resolved_at (a value already inside
+ * the JSONB and already unique per write), and it is recorded as a
+ * follow-up in the release report rather than bundled into the no-op
+ * guard's commit. The exposure is bounded -- it needs two humans, or two
+ * tabs, submitting the same line within one round trip, and the
+ * resulting determination is in every case one that was genuinely
+ * chosen by someone authorized to choose it. What is wrong is the
+ * ATTRIBUTION, not the value.
  */
 export async function redetermineLineFromActualData(
   supabase: SupabaseClient,

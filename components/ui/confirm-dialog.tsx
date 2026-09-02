@@ -45,6 +45,20 @@ import {
  *
  * 4. Cancel takes initial focus, not Confirm. The least destructive
  *    action should be the one a stray Enter press hits.
+ *
+ * 5. The <dialog> element stays mounted -- showModal() needs it -- but
+ *    its CONTENTS are rendered only while it is open. A closed <dialog>
+ *    is display:none, so leaving the contents mounted was invisible and
+ *    inert; it was, however, still real text in the document. Since
+ *    almost every dialog here names the thing it acts on ("Remove
+ *    {supplier}?", "Revoke access for {installation}?"), that text
+ *    duplicated the very name it referred to on the page behind it --
+ *    found live when three journey specs failed on "resolved to 2
+ *    elements". Anything reading the DOM rather than the pixels --
+ *    Playwright, in-page find, a future scraper -- saw a second copy of
+ *    a name that appears exactly once to a person. Rendering on demand
+ *    is also what the aria-labelledby/aria-describedby ids need: they
+ *    are only ever consulted while the dialog is shown.
  */
 export interface ConfirmDialogProps {
   open: boolean;
@@ -143,6 +157,7 @@ export function ConfirmDialog(
         "backdrop:bg-black/60",
       )}
     >
+      {open ? (
       <div className="flex flex-col gap-3 p-5">
         <h2
           id={titleId}
@@ -184,6 +199,7 @@ export function ConfirmDialog(
           </Button>
         </div>
       </div>
+      ) : null}
     </dialog>
   );
 }
