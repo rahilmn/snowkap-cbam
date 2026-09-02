@@ -494,11 +494,16 @@ describe(
         }
 
         function emptyChain(): Record<string, unknown> {
+          // `range` added 2026-08-31: the shipment_lines and
+          // latest_calculation_results fetches are now paged too (they
+          // were silently truncated by PostgREST's max_rows before),
+          // so this chain has to answer it like the shipments one does.
           const chain: Record<string, unknown> = {
             select: () => chain,
             eq: () => chain,
             in: () => chain,
             order: () => chain,
+            range: () => chain,
             then: (
               resolve: (value: { data: unknown; error: unknown }) => unknown,
             ) =>
@@ -538,6 +543,111 @@ describe(
             [1000, 1999],
             [2000, 2999],
           ],
+        );
+      },
+    );
+
+    it(
+      "pages the shipment_lines fetch too, so a period whose lines exceed PostgREST's cap is not silently understated",
+      async () => {
+        // 2026-08-31 (final adversarial review, HIGH). The per-batch
+        // shipment_lines fetch had no `.range()`, so PostgREST's
+        // max_rows silently truncated it -- with `error: null`. The
+        // dropped lines then vanished from the period total and both
+        // exports, producing a LOWER regulated emissions figure with no
+        // error, no warning, and nothing in the output to show a reader
+        // the number was partial.
+        //
+        // SHIPMENT_ID_BATCH_SIZE (200) was sized for URL length, not row
+        // count, so one batch routinely exceeds the 1000-row cap: any
+        // period averaging more than ~5 lines per shipment hit this.
+        const PAGE_SIZE = 1000;
+
+        const shipmentRow = {
+          id: "ship-1",
+          reference: "REF-1",
+          status: "READY",
+          customs_mrn: null,
+          procedure: "RELEASE_FOR_FREE_CIRCULATION",
+          release_date: "2026-03-01",
+          reporting_period_kind: "ANNUAL",
+          reporting_period_year: 2026,
+          reporting_period_quarter: null,
+          org_id: orgId,
+        };
+
+        // One page plus a remainder -- the remainder is exactly what the
+        // unpaged version dropped.
+        const TOTAL_LINES = PAGE_SIZE + 37;
+
+        const allLines =
+          Array.from(
+            { length: TOTAL_LINES },
+            (_unused, index) => (
+              {
+                id: `line-${index}`,
+                shipment_id: "ship-1",
+                line_number: index + 1,
+                cn_code: "25232100",
+                origin_country: "CN",
+                net_mass_tonnes: "1",
+                quantity_mwh: null,
+                production_route_name: null,
+                production_route_indicator: null,
+                emission_determination: null,
+                org_id: orgId,
+              }
+            ),
+          );
+
+        function pagedChain(rows: unknown[]): Record<string, unknown> {
+          let lastRange: [number, number] = [0, PAGE_SIZE - 1];
+
+          const chain: Record<string, unknown> = {
+            select: () => chain,
+            eq: () => chain,
+            neq: () => chain,
+            in: () => chain,
+            is: () => chain,
+            order: () => chain,
+            range: (from: number, to: number) => {
+              lastRange = [from, to];
+              return chain;
+            },
+            then: (
+              resolve: (value: { data: unknown; error: unknown }) => unknown,
+            ) =>
+              Promise.resolve(
+                {
+                  data: rows.slice(lastRange[0], lastRange[1] + 1),
+                  error: null,
+                },
+              ).then(resolve),
+          };
+
+          return chain;
+        }
+
+        const supabase = {
+          from: (table: string) =>
+            table === "shipments"
+              ? pagedChain([shipmentRow])
+              : table === "shipment_lines"
+                ? pagedChain(allLines)
+                : pagedChain([]),
+        } as never;
+
+        const result =
+          await listPeriodShipmentLines(
+            supabase,
+            orgId,
+            annualPeriod,
+          );
+
+        // Before the fix this was PAGE_SIZE (1000) -- the remaining 37
+        // lines were silently gone from the period.
+        expect(result.lines).toHaveLength(
+          TOTAL_LINES,
         );
       },
     );

@@ -325,46 +325,92 @@ export async function listPeriodShipmentLines(
   const lineRows: ShipmentLineRow[] =
     [];
 
+  // 2026-08-31 (final adversarial review, HIGH -- silent under-report).
+  //
+  // These per-batch fetches had NO `.range()`, so each was silently
+  // truncated by PostgREST's `max_rows` exactly as this file's own
+  // SHIPMENTS_PAGE_SIZE comment above warns -- the shipments fetch was
+  // paged for precisely this reason and the lines fetch was not.
+  //
+  // A batch covers SHIPMENT_ID_BATCH_SIZE (200) shipments, so any period
+  // averaging more than ~5 lines per shipment exceeded the 1000-row cap
+  // and simply lost the remainder. The dropped lines then vanished from
+  // build-period-summary.ts's period total and from both exports --
+  // producing a LOWER embedded-emissions figure with no error, no
+  // warning, and nothing in the output to show a reader the number was
+  // partial. An under-report of a regulated figure that looks exactly
+  // like a correct one is the worst failure mode this codebase has, and
+  // is what its numeric discipline exists to rule out.
   for (const batch of shipmentIdBatches) {
-    const { data: batchRows, error: lineError } =
-      await supabase
-        .from("shipment_lines")
-        .select(
-          SHIPMENT_LINE_COLUMNS,
-        )
-        .eq("org_id", orgId)
-        .in("shipment_id", batch)
-        .order("shipment_id", { ascending: true })
-        .order("line_number", { ascending: true });
+    for (let offset = 0; ; offset += SHIPMENTS_PAGE_SIZE) {
+      const { data: batchRows, error: lineError } =
+        await supabase
+          .from("shipment_lines")
+          .select(
+            SHIPMENT_LINE_COLUMNS,
+          )
+          .eq("org_id", orgId)
+          .in("shipment_id", batch)
+          .order("shipment_id", { ascending: true })
+          .order("line_number", { ascending: true })
+          .range(
+            offset,
+            offset + SHIPMENTS_PAGE_SIZE - 1,
+          );
 
-    if (lineError || !batchRows) {
-      return empty;
+      if (lineError || !batchRows) {
+        return empty;
+      }
+
+      lineRows.push(
+        ...(batchRows as ShipmentLineRow[]),
+      );
+
+      if (batchRows.length < SHIPMENTS_PAGE_SIZE) {
+        break;
+      }
     }
-
-    lineRows.push(
-      ...(batchRows as ShipmentLineRow[]),
-    );
   }
 
   const calculationRows: CalculationResultRow[] =
     [];
 
+  // Same silent-truncation fix as the lines fetch above, and it matters
+  // for the same reason: a line whose calculation row was dropped by the
+  // cap renders as "not yet calculated" and contributes nothing to the
+  // period total. An explicit `.order()` is required for `.range()` to
+  // page deterministically -- without a stable sort, two pages can
+  // overlap or skip rows.
   for (const batch of shipmentIdBatches) {
-    const { data: batchRows, error: calculationError } =
-      await supabase
-        .from("latest_calculation_results")
-        .select(
-          "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at, determination",
-        )
-        .in("shipment_id", batch);
+    for (let offset = 0; ; offset += SHIPMENTS_PAGE_SIZE) {
+      const { data: batchRows, error: calculationError } =
+        await supabase
+          .from("latest_calculation_results")
+          .select(
+            "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at, determination",
+          )
+          .in("shipment_id", batch)
+          .order("line_id", { ascending: true })
+          .range(
+            offset,
+            offset + SHIPMENTS_PAGE_SIZE - 1,
+          );
 
-    if (calculationError) {
-      return empty;
+      if (calculationError) {
+        return empty;
+      }
+
+      const pageRows =
+        (batchRows ?? []) as CalculationResultRow[];
+
+      calculationRows.push(
+        ...pageRows,
+      );
+
+      if (pageRows.length < SHIPMENTS_PAGE_SIZE) {
+        break;
+      }
     }
-
-    calculationRows.push(
-      ...((batchRows ?? []) as CalculationResultRow[]),
-    );
   }
 
   const shipmentById =

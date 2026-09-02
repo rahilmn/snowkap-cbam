@@ -38,6 +38,12 @@ import {
   periodColumns,
 } from "./declaration-mapper";
 
+// PostgREST's configured page cap (supabase/config.toml `max_rows`). A
+// query without `.range()` silently truncates to this many rows rather
+// than erroring -- see the paging loop below.
+const SHIPMENTS_PAGE_SIZE =
+  1000;
+
 export interface DeclarationDraftFacts {
   member_shipment_ids: ShipmentId[];
   completeness_report: CompletenessReport;
@@ -127,8 +133,53 @@ export async function computeDeclarationDraftFacts(
       ? shipmentsQuery.is("reporting_period_quarter", null)
       : shipmentsQuery.eq("reporting_period_quarter", columns.reporting_period_quarter);
 
-  const { data: shipmentRows, error: shipmentsError } =
-    await shipmentsQuery;
+  // 2026-08-31 (final adversarial review, HIGH -- silently truncated
+  // declaration membership).
+  //
+  // This query had no `.range()`, so PostgREST's `max_rows` cap
+  // (supabase/config.toml: 1000) silently truncated it -- returning a
+  // PARTIAL member set with `error: null`, which is indistinguishable
+  // here from a genuinely small period.
+  //
+  // That matters more than the reporting equivalent, because this result
+  // becomes `member_shipment_ids`, which markDeclarationReady FREEZES
+  // and record_declaration_filed() then trusts verbatim. A period with
+  // more than 1000 non-VOID shipments would have produced an immutable
+  // filed snapshot that silently omitted real shipments, understating
+  // the declared total -- and the omission would be archived, not
+  // merely displayed. MASTER_PLAN.md §33's own budget scale is 50k
+  // shipments, so this is well inside the intended operating range.
+  //
+  // Paged the same way list-period-shipment-lines.ts pages its own
+  // shipments fetch. A stable `.order("id")` is required for `.range()`
+  // to page deterministically.
+  const shipmentRows: { id: string; reference: string; status: string }[] =
+    [];
+
+  let shipmentsError: unknown = null;
+
+  for (let offset = 0; ; offset += SHIPMENTS_PAGE_SIZE) {
+    const { data: pageRows, error: pageError } =
+      await shipmentsQuery
+        .order("id", { ascending: true })
+        .range(
+          offset,
+          offset + SHIPMENTS_PAGE_SIZE - 1,
+        );
+
+    if (pageError || !pageRows) {
+      shipmentsError = pageError ?? new Error("no rows");
+      break;
+    }
+
+    shipmentRows.push(
+      ...(pageRows as { id: string; reference: string; status: string }[]),
+    );
+
+    if (pageRows.length < SHIPMENTS_PAGE_SIZE) {
+      break;
+    }
+  }
 
   if (shipmentsError || !shipmentRows) {
     // Fails closed to "no members, incomplete" -- never a fabricated
