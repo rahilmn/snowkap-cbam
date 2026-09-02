@@ -3429,3 +3429,295 @@ test address is one Supabase refuses to send to anyway.
 Until a real external email is **delivered and consumed**, SMTP remains
 **NOT VERIFIED** and no claim to the contrary appears anywhere in this
 report.
+
+---
+
+## 52. Final adversarial release review (2026-08-31)
+
+Seven independent lenses (active-org authorization/IDOR, declaration
+lifecycle + determination forgery, calculation units/precision,
+audit attribution, auth/session/rate-limiting, secrets/config drift,
+regulatory provenance), each candidate finding then challenged by an
+independent skeptic instructed to refute. **43 agents, 0 errors,
+1,669 tool calls.**
+
+It found two release blockers that every prior round — including the
+204-sub-agent audit of §16 — had missed, and both are the same class as
+the v7 defect: **the forgery validator is too strict and rejects
+legitimate determinations.**
+
+### 52.1 B1 (CRITICAL) — a route-blank line cannot be determined against a route-specific record
+
+`app.emission_determination_matches_regulatory_record` compares the
+**matched record's** route against the **line's declared** route:
+
+```sql
+-- v8, line 357
+if v_source_route_code is distinct from p_production_route_indicator then
+    return false;
+end if;
+```
+
+where `v_source_route_code` is read from the *resolution's record
+identity* (line 276). But the resolver deliberately permits these to
+differ: `resolve-default-value.ts` gates `usableExact` on
+`!input.production_route || ...`, so when no route is requested, a
+unique route-specific record is a legal selection. The two
+implementations of the same rule disagree, and the validator wins.
+
+**Live-reproduced** against real local Postgres with a proper positive
+control and single-variable isolation, inside rolled-back transactions:
+
+| Case | Validator |
+|---|---|
+| Real persisted determination, as-is (**positive control**) | **True** |
+| Same record (AL / `2523 10 00 90`, route `(A)`), line **declares** the route | **True** |
+| Same record, line declares **no** route | **False** |
+
+The only difference is the line's declared route.
+
+**User-visible effect:** `resolve-line-emissions.ts` maps the trigger's
+42501 to `SHIPMENT_NOT_EDITABLE`, so the screen says *"This shipment is
+locked or void and can no longer be edited"* — **on a DRAFT shipment**.
+The message is false, the line can never be determined or calculated,
+and the period stays permanently INCOMPLETE. The review computed the
+scale from the ACTIVE dataset: **4,147 country/code pairs** with a single
+usable route-specific record and no route-independent sibling, including
+**every aluminium row** (1,632 available, 0 route-independent). The route
+field is labelled "optional" in the UI, so blank is the default flow.
+
+### 52.2 B2 (HIGH) — every UNLISTED-origin determination is structurally rejected
+
+`CountryMappingOutcome`'s UNLISTED variant is `{ status: "UNLISTED" }`
+with **no** `regulatory_country_name` (by design). The validator's `else`
+arm — which UNLISTED falls into — compares against exactly that absent
+key, so the right-hand side is always SQL NULL and
+`X IS DISTINCT FROM NULL` is always true.
+
+**Live-reproduced, single variable:** taking the same real determination
+that returns **True** and changing *only* `country_mapping` to
+`{"status":"UNLISTED"}` returns **False**.
+
+R7 clause 1 is implemented correctly upstream and `pnpm
+regulatory:verify` is VALID; its entire *persistence* path is dead.
+
+### 52.3 Both are live on production, and no bad data exists
+
+Read directly from the production database:
+
+- v8 is installed (`v_own_country_has_usable` present), and both
+  offending comparisons are present. **B1 and B2 are live.**
+- `shipment_lines` with an UNLISTED mapping: **0**
+- `shipment_lines` with a route-specific record and a blank declared
+  route: **0**
+
+Both fail **closed**. No wrong number has been persisted, and none can
+be. This is a blocked workflow, not corrupted data — which is why they
+are release blockers rather than an incident.
+
+### 52.4 Why these are ESCALATED, not fixed
+
+I did not change the validator. Per CLAUDE.md's execution model, a
+material security-boundary change and a material regulatory-behaviour
+change are both explicit stop-and-escalate triggers, and this is both:
+
+- The route binding exists to stop **route forgery** (it was added in
+  v6). Loosening it hastily risks reopening the hole that took eight
+  iterations and three independent reviews to close.
+- The correct semantics is a genuine open question: should the validator
+  *re-derive* what the resolver would legitimately select (making the two
+  agree by construction), or should the product *require* a declared
+  route before a route-specific record may back a line? That is a
+  product and security decision, not a defect with one obvious fix.
+- B2's fix is coupled to the **already-escalated EU-origin scope gate**:
+  restoring UNLISTED acceptance also restores persisted determinations
+  for EU-member-state origins, which CBAM does not cover. Fixing B2
+  without deciding that would quietly create out-of-scope determinations.
+
+Inventing an answer to either would be exactly the "broadening
+regulatory semantics to satisfy an audit" the directive forbids.
+
+### 52.5 B3 (HIGH) — FIXED: silently understated regulated totals
+
+`max_rows = 1000`, and a PostgREST query without `.range()` truncates
+silently with `error: null`. Before this round `.range(` appeared
+**exactly once** in all non-test source. Three sibling queries lacked it:
+
+- both per-batch fetches in `list-period-shipment-lines.ts`
+  (`SHIPMENT_ID_BATCH_SIZE` = 200 was sized for URL length, not rows, so
+  any period averaging >5 lines/shipment truncated) — dropped lines
+  vanished from the period total and both exports with no marker;
+- `compute-declaration-draft-facts.ts`, whose result becomes
+  `member_shipment_ids`, **frozen** at READY and trusted verbatim by
+  `record_declaration_filed()` — past 1000 shipments an *immutable filed
+  snapshot* would archive a total omitting real shipments.
+
+All three now page, with stable `.order()` (`.range()` cannot page
+deterministically without one). Regression test added that fails against
+the unpaged implementation: one full page plus a 37-row remainder,
+asserting all 1,037 survive. Commit `388733b`.
+
+### 52.6 B4 — no CI run has ever executed against the deployed commit
+
+`.github/workflows/ci.yml` triggers only on `push: [main]` and
+`pull_request`. The deployed SHA is on `feature/full-product-build`
+only, and `gh run list --branch feature/full-product-build` is **empty**.
+So `pnpm test`, the secret scan, the dependency audit and Playwright have
+never run in CI against production's commit — they have only ever run
+locally, by me. §45.3 already recorded this; B1 is the concrete proof of
+why it matters.
+
+### 52.7 Non-blocking findings that survived refutation
+
+HIGH: `calculation_results.calculated_at` is client-supplied with no
+trigger or CHECK (a forged future-dated row wins `ORDER BY calculated_at
+DESC` permanently; fix precedent exists in `pin_audit_event_occurred_at`).
+Audit completeness is application convention only — memberships,
+installations and supplier DELETEs leave no record. Organization
+`capabilities`/EORI/declarant-status changes write no audit event and the
+catalog has no `organization.*` slot to record one.
+
+MEDIUM: filed figures cannot be corrected (LOCKED is terminal in all
+three layers; amendments can only *add*). Exports attribute a stale
+calculation's figure to the line's *current* determination (the
+declaration path is correctly gated; exports are not). `/reset-password`
+sets a password for any live session (§45.4, deliberately held).
+`signOutAction` discards `signOut()`'s error, so a user can be told they
+are signed out while the session survives. ACTUAL determinations are not
+period-matched. No staleness signal for DEFAULT determinations after a
+dataset activation. `record_shared_data_consumption` lets a grantee forge
+events into the grantor's stream.
+
+LOW: `getShipmentDetail` takes no org context (its sibling does) —
+cross-org read confined to the caller's *own* memberships, no tenancy
+boundary crossed. Invitation issue/revoke unaudited. `recordAuditEvent`
+is fire-and-forget at all 34 call sites. `browser-client.ts` is dead code
+with non-httpOnly cookie options — a loaded gun for the next caller.
+`resolveGoodSectorForActualLine` takes `candidates[0]` on AMBIGUOUS
+(latent; unreachable on the current dataset). `DEFINITIVE_REGIME_START_YEAR`
+is hardcoded in domain code rather than entering as a dataset row.
+
+**Verified clean (no defect):** `isSafeRedirectPath` survived a fresh
+bypass attempt including unicode, layered percent-encoding and
+parser-differential tricks. The E2E rate-limit bypass is compiled out
+entirely. ENGINE_VERSION discipline and the emission-unit guard hold. The
+DEFAULT path's Annex II premise holds against the actual dataset.
+
+### 52.8 Open questions — owner decision, no rule proposed
+
+1. **Route binding.** Should the validator accept a resolver-selected
+   route-specific record for a route-blank line (re-deriving rather than
+   string-comparing), or should the product require a declared route?
+2. **UNLISTED restoration and EU origins.** Restoring UNLISTED
+   acceptance also restores persisted determinations for EU-member-state
+   origins. Should these be sequenced together, and how should
+   in-scope/out-of-scope enter the system as a versioned dataset?
+3. **Correction of filed data.** May a filed record's shipment ever be
+   unlocked, and what form does a correction take?
+4. **ACTUAL dataset period.** May a dataset whose period differs from the
+   shipment's be used at all? No register entry answers this.
+5. **Stale figures in period totals.** Exclude, or include and flag?
+   Either answer changes a reported number.
+6. **Regime boundary provenance.** Does the definitive-regime start year
+   warrant its own dataset row?
+7. **Numeric ceiling.** Is 40 significant digits correct, and should
+   declared quantities carry a digit cap? Any answer needs a citation.
+
+---
+
+## 53. FINAL RELEASE DECISION
+
+Deployed commit: **`388733b4d0211367c8eeb1d0e67bc1fd08c2f44d`** — production
+serves exactly this SHA, self-reported by `/api/health`.
+
+### 53.1 Gates, all re-run from this HEAD
+
+| Gate | Result |
+|---|---|
+| `pnpm typecheck` | clean |
+| `pnpm test` (unit + integration + RLS/isolation + architecture) | **1374 passed · 14 skipped · 0 failed** (122 files) |
+| `pnpm regulatory:verify` — **against the production DB** | **RESULT: VALID** — 12,540/12,540 reconciled, source checksum `900583…6f9f35` PASS |
+| Playwright E2E (production build + real Supabase) | **24 passed · 8 skipped · 0 failed**; all three journeys real |
+| Production build | exit 0, 0 errors |
+| Secret scan (authoritative CI pattern) | clean |
+| NUL-byte scan (the `git grep` blind spot) | none |
+| E2E rate-limit bypass compiled out of production build | **0 files** carry the flag |
+| Service-role key in client bundle | **0** matches in `.next/static` |
+| Test-suite stability | 5 consecutive green runs after serialisation |
+
+### 53.2 Production evidence
+
+`/api/health` → `{"status":"ok"}` with `database`, `active_regulatory_dataset`,
+`app_url`, `product_schema` all `ok`. `/api/live` → `alive`. Security
+headers verified live: CSP (no `unsafe-eval`), HSTS `max-age=63072000;
+includeSubDomains`, `frame-ancestors 'none'`, `nosniff`, `X-Frame-Options:
+DENY`, `X-Powered-By` absent. Route enumeration (§50): 31 routes, all 20
+product routes 307 to `/sign-in`, three API routes 401, `/design` 404, no
+data leaked to any unauthenticated caller, IDOR probes with real
+production ids all refused.
+
+### 53.3 Migration / promotion status
+
+**4 of 61 repo migrations are not recorded in the production ledger**
+(`20260831100000`, `…110000`, `…120000`, `…140000`). Three are
+applied-but-unrecorded (schema verified correct by reading live policy
+and constraint definitions); `…140000` (audit_events bounds) is **not
+applied at all** — production has that fix's application-layer guard but
+not its CHECK constraints. All four files are idempotent. Reconciling
+needs an owner-gated `supabase db push`.
+
+# RELEASE BLOCKED
+
+### 53.4 Blocking items
+
+1. **SMTP delivery does not work** (§51). End-to-end test performed
+   through the real production form: it failed. Resend's account log
+   contains **zero** sends from this product, ever; Supabase throttles at
+   ~2 attempts, the signature of its built-in sender. **No real user can
+   complete registration or password reset today.** Owner-actionable:
+   configure custom SMTP with a sender on `snowkap.co.in` (the only
+   verified Resend domain).
+2. **B1 (CRITICAL) — the default determination path is broken for
+   route-blank lines** (§52.1). Live-reproduced with a positive control:
+   4,147 country/code pairs and 100% of aluminium, surfacing as a false
+   *"shipment is locked or void"* on a DRAFT shipment. **Escalated, not
+   fixed** — see §52.4.
+3. **B2 (HIGH) — every UNLISTED-origin determination is rejected**
+   (§52.2). Live-reproduced, single variable. Coupled to the escalated
+   EU-origin scope gate. **Escalated, not fixed.**
+4. **No CI run has ever executed against the deployed commit** (§52.6).
+   The workflow triggers only on `main` push or PR; the deploy branch has
+   never run it. Every gate above was run by me locally.
+5. **Migration ledger drift + one unapplied migration** (§53.3).
+
+B1 and B2 both fail **closed**, and production currently holds **zero**
+rows in either affected state — no wrong number has been persisted or can
+be. These are blocked workflows, not corrupted data.
+
+### 53.5 What I could not independently verify
+
+- Any authenticated production behaviour beyond what the earlier live
+  journeys (§16.12, §16.14) already covered.
+- Supabase Auth's SMTP configuration itself — dashboard/Management-API
+  only; this session's MCP returns "no permission" for every
+  project-level read.
+- Production PostgREST's `db_max_rows` (local `config.toml` pins 1000;
+  the cloud default is also 1000, but this project's value was not read).
+- Whether a real external email is delivered and consumed — that is
+  §46, and it is the owner's to run.
+
+### 53.6 Owner actions
+
+1. Configure Supabase Auth custom SMTP (sender on `snowkap.co.in`) and
+   raise the Auth email rate limit.
+2. Decide §52.8's open questions 1 and 2 — they gate B1 and B2, and both
+   are security/regulatory decisions, not defects with one obvious fix.
+3. `supabase db push` to reconcile the ledger and apply `…140000`.
+4. Run the §46 real-user check with an address you control.
+5. Arrange for CI to run against the deploy branch (or open a PR) so the
+   gates execute somewhere other than my machine.
+
+**RELEASE BLOCKED.** Not because CI is red — every gate above is green —
+but because the primary regulated workflow has a reproduced CRITICAL
+break, no user can receive an email, and no automated gate has ever run
+against the artifact actually deployed.
