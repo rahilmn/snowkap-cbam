@@ -1,0 +1,19 @@
+<!--
+  Magic link, sent by inviteMember when the invited address ALREADY has a
+  Snowkap account (admin.inviteUserByEmail returns email_exists for a
+  confirmed user, so no invitation mail would otherwise be delivered and
+  the invitee would hear nothing).
+
+  The hard-coded next=/accept-invitation is valid only while
+  src/application/organizations/invitations.ts is the sole caller of
+  signInWithOtp in this codebase. Any future caller must revisit it.
+
+  Wording is invitation-specific rather than generic sign-in copy: this
+  email is only ever sent because someone invited this address.
+-->
+<h2>Sign in to Snowkap CBAM</h2>
+<p>You have a pending invitation to an organization on Snowkap CBAM. Open the link below, then select <strong>Continue</strong> to sign in and review it.</p>
+<p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=magiclink&amp;next=/accept-invitation">Continue</a></p>
+<p style="color:#555;font-size:13px">If the button does not work, copy this address into your browser:<br>
+{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=magiclink&amp;next=/accept-invitation</p>
+<p style="color:#777;font-size:12px">This link can only be used once, and nothing happens until you select Continue on the page it opens.</p>

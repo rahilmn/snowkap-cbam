@@ -20,6 +20,28 @@ import {
   isSafeRedirectPath,
 } from "./is-safe-redirect-path";
 
+import {
+  parseAuthLinkError,
+} from "./parse-auth-link-error";
+
+import {
+  describeAuthLinkError,
+  toAuthLinkKind,
+  type AuthLinkErrorCopy,
+} from "../auth-link-errors";
+
+import {
+  AuthLinkErrorPanel,
+} from "../auth-link-error-panel";
+
+import {
+  Wordmark,
+} from "../../../components/shell/wordmark";
+
+import {
+  Card,
+} from "../../../components/ui/card";
+
 /**
  * Landing target for Supabase Auth email links (invite, magic link,
  * password reset). Two distinct delivery shapes reach here, confirmed
@@ -68,15 +90,53 @@ function AuthCallback() {
     useSearchParams();
 
   const [
-    error,
-    setError,
+    errorCopy,
+    setErrorCopy,
   ] =
-    useState<string | null>(
+    useState<AuthLinkErrorCopy | null>(
       null,
     );
 
   useEffect(
     () => {
+      // 2026-09-03 (P14). GoTrue reports a failed verification by
+      // redirecting BACK here with the failure in the URL -- in the hash
+      // fragment always, and additionally in the query string for a
+      // PKCE-flow token. Nothing here read those parameters until now,
+      // so a spent invitation link, a rate limit and a PKCE mismatch all
+      // rendered the same sentence with no next step.
+      //
+      // Checked FIRST: when GoTrue has told us why it failed, there is
+      // no session material in the URL to try, and attempting one would
+      // only replace a precise explanation with a generic one.
+      const linkError =
+        parseAuthLinkError(
+          window.location.hash,
+          window.location.search,
+        );
+
+      if (linkError) {
+        setErrorCopy(
+          describeAuthLinkError(
+            {
+              code: linkError.code,
+              kind: toAuthLinkKind(
+                linkError.type ??
+                  new URLSearchParams(
+                    window.location.hash.replace(/^#/, ""),
+                  ).get("type"),
+              ),
+              pkceCodeShape:
+                Boolean(
+                  searchParams.get("code"),
+                ),
+            },
+          ),
+        );
+
+        return;
+      }
+
       const requestedNext =
         searchParams.get(
           "next",
@@ -138,9 +198,22 @@ function AuthCallback() {
               );
             })();
 
+      const kind =
+        toAuthLinkKind(
+          searchParams.get("type") ??
+            new URLSearchParams(
+              window.location.hash.replace(/^#/, ""),
+            ).get("type"),
+        );
+
+      const pkceCodeShape =
+        Boolean(code);
+
       if (!sessionPromise) {
-        setError(
-          "This link is invalid or has expired.",
+        setErrorCopy(
+          describeAuthLinkError(
+            { code: null, kind, pkceCodeShape },
+          ),
         );
 
         return;
@@ -150,8 +223,10 @@ function AuthCallback() {
         .then(
           (result) => {
             if (result.status === "error") {
-              setError(
-                "This link is invalid or has expired.",
+              setErrorCopy(
+                describeAuthLinkError(
+                  { code: result.code, kind, pkceCodeShape },
+                ),
               );
 
               return;
@@ -164,8 +239,10 @@ function AuthCallback() {
         )
         .catch(
           () => {
-            setError(
-              "This link is invalid or has expired.",
+            setErrorCopy(
+              describeAuthLinkError(
+                { code: null, kind, pkceCodeShape },
+              ),
             );
           },
         );
@@ -173,10 +250,22 @@ function AuthCallback() {
     [router, searchParams],
   );
 
+  if (errorCopy) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-8 bg-[var(--surface-page)] p-6">
+        <Wordmark className="text-lg" />
+
+        <Card className="w-full max-w-md p-6">
+          <AuthLinkErrorPanel copy={errorCopy} />
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[var(--surface-page)] p-6">
       <p className="text-sm text-[var(--text-secondary)]">
-        {error ?? "Signing you in…"}
+        Signing you in…
       </p>
     </div>
   );

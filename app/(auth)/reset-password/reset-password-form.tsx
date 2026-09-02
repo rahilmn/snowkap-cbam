@@ -28,7 +28,13 @@ import {
   initialAuthActionState,
 } from "../action-state";
 
-export function ResetPasswordForm() {
+export function ResetPasswordForm(
+  {
+    next,
+  }: {
+    next?: string | null;
+  } = {},
+) {
   const [
     state,
     formAction,
@@ -44,6 +50,14 @@ export function ResetPasswordForm() {
       action={formAction}
       className="flex w-full max-w-sm flex-col gap-4"
     >
+      {next ? (
+        <input
+          type="hidden"
+          name="next"
+          value={next}
+        />
+      ) : null}
+
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="password">
           New password

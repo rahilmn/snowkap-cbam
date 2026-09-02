@@ -15,6 +15,7 @@ import type {
 
 export type InviteMemberResult =
   | { status: "OK"; invitationId: InvitationId }
+  | { status: "OK_MAGIC_LINK_SENT"; invitationId: InvitationId }
   | { status: "OK_EMAIL_NOT_SENT"; invitationId: InvitationId }
   | { status: "ALREADY_PENDING" }
   | { status: "INSERT_FAILED" };
@@ -32,13 +33,18 @@ export type InviteMemberResult =
  * narrowly scoped and constructed by the caller (a Server Action),
  * not by this function.
  *
- * A failed send (most commonly: the email already belongs to an
- * existing Snowkap user -- inviteUserByEmail is for provisioning new
- * accounts) is deliberately not distinguished from other send failures
- * in the returned status, to avoid an account-enumeration side channel
- * ("this email already has an account" vs "the mail server hiccuped").
- * Either way the invitation row still exists: once that person signs
- * in with any account matching the invited email, RLS
+ * When the address already belongs to a confirmed Snowkap user,
+ * inviteUserByEmail refuses with email_exists and a magic link is sent
+ * instead -- see the comment at that branch. The two outcomes are
+ * reported to the caller as distinct statuses but rendered identically
+ * to the admin ("sent"), which is BETTER for account enumeration than
+ * the previous behaviour: the old code surfaced a message that
+ * volunteered "this can happen if the person already has a Snowkap
+ * account", which is exactly the disclosure the distinction was
+ * supposed to avoid.
+ *
+ * Either way the invitation row still exists: once that person signs in
+ * with any account matching the invited email, RLS
  * (organization_invitations_select_own_email) lets them see and accept
  * it from /accept-invitation regardless of how they got there.
  */
@@ -108,15 +114,60 @@ export async function inviteMember(
       },
     );
 
-  if (sendError) {
+  if (!sendError) {
     return {
-      status: "OK_EMAIL_NOT_SENT",
+      status: "OK",
       invitationId,
     };
   }
 
+  // 2026-09-03 (P14). inviteUserByEmail refuses an address that already
+  // has a confirmed account (422 email_exists) -- it exists to PROVISION
+  // accounts. Until now that meant the invitation row was created and
+  // the invitee was told nothing at all: no mail was sent, and the only
+  // way they would ever learn of the invitation was if somebody told
+  // them out of band to go and look at a URL.
+  //
+  // A magic link closes that. It is emailed by the same project, lands
+  // on the same /auth/confirm screen, and carries the invitee to
+  // /accept-invitation once they press Continue.
+  //
+  // Deliberately narrow, because this mails a genuine sign-in credential
+  // to an address an admin typed:
+  //   - reached only through inviteMemberAction, which is ADMIN/OWNER
+  //     only (RLS on the insert above) and IP rate limited;
+  //   - shouldCreateUser: false, so it can never provision an account;
+  //   - only on email_exists, never as a general fallback for a mail
+  //     outage;
+  //   - and the invitation row must already exist, which the unique
+  //     PENDING index means requires revoking any previous one first.
+  //
+  // The residual risk is recorded rather than waved away: an org admin
+  // can cause repeated sign-in links to be mailed to any address they
+  // are willing to type, bounded by the limiter and the project's own
+  // hourly email budget. See the release report's high-risk register.
+  if (sendError.code === "email_exists") {
+    const { error: magicLinkError } =
+      await adminSupabase.auth.signInWithOtp(
+        {
+          email: normalizedEmail,
+          options: {
+            emailRedirectTo: params.redirectTo,
+            shouldCreateUser: false,
+          },
+        },
+      );
+
+    if (!magicLinkError) {
+      return {
+        status: "OK_MAGIC_LINK_SENT",
+        invitationId,
+      };
+    }
+  }
+
   return {
-    status: "OK",
+    status: "OK_EMAIL_NOT_SENT",
     invitationId,
   };
 }

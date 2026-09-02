@@ -83,7 +83,11 @@ describe(
           );
 
         expect(result).toEqual(
-          { status: "error" },
+          // 2026-09-03 (P14): the result now carries GoTrue's own error
+          // code so the callback can explain WHICH failure occurred
+          // rather than rendering one sentence for all of them. Null here
+          // because these fixtures supply an error without a code.
+          { status: "error", code: null },
         );
       },
     );
@@ -104,7 +108,11 @@ describe(
           );
 
         expect(result).toEqual(
-          { status: "error" },
+          // 2026-09-03 (P14): the result now carries GoTrue's own error
+          // code so the callback can explain WHICH failure occurred
+          // rather than rendering one sentence for all of them. Null here
+          // because these fixtures supply an error without a code.
+          { status: "error", code: null },
         );
       },
     );

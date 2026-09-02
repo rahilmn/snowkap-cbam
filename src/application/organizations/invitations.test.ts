@@ -128,6 +128,10 @@ function mockUserScopedSupabase(
 
 function mockAdminSupabase(
   inviteError: unknown = null,
+  options: {
+    magicLinkError?: unknown;
+    calls?: { signInWithOtp: unknown[] };
+  } = {},
 ) {
   return {
     auth: {
@@ -136,6 +140,14 @@ function mockAdminSupabase(
           Promise.resolve(
             { data: {}, error: inviteError },
           ),
+      },
+
+      signInWithOtp: (args: unknown) => {
+        options.calls?.signInWithOtp.push(args);
+
+        return Promise.resolve(
+          { data: {}, error: options.magicLinkError ?? null },
+        );
       },
     },
   } as never;
@@ -518,6 +530,135 @@ describe(
 
         expect(result).toEqual(
           [],
+        );
+      },
+    );
+  },
+);
+
+describe(
+  "inviteMember when the address already has an account (P14)",
+  () => {
+    /**
+     * admin.inviteUserByEmail exists to PROVISION accounts, so it refuses
+     * an address that already has a confirmed one (422 email_exists).
+     * Until 2026-09-03 that meant the invitation row was created and the
+     * invitee was told nothing at all -- no mail was sent, and the only
+     * way they would learn of the invitation was somebody telling them
+     * out of band to visit a URL.
+     *
+     * Confirmed against real GoTrue in
+     * tests/integration/auth-email-links.test.ts, which asserts both the
+     * email_exists refusal and that the magic link that replaces it
+     * verifies into a session.
+     */
+    it(
+      "sends a magic link instead, scoped so it can never provision an account",
+      async () => {
+        const calls =
+          { signInWithOtp: [] as unknown[] };
+
+        const result =
+          await inviteMember(
+            mockUserScopedSupabase(
+              {
+                insertResult: { data: { id: invitationId }, error: null },
+              },
+            ),
+            mockAdminSupabase(
+              { code: "email_exists" },
+              { calls },
+            ),
+            {
+              orgId,
+              email: "existing@example.com",
+              role: "MEMBER",
+              redirectTo: "http://localhost:3000/auth/callback?next=/accept-invitation",
+            },
+          );
+
+        expect(result).toEqual(
+          { status: "OK_MAGIC_LINK_SENT", invitationId },
+        );
+
+        expect(calls.signInWithOtp).toEqual(
+          [
+            {
+              email: "existing@example.com",
+              options: {
+                emailRedirectTo:
+                  "http://localhost:3000/auth/callback?next=/accept-invitation",
+                shouldCreateUser: false,
+              },
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "does NOT send a magic link for any other send failure -- this is a specific remedy, not a general fallback",
+      async () => {
+        // Mailing a sign-in credential is a real capability handed to an
+        // org admin. It is warranted when the invitee demonstrably has an
+        // account and would otherwise hear nothing; it is not warranted
+        // because the mail server hiccuped.
+        const calls =
+          { signInWithOtp: [] as unknown[] };
+
+        const result =
+          await inviteMember(
+            mockUserScopedSupabase(
+              {
+                insertResult: { data: { id: invitationId }, error: null },
+              },
+            ),
+            mockAdminSupabase(
+              { code: "unexpected_failure" },
+              { calls },
+            ),
+            {
+              orgId,
+              email: "someone@example.com",
+              role: "MEMBER",
+              redirectTo: "http://localhost:3000/auth/callback",
+            },
+          );
+
+        expect(result).toEqual(
+          { status: "OK_EMAIL_NOT_SENT", invitationId },
+        );
+
+        expect(calls.signInWithOtp).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "falls back to OK_EMAIL_NOT_SENT when the magic link itself is refused, e.g. by the hosted per-address interval",
+      async () => {
+        const result =
+          await inviteMember(
+            mockUserScopedSupabase(
+              {
+                insertResult: { data: { id: invitationId }, error: null },
+              },
+            ),
+            mockAdminSupabase(
+              { code: "email_exists" },
+              { magicLinkError: { code: "over_email_send_rate_limit" } },
+            ),
+            {
+              orgId,
+              email: "existing@example.com",
+              role: "MEMBER",
+              redirectTo: "http://localhost:3000/auth/callback",
+            },
+          );
+
+        expect(result).toEqual(
+          { status: "OK_EMAIL_NOT_SENT", invitationId },
         );
       },
     );

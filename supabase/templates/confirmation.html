@@ -1,0 +1,7 @@
+<!-- Sign-up confirmation. See invite.html's header for why this points at /auth/confirm rather than GoTrue's verify endpoint. -->
+<h2>Confirm your email address</h2>
+<p>Open the link below, then select <strong>Continue</strong> to confirm this email address and finish creating your Snowkap CBAM account.</p>
+<p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=signup&amp;next=/onboarding">Continue</a></p>
+<p style="color:#555;font-size:13px">If the button does not work, copy this address into your browser:<br>
+{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=signup&amp;next=/onboarding</p>
+<p style="color:#777;font-size:12px">This link can only be used once, and nothing happens until you select Continue on the page it opens.</p>

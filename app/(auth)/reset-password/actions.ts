@@ -17,6 +17,10 @@ import {
   getClientIp,
 } from "../../../components/shell/get-client-ip";
 
+import {
+  isSafeRedirectPath,
+} from "../../auth/callback/is-safe-redirect-path";
+
 import type {
   AuthActionState,
 } from "../action-state";
@@ -42,6 +46,37 @@ const updatePasswordLimiter =
   createInMemoryRateLimiter(
     UPDATE_PASSWORD_RATE_LIMIT,
   );
+
+/**
+ * Where to land once the password is set.
+ *
+ * The invitation flow routes through this screen (/auth/confirm sends an
+ * `invite` link here, because GoTrue confirms an invited account without
+ * the invitee ever choosing a password), so it has to be able to carry
+ * the user onward to /accept-invitation afterwards.
+ *
+ * The value is re-validated here rather than trusted from the page: it
+ * arrives as a hidden form field, and a hidden field is client-controlled
+ * at POST time no matter what the page rendered. Same allowlist the auth
+ * callback uses -- see is-safe-redirect-path.ts for the open-redirect and
+ * session-fixation chain it closes.
+ */
+function resolveDestination(
+  requested: string | undefined,
+): string {
+  return requested && isSafeRedirectPath(requested)
+    ? requested
+    : "/";
+}
+
+function appendFlag(
+  destination: string,
+  flag: string,
+): string {
+  return destination.includes("?")
+    ? `${destination}&${flag}`
+    : `${destination}?${flag}`;
+}
 
 const MINIMUM_PASSWORD_LENGTH = 8;
 
@@ -160,11 +195,36 @@ export async function updatePasswordAction(
     };
   }
 
-  // The recovery session updateUser() just confirmed the password
-  // against is now an ordinary valid session for this user (Supabase
-  // does not invalidate it after a password change) -- land them
-  // straight in the app, the same "successful auth action redirects,
-  // never returns a state to render" convention signInAction/
-  // signUpAction (app/(auth)/actions.ts) already use.
-  redirect("/");
+  // 2026-09-03 (P14). Sign OTHER sessions out, keeping this one.
+  //
+  // A password change should end every session the old password could
+  // have established. `scope: "others"` is the only variant that does
+  // that without also ending the session the user is standing in --
+  // auth-js skips its own removeCurrentSession for this scope alone.
+  //
+  // Its outcome must never block the redirect. This action sits on the
+  // invitation path (an invited user sets a password here before
+  // accepting), and returning an error state after the password has
+  // ALREADY changed would strand that user on this form with nothing
+  // useful to retry: the password is set, the form cannot tell them so,
+  // and the invitation is one screen away. So a failure here is carried
+  // to the destination as a notice instead.
+  const { error: othersError } =
+    await supabase.auth.signOut(
+      { scope: "others" },
+    );
+
+  const destination =
+    resolveDestination(
+      formData.get("next")?.toString(),
+    );
+
+  redirect(
+    othersError
+      ? appendFlag(
+          destination,
+          "password_change=others_not_signed_out",
+        )
+      : destination,
+  );
 }

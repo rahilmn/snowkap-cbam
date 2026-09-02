@@ -1,0 +1,26 @@
+<!--
+  Snowkap CBAM invitation email.
+
+  The link points at THIS APPLICATION, not at GoTrue's /auth/v1/verify
+  endpoint, and carries a token_hash rather than a token. That is the
+  whole point: /auth/v1/verify consumes its single-use token on GET, so
+  anything that opens the link before the recipient does -- a corporate
+  mail-security scanner, a link preview, a prefetch -- burns it. On
+  2026-09-02 a real invitee's token was consumed 76 seconds after
+  delivery by a Chromium client from a Microsoft Azure address, and the
+  human's own click landed on "This link is invalid or has expired."
+
+  /auth/confirm renders inert on GET and exchanges the token only behind
+  an explicit Continue press.
+
+  No `next` parameter here on purpose: app/auth/confirm/parse-confirm-link.ts
+  routes an invite to the set-password step and deliberately ignores any
+  next, so that decision lives in exactly one place.
+-->
+<h2>You have been invited</h2>
+<p>You have been invited to join an organization on Snowkap CBAM. Open the link below, then select <strong>Continue</strong> to accept it and choose a password.</p>
+<p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=invite">Continue</a></p>
+<p>If you did not expect this invitation, you can ignore this email.</p>
+<p style="color:#555;font-size:13px">If the button does not work, copy this address into your browser:<br>
+{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=invite</p>
+<p style="color:#777;font-size:12px">This link can only be used once, and nothing happens until you select Continue on the page it opens.</p>

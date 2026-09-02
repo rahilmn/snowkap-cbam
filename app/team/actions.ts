@@ -652,6 +652,13 @@ export async function inviteMemberAction(
 
   switch (result.status) {
     case "OK":
+
+    // 2026-09-03 (P14): reported identically to the admin. The invitee
+    // received a magic link instead of a provisioning invitation because
+    // they already have an account -- an implementation detail from the
+    // admin's point of view, and one whose disclosure would tell an
+    // admin whether an arbitrary address is registered here.
+    case "OK_MAGIC_LINK_SENT":
       return {
         status: "idle",
       };
@@ -661,8 +668,8 @@ export async function inviteMemberAction(
         status: "error",
         message:
           "The invitation was created, but the email couldn't be sent " +
-          "(this can happen if the person already has a Snowkap account). " +
-          "Ask them to sign in and visit /accept-invitation.",
+          "right now. Try again in a minute, or ask them to sign in and " +
+          "open Pending invitations from the menu.",
       };
 
     case "ALREADY_PENDING":

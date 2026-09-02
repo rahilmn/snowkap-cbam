@@ -337,9 +337,33 @@ otp_expiry = 3600
 # sender_name = "Admin"
 
 # Uncomment to customize email template
-# [auth.email.template.invite]
-# subject = "You have been invited"
-# content_path = "./supabase/templates/invite.html"
+# 2026-09-03 (P14). These four templates are the local counterpart of the
+# hosted project's Auth email templates, and they must stay in lockstep:
+# the E2E and integration suites follow the links these produce, so if
+# they diverge from production the suites stop testing the shape real
+# users receive.
+#
+# Every link points at THIS APPLICATION (/auth/confirm) carrying a
+# token_hash, rather than at GoTrue's own /auth/v1/verify endpoint. That
+# endpoint consumes its single-use token on GET, so anything that opens
+# the link before the recipient does -- a corporate mail-security
+# scanner, a link preview, a prefetch -- burns it. It happened to a real
+# invitee on 2026-09-02, 76 seconds after delivery.
+[auth.email.template.invite]
+subject = "You have been invited to Snowkap CBAM"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.template.confirmation]
+subject = "Confirm your Snowkap CBAM email address"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "Reset your Snowkap CBAM password"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.magic_link]
+subject = "Your Snowkap CBAM sign-in link"
+content_path = "./supabase/templates/magic_link.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]

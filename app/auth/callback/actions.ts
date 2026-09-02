@@ -6,7 +6,20 @@ import {
 
 export type EstablishSessionResult =
   | { status: "ok" }
-  | { status: "error" };
+  | {
+      status: "error";
+
+      /**
+       * 2026-09-03 (P14). GoTrue's own error code, carried out rather
+       * than flattened away, so the callback can explain WHICH failure
+       * happened. Until now every failure here rendered the single
+       * sentence "This link is invalid or has expired.", which told a
+       * user with a spent invitation link nothing they could act on --
+       * the state a real invitee was left in on 2026-09-02. Null when
+       * the error carries no code.
+       */
+      code: string | null;
+    };
 
 /**
  * Establishes the session Supabase Auth email links (invite, magic
@@ -51,6 +64,7 @@ export async function establishSessionAction(
     if (error) {
       return {
         status: "error",
+        code: error.code ?? null,
       };
     }
 
@@ -60,6 +74,7 @@ export async function establishSessionAction(
   } catch {
     return {
       status: "error",
+      code: null,
     };
   }
 }
@@ -100,6 +115,7 @@ export async function exchangeCodeForSessionAction(
     if (error) {
       return {
         status: "error",
+        code: error.code ?? null,
       };
     }
 
@@ -109,6 +125,7 @@ export async function exchangeCodeForSessionAction(
   } catch {
     return {
       status: "error",
+      code: null,
     };
   }
 }
