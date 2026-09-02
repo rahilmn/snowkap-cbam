@@ -22,6 +22,13 @@ const DEFAULT_RULE_REF =
 const ACTUAL_RULE_REF =
   "RULE-EE-009";
 
+// The rule that makes Annex II goods direct-only. A REGULATORY FACT,
+// already in the register: Regulation (EU) 2023/956 Article 7(1)
+// sentence 2, "For goods listed in Annex II only direct emissions shall
+// be calculated and taken into account."
+const ANNEX_II_RULE_REF =
+  "RULE-EE-004";
+
 /**
  * Owner-directed interim gate (2026-08-29,
  * docs/regulatory/CALCULATION_RULE_REGISTER.md, RULE-EE-009's own
@@ -43,6 +50,56 @@ const ANNEX_II_SECTORS: ReadonlySet<string> =
       "ALUMINIUM",
     ],
   );
+
+/**
+ * 2026-09-03 -- OWNER DECISION D1. What this set now DOES, and the risk
+ * that comes with it.
+ *
+ * Until today, an ACTUAL-method line on a good in one of these sectors
+ * with non-zero indirect emissions returned
+ * PARAMETER_DATASET_UNAVAILABLE and produced no number at all. That was
+ * a deliberate 2026-08-29 interim gate, and it was too restrictive: it
+ * blocked an entire legitimate workflow because indirect data merely
+ * EXISTED, when the applicable treatment is simply to leave that data
+ * out of the CBAM figure.
+ *
+ * The engine now applies the treatment instead of refusing: for these
+ * sectors, embedded emissions are computed from direct emissions alone.
+ * Indirect emissions remain stored on the producer's record and frozen
+ * in the snapshot -- they are source data, and they are not deleted or
+ * zeroed -- they are simply not added to the CBAM-relevant result. The
+ * trace records the exclusion and names the rule, so the number can be
+ * explained without reading this file.
+ *
+ * THE RISK, WHICH HAS CHANGED DIRECTION AND MUST NOT BE GLOSSED.
+ *
+ * `sector` is a PROXY. Annex II is a CN-code-level list; `cbam_goods`
+ * carries no Annex II membership field at all, only this coarser
+ * sector. Building the real list is a versioned-dataset ingestion pass
+ * (CLAUDE.md's facts-as-datasets rule forbids hardcoding it here), and
+ * it has not been done.
+ *
+ * While the proxy REFUSED, its imprecision was conservative: a
+ * non-Annex-II good in these sectors was blocked needlessly, which is
+ * annoying and safe. Now that the proxy APPLIES an exclusion, the same
+ * imprecision points the other way: such a good would have its indirect
+ * emissions excluded and would be UNDER-reported.
+ *
+ * That is the accepted cost of the owner's decision, recorded here, in
+ * the calculation rule register, and in the release report -- not
+ * discovered later from a wrong number. The real fix remains a properly
+ * sourced, versioned Annex II CN-code dataset.
+ *
+ * Two things this deliberately does NOT do:
+ *
+ *   - It does not touch the DEFAULT path. RULE-EE-001 trusts the
+ *     published dataset's own pre-summed total, which is already
+ *     Annex-II-correct at source; recomputing there would be the exact
+ *     violation RULE-EE-004 warns about.
+ *   - It does not gate on a null sector. A good whose sector could not
+ *     be resolved is unknown, not Annex II, and the engine does not
+ *     guess in either direction.
+ */
 
 function noValueResult(
   status: Exclude<LineEmissionsCalculation["status"], "COMPUTED">,
@@ -222,26 +279,56 @@ function calculateFromActualDetermination(
     );
   }
 
-  if (
-    goodSector !== null &&
-    ANNEX_II_SECTORS.has(goodSector) &&
-    !toDecimal(snapshot.values.indirect_specific).isZero()
-  ) {
-    return noValueResult(
-      "PARAMETER_DATASET_UNAVAILABLE",
-    );
-  }
-
   if (!unitMatchesQuantityBasis(snapshot.emission_unit, netMassTonnes)) {
     return noValueResult(
       "UNIT_UNSUPPORTED",
     );
   }
 
-  const specificEmissions =
-    toDecimal(snapshot.values.direct_specific).plus(
-      toDecimal(snapshot.values.indirect_specific),
+  // 2026-09-03 (owner decision D1). Annex II goods are direct-only.
+  // See ANNEX_II_SECTORS above for what this proxy can and cannot
+  // establish, and for the under-reporting risk its imprecision now
+  // carries.
+  //
+  // Applied whether or not indirect emissions are zero. When they are
+  // zero the arithmetic is identical either way, but the TRACE is not:
+  // a reader of a frozen calculation must be able to see that the
+  // Annex II treatment was applied, not infer it from a number that
+  // happens to match.
+  const annexIiDirectOnly =
+    goodSector !== null &&
+    ANNEX_II_SECTORS.has(goodSector);
+
+  const steps: CalculationStep[] =
+    [];
+
+  if (annexIiDirectOnly) {
+    steps.push(
+      {
+        step: "ANNEX_II_DIRECT_ONLY",
+        rule_ref: ANNEX_II_RULE_REF,
+        formula: "specific_emissions = direct_specific",
+        inputs: {
+          good_sector: goodSector,
+          direct_specific: snapshot.values.direct_specific,
+          // Recorded, not used. The producer reported this figure and
+          // it stays visible in the trace; what the trace shows is
+          // that it was deliberately left out of the result, which is
+          // a different and much more useful thing than it being
+          // absent.
+          indirect_specific_excluded: snapshot.values.indirect_specific,
+        },
+        value: snapshot.values.direct_specific,
+      },
     );
+  }
+
+  const specificEmissions =
+    annexIiDirectOnly
+      ? toDecimal(snapshot.values.direct_specific)
+      : toDecimal(snapshot.values.direct_specific).plus(
+          toDecimal(snapshot.values.indirect_specific),
+        );
 
   const embeddedEmissionsString =
     toDecimalString(
@@ -250,24 +337,34 @@ function calculateFromActualDetermination(
       ),
     );
 
-  const step: CalculationStep =
+  steps.push(
     {
       step: "LINE_EMBEDDED_EMISSIONS",
       rule_ref: ACTUAL_RULE_REF,
-      formula: "line_embedded_emissions = quantity * (direct_specific + indirect_specific)",
-      inputs: {
-        quantity: quantity,
-        direct_specific: snapshot.values.direct_specific,
-        indirect_specific: snapshot.values.indirect_specific,
-      },
+      formula:
+        annexIiDirectOnly
+          ? "line_embedded_emissions = quantity * direct_specific"
+          : "line_embedded_emissions = quantity * (direct_specific + indirect_specific)",
+      inputs:
+        annexIiDirectOnly
+          ? {
+              quantity: quantity,
+              direct_specific: snapshot.values.direct_specific,
+            }
+          : {
+              quantity: quantity,
+              direct_specific: snapshot.values.direct_specific,
+              indirect_specific: snapshot.values.indirect_specific,
+            },
       value: embeddedEmissionsString,
-    };
+    },
+  );
 
   return {
     status: "COMPUTED",
     engine_version: ENGINE_VERSION,
     embedded_emissions_tco2e: embeddedEmissionsString,
-    steps: [step],
+    steps,
   };
 }
 

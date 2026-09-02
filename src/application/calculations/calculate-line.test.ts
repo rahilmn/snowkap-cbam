@@ -412,7 +412,7 @@ describe(
     );
 
     it(
-      "returns PARAMETER_DATASET_UNAVAILABLE without persisting anything for an ACTUAL determination on an IRON_STEEL good with non-zero indirect_specific -- proves the sector lookup (shipments.release_date + repository.findCbamGoodsByCode) actually reaches the engine's Annex II gate, not just the pure domain test",
+      "computes and PERSISTS a direct-only figure for an ACTUAL determination on an IRON_STEEL good -- proves the sector lookup (shipments.release_date + repository.findCbamGoodsByCode) reaches the engine's Annex II treatment, not just the pure domain test (D1)",
       async () => {
         const insertPayloads: unknown[] =
           [];
@@ -442,18 +442,44 @@ describe(
             lineId,
           );
 
-        expect(result).toEqual(
-          {
-            status: "OK",
-            calculation: {
-              status: "PARAMETER_DATASET_UNAVAILABLE",
-              engine_version: ENGINE_VERSION,
-            },
-          },
+        // 2026-09-03 (owner decision D1). This case previously asserted
+        // PARAMETER_DATASET_UNAVAILABLE and zero writes: an Annex II
+        // good with non-zero indirect emissions produced no number at
+        // all and nothing was persisted. That behaviour was decided to
+        // be wrong -- Article 7(1) sentence 2 (RULE-EE-004) takes only
+        // direct emissions into account for Annex II goods, so the
+        // presence of indirect data is a reason to EXCLUDE it, not a
+        // reason to refuse the whole calculation.
+        //
+        // The assertion is reversed rather than relaxed, and it now
+        // proves the stronger thing: the sector genuinely reached the
+        // engine AND the resulting figure was persisted.
+        expect(result.status).toBe(
+          "OK",
         );
 
+        if (result.status === "OK") {
+          expect(result.calculation.status).toBe(
+            "COMPUTED",
+          );
+
+          if (result.calculation.status === "COMPUTED") {
+            // Direct only: 10.5 x 1.0 = 10.5. Summing would have given
+            // 10.5 x 1.2 = 12.6.
+            expect(result.calculation.embedded_emissions_tco2e).toBe(
+              "10.5",
+            );
+
+            expect(
+              result.calculation.steps.map((step) => step.step),
+            ).toEqual(
+              ["ANNEX_II_DIRECT_ONLY", "LINE_EMBEDDED_EMISSIONS"],
+            );
+          }
+        }
+
         expect(insertPayloads).toHaveLength(
-          0,
+          1,
         );
       },
     );

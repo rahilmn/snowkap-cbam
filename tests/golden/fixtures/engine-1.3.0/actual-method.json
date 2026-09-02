@@ -1,0 +1,430 @@
+[
+  {
+    "name": "RULE-EE-009: 10 tonnes at 0.155 direct + 0.045 indirect",
+    "note": "By hand: 0.155 + 0.045 = 0.200; 0.200 x 10 = 2.000; toFixed() with no argument drops the trailing zeros, so the byte-exact DecimalString is \"2\", never \"2.000\". This is exactly what production's SNOWKAP IMP-ACTUAL-001 carries (calculation f48cbe73), independently recomputed on 2026-09-02 and byte-equal. Cement is not an Annex II sector, so direct + indirect is correct here.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": "CEMENT",
+      "emission_determination": {
+        "method": "ACTUAL",
+        "snapshot": {
+          "emission_unit": "tCO2e/t",
+          "verification": {
+            "status": "VERIFIED"
+          },
+          "values": {
+            "direct_specific": "0.155",
+            "indirect_specific": "0.045"
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.3.0",
+      "embedded_emissions_tco2e": "2",
+      "steps": [
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-009",
+          "formula": "line_embedded_emissions = quantity * (direct_specific + indirect_specific)",
+          "inputs": {
+            "quantity": "10",
+            "direct_specific": "0.155",
+            "indirect_specific": "0.045"
+          },
+          "value": "2"
+        }
+      ]
+    }
+  },
+  {
+    "name": "RULE-EE-009: the sum is direct + indirect, not direct alone, outside Annex II",
+    "note": "The most likely formula error, pinned. Direct alone would give 1.55; the total is 0.155 + 0.045 = 0.2, so 10 x 0.2 = 2. good_sector null means \"not known to be Annex II\", and the engine does not guess -- it sums.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": null,
+      "emission_determination": {
+        "method": "ACTUAL",
+        "snapshot": {
+          "emission_unit": "tCO2e/t",
+          "verification": {
+            "status": "VERIFIED"
+          },
+          "values": {
+            "direct_specific": "0.155",
+            "indirect_specific": "0.045"
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.3.0",
+      "embedded_emissions_tco2e": "2",
+      "steps": [
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-009",
+          "formula": "line_embedded_emissions = quantity * (direct_specific + indirect_specific)",
+          "inputs": {
+            "quantity": "10",
+            "direct_specific": "0.155",
+            "indirect_specific": "0.045"
+          },
+          "value": "2"
+        }
+      ]
+    }
+  },
+  {
+    "name": "RULE-EE-009: the regulatory dataset's own unit spelling is accepted on an ACTUAL snapshot too",
+    "note": "DEFAULT and ACTUAL populate emission_unit from different sources with different conventions (TCO2E_PER_TONNE vs tCO2e/t). Both must be accepted, or the same figures compute or refuse depending on where they came from. By hand: (1.85 + 0.32) x 4 = 2.17 x 4 = 8.68.",
+    "input": {
+      "net_mass_tonnes": "4",
+      "quantity_mwh": null,
+      "good_sector": null,
+      "emission_determination": {
+        "method": "ACTUAL",
+        "snapshot": {
+          "emission_unit": "TCO2E_PER_TONNE",
+          "verification": {
+            "status": "VERIFIED"
+          },
+          "values": {
+            "direct_specific": "1.85",
+            "indirect_specific": "0.32"
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.3.0",
+      "embedded_emissions_tco2e": "8.68",
+      "steps": [
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-009",
+          "formula": "line_embedded_emissions = quantity * (direct_specific + indirect_specific)",
+          "inputs": {
+            "quantity": "4",
+            "direct_specific": "1.85",
+            "indirect_specific": "0.32"
+          },
+          "value": "8.68"
+        }
+      ]
+    }
+  },
+  {
+    "name": "RULE-EE-009: an unverified snapshot yields no number",
+    "note": "verification.status is branded VERIFIED at the type level, but the snapshot round-trips through an unconstrained jsonb column and back through an unchecked cast. The engine re-checks rather than trusting the type.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": null,
+      "emission_determination": {
+        "method": "ACTUAL",
+        "snapshot": {
+          "emission_unit": "tCO2e/t",
+          "verification": {
+            "status": "VERIFICATION_PENDING"
+          },
+          "values": {
+            "direct_specific": "0.155",
+            "indirect_specific": "0.045"
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "VALUE_UNAVAILABLE",
+      "engine_version": "1.3.0"
+    }
+  },
+  {
+    "name": "D1: Annex II iron and steel computes from DIRECT emissions alone",
+    "note": "OWNER DECISION D1 (2026-09-03), and the case that motivated it. The owner's own worked example: direct 1.850, indirect 0.045, quantity 10. By hand, direct-only: 1.850 x 10 = 18.500 -> toFixed() drops trailing zeros -> \"18.5\". Article 7(1) sentence 2 (RULE-EE-004): for goods listed in Annex II only direct emissions are taken into account. Before D1 this returned PARAMETER_DATASET_UNAVAILABLE and produced no number at all.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": "IRON_STEEL",
+      "emission_determination": {
+        "method": "ACTUAL",
+        "snapshot": {
+          "emission_unit": "tCO2e/t",
+          "verification": {
+            "status": "VERIFIED"
+          },
+          "values": {
+            "direct_specific": "1.850",
+            "indirect_specific": "0.045"
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.3.0",
+      "embedded_emissions_tco2e": "18.5",
+      "steps": [
+        {
+          "step": "ANNEX_II_DIRECT_ONLY",
+          "rule_ref": "RULE-EE-004",
+          "formula": "specific_emissions = direct_specific",
+          "inputs": {
+            "good_sector": "IRON_STEEL",
+            "direct_specific": "1.850",
+            "indirect_specific_excluded": "0.045"
+          },
+          "value": "1.850"
+        },
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-009",
+          "formula": "line_embedded_emissions = quantity * direct_specific",
+          "inputs": {
+            "quantity": "10",
+            "direct_specific": "1.850"
+          },
+          "value": "18.5"
+        }
+      ]
+    }
+  },
+  {
+    "name": "D1: the excluded indirect figure stays visible in the trace, it is not erased",
+    "note": "The trace must be able to answer \"why is this number not larger?\". indirect_specific_excluded carries the producer's own reported figure -- recorded, named as excluded, and not used. Had it been summed the result would have been (1.8 + 0.3) x 10 = 21, so the difference is material and the trace has to account for it. By hand, direct-only: 1.8 x 10 = 18.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": "ALUMINIUM",
+      "emission_determination": {
+        "method": "ACTUAL",
+        "snapshot": {
+          "emission_unit": "tCO2e/t",
+          "verification": {
+            "status": "VERIFIED"
+          },
+          "values": {
+            "direct_specific": "1.8",
+            "indirect_specific": "0.3"
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.3.0",
+      "embedded_emissions_tco2e": "18",
+      "steps": [
+        {
+          "step": "ANNEX_II_DIRECT_ONLY",
+          "rule_ref": "RULE-EE-004",
+          "formula": "specific_emissions = direct_specific",
+          "inputs": {
+            "good_sector": "ALUMINIUM",
+            "direct_specific": "1.8",
+            "indirect_specific_excluded": "0.3"
+          },
+          "value": "1.8"
+        },
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-009",
+          "formula": "line_embedded_emissions = quantity * direct_specific",
+          "inputs": {
+            "quantity": "10",
+            "direct_specific": "1.8"
+          },
+          "value": "18"
+        }
+      ]
+    }
+  },
+  {
+    "name": "D1: the Annex II step is recorded even when indirect emissions are already zero",
+    "note": "The arithmetic is identical either way -- 1.8 + 0 and 1.8 both give 18 -- but the TRACE is not. A reader of a frozen calculation must be able to see that the Annex II treatment WAS applied, rather than inferring it from a number that happens to agree. Deliberately not optimised away.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": "IRON_STEEL",
+      "emission_determination": {
+        "method": "ACTUAL",
+        "snapshot": {
+          "emission_unit": "tCO2e/t",
+          "verification": {
+            "status": "VERIFIED"
+          },
+          "values": {
+            "direct_specific": "1.8",
+            "indirect_specific": "0"
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.3.0",
+      "embedded_emissions_tco2e": "18",
+      "steps": [
+        {
+          "step": "ANNEX_II_DIRECT_ONLY",
+          "rule_ref": "RULE-EE-004",
+          "formula": "specific_emissions = direct_specific",
+          "inputs": {
+            "good_sector": "IRON_STEEL",
+            "direct_specific": "1.8",
+            "indirect_specific_excluded": "0"
+          },
+          "value": "1.8"
+        },
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-009",
+          "formula": "line_embedded_emissions = quantity * direct_specific",
+          "inputs": {
+            "quantity": "10",
+            "direct_specific": "1.8"
+          },
+          "value": "18"
+        }
+      ]
+    }
+  },
+  {
+    "name": "D1: a non-Annex-II sector still sums direct and indirect",
+    "note": "The other half. A treatment that applied everywhere would be indistinguishable from a formula error. Cement: (1.8 + 0.3) x 10 = 2.1 x 10 = 21, and no ANNEX_II_DIRECT_ONLY step.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": "CEMENT",
+      "emission_determination": {
+        "method": "ACTUAL",
+        "snapshot": {
+          "emission_unit": "tCO2e/t",
+          "verification": {
+            "status": "VERIFIED"
+          },
+          "values": {
+            "direct_specific": "1.8",
+            "indirect_specific": "0.3"
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.3.0",
+      "embedded_emissions_tco2e": "21",
+      "steps": [
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-009",
+          "formula": "line_embedded_emissions = quantity * (direct_specific + indirect_specific)",
+          "inputs": {
+            "quantity": "10",
+            "direct_specific": "1.8",
+            "indirect_specific": "0.3"
+          },
+          "value": "21"
+        }
+      ]
+    }
+  },
+  {
+    "name": "D1: a good whose sector could not be resolved is NOT treated as Annex II",
+    "note": "Unknown is not Annex II. The engine does not guess in either direction: with good_sector null it sums, which is the same thing it did before D1. (1.8 + 0.3) x 10 = 21.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": null,
+      "emission_determination": {
+        "method": "ACTUAL",
+        "snapshot": {
+          "emission_unit": "tCO2e/t",
+          "verification": {
+            "status": "VERIFIED"
+          },
+          "values": {
+            "direct_specific": "1.8",
+            "indirect_specific": "0.3"
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.3.0",
+      "embedded_emissions_tco2e": "21",
+      "steps": [
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-009",
+          "formula": "line_embedded_emissions = quantity * (direct_specific + indirect_specific)",
+          "inputs": {
+            "quantity": "10",
+            "direct_specific": "1.8",
+            "indirect_specific": "0.3"
+          },
+          "value": "21"
+        }
+      ]
+    }
+  },
+  {
+    "name": "D1: an Annex II line whose unit is unusable is still refused, treatment or not",
+    "note": "The direct-only treatment is not a licence to skip the other guards. kgCO2e/t on a mass line stays UNIT_UNSUPPORTED -- the 1000x overstatement class does not become acceptable because a good is Annex II.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": "IRON_STEEL",
+      "emission_determination": {
+        "method": "ACTUAL",
+        "snapshot": {
+          "emission_unit": "kgCO2e/t",
+          "verification": {
+            "status": "VERIFIED"
+          },
+          "values": {
+            "direct_specific": "1.8",
+            "indirect_specific": "0.3"
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "UNIT_UNSUPPORTED",
+      "engine_version": "1.3.0"
+    }
+  },
+  {
+    "name": "D1: an Annex II line whose snapshot is unverified is still refused",
+    "note": "Same point, the verification guard. The treatment changes WHICH figures are summed, never WHETHER the record was eligible to be used at all.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": "IRON_STEEL",
+      "emission_determination": {
+        "method": "ACTUAL",
+        "snapshot": {
+          "emission_unit": "tCO2e/t",
+          "verification": {
+            "status": "VERIFICATION_PENDING"
+          },
+          "values": {
+            "direct_specific": "1.8",
+            "indirect_specific": "0.3"
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "VALUE_UNAVAILABLE",
+      "engine_version": "1.3.0"
+    }
+  }
+]

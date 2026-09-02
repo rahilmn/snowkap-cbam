@@ -147,6 +147,31 @@ const actualStoredSteps =
     },
   ];
 
+// 2026-09-03 (owner decision D1): what engine 1.3.0 emits for an
+// Annex II good -- an explicit direct-only step naming RULE-EE-004 and
+// carrying the excluded indirect figure, then the multiplication.
+const annexIiStoredSteps =
+  [
+    {
+      step: "ANNEX_II_DIRECT_ONLY",
+      rule_ref: "RULE-EE-004",
+      formula: "specific_emissions = direct_specific",
+      inputs: {
+        good_sector: "IRON_STEEL",
+        direct_specific: "1.0",
+        indirect_specific_excluded: "0",
+      },
+      value: "1.0",
+    },
+    {
+      step: "LINE_EMBEDDED_EMISSIONS",
+      rule_ref: "RULE-EE-009",
+      formula: "line_embedded_emissions = quantity * direct_specific",
+      inputs: { quantity: "10.5", direct_specific: "1.0" },
+      value: "10.5",
+    },
+  ];
+
 function mockSupabase(
   {
     calculationResultFetchResult,
@@ -291,7 +316,12 @@ describe(
                     quantity: "10.5",
                     quantity_unit: "TONNES",
                     determination: actualDeterminationZeroIndirect,
-                    steps: actualStoredSteps,
+                    // Engine 1.3.0 emits the ANNEX_II_DIRECT_ONLY step
+                    // even when indirect is already zero, so a row
+                    // genuinely produced by this engine carries it --
+                    // and the comparator compares steps, not just the
+                    // headline figure.
+                    steps: annexIiStoredSteps,
                     embedded_emissions_tco2e: "10.5",
                   },
                   error: null,
@@ -485,7 +515,7 @@ describe(
     );
 
     it(
-      "reports INPUTS_DRIFTED, not a thrown error, when a stored ACTUAL row's line has since been reclassified into an Annex II sector with non-zero indirect_specific -- the manage-lines.ts in-place cn_code edit case (P8 security review, finding #1)",
+      "reports MISMATCH when a stored ACTUAL row's line has since been reclassified into an Annex II sector -- the recompute now succeeds and disagrees, rather than failing to run (D1)",
       async () => {
         const result =
           await reproduceCalculationResult(
@@ -530,12 +560,42 @@ describe(
             calculationResultId,
           );
 
-        expect(result).toEqual(
-          {
-            status: "INPUTS_DRIFTED",
-            recomputedStatus: "PARAMETER_DATASET_UNAVAILABLE",
-          },
+        // 2026-09-03 (owner decision D1). This case previously produced
+        // INPUTS_DRIFTED with recomputedStatus
+        // PARAMETER_DATASET_UNAVAILABLE: reclassifying a line into an
+        // Annex II sector made the recompute refuse to run at all, and
+        // "the recompute could not even run" was reported as its own
+        // outcome.
+        //
+        // Under D1 the recompute RUNS -- it applies the direct-only
+        // treatment -- and produces 10.5 x 1.0 = 10.5 against a stored
+        // 13.125 that included indirect emissions. So the honest answer
+        // is MISMATCH: the stored figure genuinely does not reproduce,
+        // and saying so is more useful than saying the check could not
+        // be performed.
+        //
+        // NOTE, recorded rather than hidden: INPUTS_DRIFTED is now
+        // UNREACHABLE. good_sector was the only re-derived input that
+        // could make a recompute non-COMPUTED, and it no longer can.
+        // The variant is deliberately retained: it is the fail-closed
+        // answer for "the recompute could not run", and removing it
+        // would mean a future sector- or dataset-dependent refusal had
+        // nowhere honest to land. It is listed as a known-unreachable
+        // branch in the release report rather than left as quiet dead
+        // code.
+        expect(result.status).toBe(
+          "MISMATCH",
         );
+
+        if (result.status === "MISMATCH") {
+          expect(result.stored.embedded_emissions_tco2e).toBe(
+            "13.125",
+          );
+
+          expect(result.recomputed.embedded_emissions_tco2e).toBe(
+            "10.5",
+          );
+        }
       },
     );
   },

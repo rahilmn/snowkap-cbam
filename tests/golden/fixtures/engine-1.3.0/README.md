@@ -1,4 +1,4 @@
-# Calculation engine golden fixtures — engine 1.2.0
+# Calculation engine golden fixtures — engine 1.3.0
 
 Every `expected` value in this directory was derived **by hand**, from
 the source regulatory dataset and from arithmetic done separately, and
@@ -18,7 +18,7 @@ Consequently:
   to decide which, with the rule register open. "Update the golden" is
   not a fix.
 - **A version bump forces re-derivation.** The runner asserts
-  `ENGINE_VERSION === "1.2.0"`. Bumping the engine deliberately breaks
+  `ENGINE_VERSION === "1.3.0"`. Bumping the engine deliberately breaks
   this suite so the expected values are re-derived by hand for the new
   version rather than carried forward on the assumption that nothing
   moved.
@@ -80,7 +80,24 @@ rather than as settled:
 - `tCO2/t` computes, treating CO2 as CO2e. That is a written decision in
   the engine, not an oversight — and an open owner question, because CO2
   and CO2e differ materially for aluminium PFCs and fertiliser N2O.
-- The Annex II gate refuses an ACTUAL determination on an iron/steel or
-  aluminium good with non-zero indirect emissions. That is an
-  owner-directed interim gate standing in for an Annex II dataset that
-  does not exist yet, and it fails closed.
+- **The Annex II direct-only treatment (owner decision D1, 2026-09-03).**
+  An ACTUAL determination on an iron/steel or aluminium good computes
+  from direct emissions alone, per Article 7(1) sentence 2
+  (RULE-EE-004). Until 1.3.0 the same case returned
+  `PARAMETER_DATASET_UNAVAILABLE` and produced no number at all, which
+  blocked a legitimate workflow because indirect data merely existed.
+
+  The membership test is `cbam_goods.sector`, a **proxy**: Annex II is a
+  CN-code-level list, and no such dataset exists in this project yet.
+  While the proxy refused, its imprecision was conservative. Now that it
+  applies an exclusion, the same imprecision points the other way — a
+  good in these sectors that is not actually in Annex II would be
+  **under-reported**. That is the accepted cost of the decision, and it
+  is recorded here, in the calculation rule register, and in the release
+  report rather than left to be found in a wrong number.
+
+  Fixtures pin both directions: the treatment applies for those sectors,
+  does NOT apply for cement, and does NOT apply when the sector could not
+  be resolved at all. The `ANNEX_II_DIRECT_ONLY` step is emitted even
+  when indirect emissions are already zero, where the arithmetic is
+  identical but the trace is not.

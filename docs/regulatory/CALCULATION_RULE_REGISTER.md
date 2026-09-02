@@ -166,7 +166,91 @@ the paragraph above.
   rather than restored, since failing loudly on a guard violation earlier is arguably the
   better default; flagging so a future reader doesn't mistake it for an oversight.
 
-## ESCALATED, INTERIM GATE IMPLEMENTED: RULE-EE-009 vs. RULE-EE-004's Annex II exception (2026-08-29)
+## RESOLVED BY OWNER DECISION D1 (2026-09-03): Annex II ACTUAL determinations are computed direct-only, not refused
+
+**Status: the 2026-08-29 interim gate described below is SUPERSEDED.** It is kept
+verbatim underneath because it explains why the gate existed and what was known when it
+was chosen; nothing in it should be read as current behaviour.
+
+**Decision.** Snowkap supports Annex II ACTUAL determinations in this release. An
+ACTUAL-method line on a good in an Annex II sector computes its embedded emissions from
+**direct emissions alone**, and the presence of non-zero indirect emissions is no longer a
+reason to refuse the calculation.
+
+**Authority — REGULATORY FACT, already in this register.** Regulation (EU) 2023/956
+Article 7(1) sentence 2: *"For goods listed in Annex II only direct emissions shall be
+calculated and taken into account."* That is RULE-EE-004, recorded here since the P6
+pass. D1 does not introduce a new regulatory semantic; it applies one this register
+already held, on a path that previously refused to apply it at all. **No Annex II code
+list was transcribed, invented, or inferred as part of this decision.**
+
+**Why the previous behaviour was wrong.** The gate refused to produce any number when an
+Annex II good had indirect-emissions data, which blocked a legitimate workflow entirely on
+the basis that data merely EXISTED. The applicable treatment is to leave that data out of
+the CBAM figure, not to withhold the figure.
+
+**What indirect emissions now do.** They remain stored on the producer's `emission_data`
+record and frozen verbatim in the `ActualEmissionSnapshot` — they are source data and are
+neither deleted nor zeroed. They are excluded from the CBAM-relevant result, and the
+calculation trace records that exclusion explicitly (see the trace contract below).
+
+**Trace contract (new, engine 1.3.0).** When the treatment applies, the engine emits an
+`ANNEX_II_DIRECT_ONLY` step BEFORE `LINE_EMBEDDED_EMISSIONS`, carrying `rule_ref`
+`RULE-EE-004`, the resolved `good_sector`, the `direct_specific` used, and
+`indirect_specific_excluded` — the producer's own reported indirect figure, recorded and
+named as excluded. The step is emitted **even when indirect emissions are zero**: the
+arithmetic is identical either way, but a reader of a frozen calculation must be able to
+see that the treatment was applied rather than infer it from a number that happens to
+agree. `LINE_EMBEDDED_EMISSIONS`'s formula changes to
+`quantity * direct_specific` in that case, so the trace never claims a sum it did not
+perform.
+
+**Engine version.** `ENGINE_VERSION` 1.2.0 → **1.3.0**. Every `calculation_results` row
+already carrying 1.2.0 now reproduces as `ENGINE_VERSION_CHANGED` rather than
+`REPRODUCIBLE`. That is the honest outcome and the reason the column exists; no historical
+row is rewritten (`calculation_results` is append-only).
+
+**THE RISK THIS DECISION ACCEPTS, AND ITS DIRECTION HAS CHANGED.** Annex II membership is
+still detected through `cbam_goods.sector` — a proxy. Annex II is a CN-code-level list,
+`cbam_goods` carries no Annex II membership field, and building that dataset remains an
+unstarted, properly-sourced ingestion pass (CLAUDE.md's facts-as-datasets rule forbids
+hardcoding it).
+
+While the proxy REFUSED, its imprecision was conservative: a non-Annex-II good in the
+IRON_STEEL or ALUMINIUM sector was blocked needlessly, which is inconvenient and safe.
+Now that the proxy APPLIES AN EXCLUSION, the same imprecision points the other way — such
+a good would have its indirect emissions excluded and would be **UNDER-REPORTED**. This is
+recorded as a HIGH-RISK accepted item requiring owner sign-off, not as a closed question,
+and the real fix remains a versioned Annex II CN-code dataset.
+
+Two boundaries the decision deliberately does not cross:
+
+- **DEFAULT-method lines are untouched.** RULE-EE-001 trusts the published dataset's own
+  pre-summed total, which is already Annex-II-correct at source. Recomputing there would
+  be the exact violation RULE-EE-004 warns about.
+- **An unresolved sector is not treated as Annex II.** `good_sector: null` means unknown,
+  and the engine does not guess in either direction — it sums, exactly as before D1.
+
+**Coverage.** `src/domain/calculations/calculate-line-emissions.test.ts` (treatment
+applied for both sectors; trace shape; the zero-indirect trace case; not applied for
+CEMENT; not applied for a null sector; unit and verification guards still refuse),
+`tests/golden/fixtures/engine-1.3.0/actual-method.json` (hand-derived, including the
+owner's own worked example: direct 1.850, indirect 0.045, quantity 10 → `"18.5"`),
+`src/application/calculations/calculate-line.test.ts` (the sector lookup genuinely reaches
+the engine and the figure is persisted), and
+`src/application/calculations/reproduce-calculation-result.test.ts` (an Annex II row
+reproduces; a line reclassified into an Annex II sector after calculation now reports
+MISMATCH rather than INPUTS_DRIFTED).
+
+**Known-unreachable branch, recorded rather than hidden.** `INPUTS_DRIFTED` is now
+unreachable: `good_sector` was the only re-derived input that could make a recompute
+non-COMPUTED. The variant is retained deliberately as the fail-closed answer for "the
+recompute could not run at all", so a future sector- or dataset-dependent refusal has
+somewhere honest to land.
+
+---
+
+## SUPERSEDED BY D1 (kept for provenance): ESCALATED, INTERIM GATE IMPLEMENTED: RULE-EE-009 vs. RULE-EE-004's Annex II exception (2026-08-29)
 
 RULE-EE-004 (below) documents that this rule (RULE-EE-001) trusts the regulatory
 dataset's own pre-summed `total_emissions` rather than recomputing `direct + indirect` in
@@ -396,18 +480,33 @@ throughout, since RULE-EE-001's own trust-the-dataset-total design was never at 
   indirect component, at the source). RULE-EE-001 already trusts the dataset's own
   `total_emissions` rather than recomputing `direct + indirect` in application code
   specifically *because* of this rule — recomputing would silently violate it for any
-  Annex-II good. **No engine code implements this rule directly**; it is recorded here
-  so the reasoning in RULE-EE-001 is traceable, and so that if the engine is ever
-  changed to recompute totals from direct+indirect components, this exception must be
-  reintroduced explicitly.
+  Annex-II good. **Updated 2026-09-03 (owner decision D1): this rule IS now implemented in
+  engine code, on the ACTUAL path only.** RULE-EE-009 does recompute from
+  direct+indirect components, and the exception this entry warned would have to be
+  "reintroduced explicitly" has been: `calculateFromActualDetermination` applies
+  direct-only for goods whose `cbam_goods.sector` is IRON_STEEL or ALUMINIUM, emitting an
+  `ANNEX_II_DIRECT_ONLY` trace step that cites this rule. The DEFAULT path remains
+  untouched and continues to trust the dataset's own total, for the reason stated above.
+  Membership is still detected through the coarser `sector` proxy rather than an Annex II
+  CN-code dataset, which no longer over-blocks but can now under-report — see the D1
+  section at the top of this register for the accepted risk.
+
+  (Historical, pre-D1: "No engine code implements this rule directly; it is recorded here
+  so the reasoning in RULE-EE-001 is traceable, and so that if the engine is ever changed
+  to recompute totals from direct+indirect components, this exception must be reintroduced
+  explicitly.")
 - **Inputs / Units / Formula / Rounding**: not applicable (upstream data-content rule,
   not a computation).
 - **Exceptions**: none beyond the rule's own scope (Annex II membership).
 - **Source URL**: `https://eur-lex.europa.eu/eli/reg/2023/956/oj/eng` (Article 7(1),
   Annex II).
-- **Golden regression fixture**: covered indirectly by RULE-EE-001's fixtures using real
-  dataset records; no dedicated fixture (no engine code to test against this rule
-  specifically).
+- **Golden regression fixture**: as of 2026-09-03 (D1) this rule has dedicated coverage —
+  `tests/golden/fixtures/engine-1.3.0/actual-method.json` (the direct-only treatment, the
+  excluded indirect figure preserved in the trace, the zero-indirect trace case, and the
+  negative cases for a non-Annex-II sector and an unresolved sector) plus the Annex II
+  cases in `src/domain/calculations/calculate-line-emissions.test.ts`. RULE-EE-001's own
+  fixtures continue to cover the DEFAULT path, which this rule governs upstream at the
+  dataset rather than in engine code.
 
 ## RULE-EE-005 — Non-computable determinations produce explicit states, never zero
 

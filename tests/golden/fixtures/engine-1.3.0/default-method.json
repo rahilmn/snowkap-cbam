@@ -11,14 +11,17 @@
         "resolution": {
           "emission_unit": "TCO2E_PER_TONNE",
           "values": {
-            "total": { "status": "AVAILABLE", "value": "1.390" }
+            "total": {
+              "status": "AVAILABLE",
+              "value": "1.390"
+            }
           }
         }
       }
     },
     "expected": {
       "status": "COMPUTED",
-      "engine_version": "1.2.0",
+      "engine_version": "1.3.0",
       "embedded_emissions_tco2e": "2.78",
       "steps": [
         {
@@ -46,14 +49,17 @@
         "resolution": {
           "emission_unit": "TCO2E_PER_TONNE",
           "values": {
-            "total": { "status": "AVAILABLE", "value": "0.280" }
+            "total": {
+              "status": "AVAILABLE",
+              "value": "0.280"
+            }
           }
         }
       }
     },
     "expected": {
       "status": "COMPUTED",
-      "engine_version": "1.2.0",
+      "engine_version": "1.3.0",
       "embedded_emissions_tco2e": "2.8",
       "steps": [
         {
@@ -81,14 +87,17 @@
         "resolution": {
           "emission_unit": "TCO2E_PER_TONNE",
           "values": {
-            "total": { "status": "AVAILABLE", "value": "1.390" }
+            "total": {
+              "status": "AVAILABLE",
+              "value": "1.390"
+            }
           }
         }
       }
     },
     "expected": {
       "status": "COMPUTED",
-      "engine_version": "1.2.0",
+      "engine_version": "1.3.0",
       "embedded_emissions_tco2e": "0.46287",
       "steps": [
         {
@@ -116,14 +125,17 @@
         "resolution": {
           "emission_unit": "TCO2E_PER_TONNE",
           "values": {
-            "total": { "status": "UNAVAILABLE", "value": null }
+            "total": {
+              "status": "UNAVAILABLE",
+              "value": null
+            }
           }
         }
       }
     },
     "expected": {
       "status": "VALUE_UNAVAILABLE",
-      "engine_version": "1.2.0"
+      "engine_version": "1.3.0"
     }
   },
   {
@@ -138,14 +150,17 @@
         "resolution": {
           "emission_unit": "TCO2E_PER_TONNE",
           "values": {
-            "total": { "status": "REFERENCE_REQUIRED", "value": null }
+            "total": {
+              "status": "REFERENCE_REQUIRED",
+              "value": null
+            }
           }
         }
       }
     },
     "expected": {
       "status": "VALUE_UNAVAILABLE",
-      "engine_version": "1.2.0"
+      "engine_version": "1.3.0"
     }
   },
   {
@@ -160,14 +175,17 @@
         "resolution": {
           "emission_unit": "TCO2E_PER_TONNE",
           "values": {
-            "total": { "status": "NOT_APPLICABLE", "value": null }
+            "total": {
+              "status": "NOT_APPLICABLE",
+              "value": null
+            }
           }
         }
       }
     },
     "expected": {
       "status": "VALUE_UNAVAILABLE",
-      "engine_version": "1.2.0"
+      "engine_version": "1.3.0"
     }
   },
   {
@@ -182,14 +200,17 @@
         "resolution": {
           "emission_unit": "TCO2_PER_MWH",
           "values": {
-            "total": { "status": "AVAILABLE", "value": "0.5" }
+            "total": {
+              "status": "AVAILABLE",
+              "value": "0.5"
+            }
           }
         }
       }
     },
     "expected": {
       "status": "COMPUTED",
-      "engine_version": "1.2.0",
+      "engine_version": "1.3.0",
       "embedded_emissions_tco2e": "50",
       "steps": [
         {
@@ -217,14 +238,17 @@
         "resolution": {
           "emission_unit": "TCO2E_PER_TONNE",
           "values": {
-            "total": { "status": "AVAILABLE", "value": "0.5" }
+            "total": {
+              "status": "AVAILABLE",
+              "value": "0.5"
+            }
           }
         }
       }
     },
     "expected": {
       "status": "UNIT_UNSUPPORTED",
-      "engine_version": "1.2.0"
+      "engine_version": "1.3.0"
     }
   },
   {
@@ -238,7 +262,7 @@
     },
     "expected": {
       "status": "INPUT_UNRESOLVED",
-      "engine_version": "1.2.0"
+      "engine_version": "1.3.0"
     }
   }
 ]

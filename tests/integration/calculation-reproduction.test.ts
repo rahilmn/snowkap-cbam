@@ -495,7 +495,7 @@ describe.skipIf(!localRegulatoryDataSeeded)(
         expect(
           (data as { engine_version: string }).engine_version,
         ).toBe(
-          "1.2.0",
+          "1.3.0",
         );
       },
     );

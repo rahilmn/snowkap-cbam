@@ -610,8 +610,24 @@ describe(
       },
     );
 
+    /**
+     * 2026-09-03 -- OWNER DECISION D1. These two cases previously
+     * asserted PARAMETER_DATASET_UNAVAILABLE: an Annex II good with
+     * non-zero indirect emissions produced no number at all.
+     *
+     * The assertions are not weakened, they are REVERSED, because the
+     * behaviour was decided to be wrong. Article 7(1) sentence 2
+     * (RULE-EE-004) says only direct emissions are taken into account
+     * for Annex II goods -- so the presence of indirect data is not a
+     * reason to refuse, it is a reason to leave that data out of the
+     * result. Refusing blocked a legitimate workflow entirely.
+     *
+     * The proxy's imprecision now points at under-reporting rather than
+     * over-blocking; that risk is recorded in ANNEX_II_SECTORS' own
+     * comment, the calculation rule register and the release report.
+     */
     it(
-      "returns PARAMETER_DATASET_UNAVAILABLE (never a computed value) for an ACTUAL determination on an IRON_STEEL good with non-zero indirect_specific -- owner-directed gate for RULE-EE-004's not-yet-reintroduced Annex II exception",
+      "computes from DIRECT emissions alone for an ACTUAL determination on an IRON_STEEL good (D1)",
       () => {
         const result =
           calculateLineEmissions(
@@ -625,14 +641,41 @@ describe(
             },
           );
 
-        expect(result).toEqual(
-          { status: "PARAMETER_DATASET_UNAVAILABLE", engine_version: ENGINE_VERSION },
+        expect(result.status).toBe(
+          "COMPUTED",
         );
+
+        if (result.status === "COMPUTED") {
+          // Direct only: 10 x 1.0 = 10. Summing would have given 12.
+          expect(result.embedded_emissions_tco2e).toBe(
+            "10",
+          );
+
+          // And the trace says WHY, naming the rule and carrying the
+          // figure that was deliberately left out.
+          expect(result.steps[0]).toEqual(
+            {
+              step: "ANNEX_II_DIRECT_ONLY",
+              rule_ref: "RULE-EE-004",
+              formula: "specific_emissions = direct_specific",
+              inputs: {
+                good_sector: "IRON_STEEL",
+                direct_specific: "1.0",
+                indirect_specific_excluded: "0.2",
+              },
+              value: "1.0",
+            },
+          );
+
+          expect(result.steps[1]?.formula).toBe(
+            "line_embedded_emissions = quantity * direct_specific",
+          );
+        }
       },
     );
 
     it(
-      "returns PARAMETER_DATASET_UNAVAILABLE for an ALUMINIUM good with non-zero indirect_specific",
+      "computes from DIRECT emissions alone for an ALUMINIUM good (D1)",
       () => {
         const result =
           calculateLineEmissions(
@@ -646,15 +689,25 @@ describe(
             },
           );
 
-        expect(result).toEqual(
-          { status: "PARAMETER_DATASET_UNAVAILABLE", engine_version: ENGINE_VERSION },
+        expect(result.status).toBe(
+          "COMPUTED",
         );
+
+        if (result.status === "COMPUTED") {
+          expect(result.embedded_emissions_tco2e).toBe(
+            "10",
+          );
+        }
       },
     );
 
     it(
-      "computes normally for an IRON_STEEL good whose indirect_specific is exactly zero -- direct + 0 already equals the Annex II-correct value, so the gate must not over-block it",
+      "records the Annex II treatment in the trace even when indirect_specific is already zero (D1)",
       () => {
+        // The arithmetic is identical either way. The trace is not: a
+        // reader of a frozen calculation must be able to SEE that the
+        // treatment was applied, not infer it from a number that happens
+        // to agree.
         const result =
           calculateLineEmissions(
             {
@@ -670,11 +723,38 @@ describe(
         expect(result.status).toBe(
           "COMPUTED",
         );
+
         if (result.status === "COMPUTED") {
           expect(result.embedded_emissions_tco2e).toBe(
             "10",
           );
+
+          expect(result.steps.map((step) => step.step)).toEqual(
+            ["ANNEX_II_DIRECT_ONLY", "LINE_EMBEDDED_EMISSIONS"],
+          );
         }
+      },
+    );
+
+    it(
+      "still refuses an Annex II line whose unit is unusable -- the treatment is not a licence to skip other guards (D1)",
+      () => {
+        const result =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10" as never,
+              quantity_mwh: null,
+              emission_determination: actualDetermination(
+                { direct_specific: "1.0", indirect_specific: "0.2" },
+                "kgCO2e/t",
+              ),
+              good_sector: "IRON_STEEL",
+            },
+          );
+
+        expect(result).toEqual(
+          { status: "UNIT_UNSUPPORTED", engine_version: ENGINE_VERSION },
+        );
       },
     );
 
@@ -699,6 +779,13 @@ describe(
         if (result.status === "COMPUTED") {
           expect(result.embedded_emissions_tco2e).toBe(
             "12",
+          );
+
+          // 2026-09-03 (D1): and no Annex II step. A treatment that
+          // applied everywhere would be indistinguishable from a
+          // formula error that dropped indirect emissions outright.
+          expect(result.steps.map((step) => step.step)).toEqual(
+            ["LINE_EMBEDDED_EMISSIONS"],
           );
         }
       },

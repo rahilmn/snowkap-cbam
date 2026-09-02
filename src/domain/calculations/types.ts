@@ -44,8 +44,23 @@ export type EngineVersion =
 // fix (rewriting engine_version on already-persisted, append-only rows
 // would itself violate the append-only/never-mutate-history invariant
 // this column exists to protect).
+// 2026-09-03 (P14, owner decision D1): bumped 1.2.0 -> 1.3.0 for the
+// Annex II direct-only treatment. An ACTUAL-method line on an iron/steel
+// or aluminium good with non-zero indirect emissions previously returned
+// PARAMETER_DATASET_UNAVAILABLE and produced no number at all; it now
+// computes from direct emissions alone, per Article 7(1) sentence 2
+// (RULE-EE-004). That is a genuine behavioural change, so it gets a
+// version.
+//
+// Consequence, stated rather than discovered later: every
+// calculation_results row already carrying "1.2.0" now reproduces as
+// ENGINE_VERSION_CHANGED rather than REPRODUCIBLE. That is the honest
+// outcome and the reason the column exists -- byte-equality against a
+// different implementation would be a meaningless claim even where it
+// happens to hold. No historical row is rewritten: append-only means
+// append-only.
 export const ENGINE_VERSION: EngineVersion =
-  "1.2.0";
+  "1.3.0";
 
 /**
  * Identifies one ACTIVE regulatory dataset the calculation engine read
@@ -152,8 +167,15 @@ export interface CalculationResult {
  *   *emission record's own* emission_unit, which nothing else
  *   validates. Found in the mandatory P6 review for RULE-EE-001;
  *   applied to RULE-EE-009 (ACTUAL) from the start.
- * - PARAMETER_DATASET_UNAVAILABLE (added 2026-08-29, owner-directed
- *   gate): an ACTUAL determination on a good in a known Annex-II
+ * - PARAMETER_DATASET_UNAVAILABLE (added 2026-08-29 as the Annex II
+ *   gate; NO LONGER RETURNED for that case as of 2026-09-03, owner
+ *   decision D1 -- see calculate-line-emissions.ts's own ANNEX_II
+ *   section. Retained as a status because master plan §17 names it and
+ *   a genuinely missing parameter dataset -- markups, benchmarks,
+ *   certificate prices -- must still be able to produce it rather than
+ *   a fabricated number. The historical text follows.)
+ *
+ *   (historical, 2026-08-29 owner-directed gate): an ACTUAL determination on a good in a known Annex-II
  *   sector (iron & steel, aluminium -- Article 7(1) sentence 2,
  *   direct-emissions-only, RULE-EE-004) whose declared
  *   `indirect_specific` is non-zero. RULE-EE-009 sums

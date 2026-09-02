@@ -12,14 +12,14 @@ import {
   ENGINE_VERSION,
 } from "../../src/domain/calculations/types";
 
-import defaultMethodFixtures from "./fixtures/engine-1.2.0/default-method.json";
-import actualMethodFixtures from "./fixtures/engine-1.2.0/actual-method.json";
-import emissionUnitFixtures from "./fixtures/engine-1.2.0/emission-units.json";
+import defaultMethodFixtures from "./fixtures/engine-1.3.0/default-method.json";
+import actualMethodFixtures from "./fixtures/engine-1.3.0/actual-method.json";
+import emissionUnitFixtures from "./fixtures/engine-1.3.0/emission-units.json";
 
 /**
  * Hand-authored golden fixtures for the calculation engine.
  *
- * Read tests/golden/fixtures/engine-1.2.0/README.md before touching
+ * Read tests/golden/fixtures/engine-1.3.0/README.md before touching
  * anything here. The short version: every expected value in those files
  * was derived by hand from the rule register and the source dataset,
  * NEVER by running the engine and recording the output. A generated
@@ -54,7 +54,7 @@ interface UnitFixture {
 }
 
 describe(
-  "calculation engine goldens (engine 1.2.0)",
+  "calculation engine goldens (engine 1.3.0)",
   () => {
     it(
       "is the engine version these fixtures were derived for",
@@ -64,7 +64,7 @@ describe(
         // values are re-derived by hand for the new version instead of
         // being carried forward on the assumption nothing moved.
         expect(ENGINE_VERSION).toBe(
-          "1.2.0",
+          "1.3.0",
         );
       },
     );

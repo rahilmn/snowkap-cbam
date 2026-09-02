@@ -416,6 +416,28 @@ export function WhyThisNumberPanel(
       determination,
     ) === "STALE";
 
+  /**
+   * 2026-09-03 (owner decision D1). Was the Annex II direct-only
+   * treatment applied to the figure shown here?
+   *
+   * Read from the FROZEN steps of the calculation being explained, not
+   * re-derived from the line's current good. The panel's job is to
+   * explain the number in front of the user, and re-deriving would let
+   * it describe a treatment that was never applied to that number --
+   * the same class of defect as explaining a stale figure with the
+   * current determination.
+   *
+   * Without this the panel would show 18.5 where the producer reported
+   * 1.850 direct AND 0.045 indirect, and nothing on the screen would
+   * account for the difference. The step is in the trace either way;
+   * this states it in words, at the result, where the question is
+   * actually asked.
+   */
+  const annexIiStep =
+    latestCalculation?.steps.find(
+      (step) => step.step === "ANNEX_II_DIRECT_ONLY",
+    );
+
   return (
     <div className="flex flex-col gap-4 py-1">
       <PanelSection title="Line">
@@ -547,6 +569,23 @@ export function WhyThisNumberPanel(
           <p className="font-mono text-lg font-semibold tabular-nums text-[var(--text-primary)]">
             {latestCalculation.embedded_emissions_tco2e} tCO2e
           </p>
+
+          {annexIiStep ? (
+            <div className="mt-2 flex flex-col gap-0.5 rounded-[var(--radius-sm)] bg-[var(--surface-sunken)] px-3 py-2">
+              <p className="text-xs font-medium text-[var(--text-primary)]">
+                Treatment: direct emissions only
+              </p>
+
+              <p className="text-xs text-[var(--text-secondary)]">
+                This good is in a sector subject to the Annex II
+                treatment, where only direct emissions are taken into
+                account. The installation also reported{" "}
+                {annexIiStep.inputs.indirect_specific_excluded} indirect
+                emissions; that figure is kept on the record and was not
+                added to this result.
+              </p>
+            </div>
+          ) : null}
 
           {isStale ? (
             <div className="mt-2 rounded-[var(--radius-sm)] bg-[var(--color-warning-100)] px-3 py-2 text-xs text-[var(--color-warning-700)]">
