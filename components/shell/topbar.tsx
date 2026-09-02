@@ -1,5 +1,6 @@
 import {
   Info,
+  Mail,
   LogOut,
 } from "lucide-react";
 
@@ -42,6 +43,17 @@ export interface TopbarProps {
    */
   organizationName: string | null;
 
+  /**
+   * Whether there is a session at all. Distinct from organizationName
+   * on purpose: an invited user who has not accepted yet is signed in
+   * WITHOUT an organization, and gating account controls on the org name
+   * left them with no way to sign out.
+   */
+  isSignedIn?: boolean;
+
+  /** Invitations addressed to this user, awaiting their acceptance. */
+  pendingInvitationCount?: number;
+
   currentOrgId?: string;
   organizations?: OrgSwitcherOption[];
   // Passed through to the mobile drawer so it renders the SAME nav set
@@ -53,6 +65,8 @@ export interface TopbarProps {
 export function Topbar(
   {
     organizationName,
+    isSignedIn = false,
+    pendingInvitationCount = 0,
     currentOrgId,
     organizations,
     experience,
@@ -110,7 +124,45 @@ export function Topbar(
           />
         </Link>
 
-        {organizationName ? (
+        {/*
+          2026-09-03 (P14). /accept-invitation is reachable from no
+          navigation anywhere in the product, so an invited user who
+          landed on any other screen -- which is what happens when their
+          email link is spent, or when they simply visit the site later
+          -- had no route to the invitation waiting for them. This is
+          that route. Shown only when there is actually something to
+          look at, so it is never a permanently-lit signal that teaches
+          people to ignore it.
+        */}
+        {isSignedIn && pendingInvitationCount > 0 ? (
+          <Link
+            href="/accept-invitation"
+            aria-label={`Pending invitations (${pendingInvitationCount})`}
+            title={`Pending invitations (${pendingInvitationCount})`}
+            className="relative flex size-8 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--color-brand-100)] hover:text-[var(--color-brand-800)] focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            <Mail
+              className="size-4"
+              aria-hidden="true"
+            />
+
+            <span
+              aria-hidden="true"
+              className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-[var(--color-brand-600)] px-1 text-[10px] font-medium leading-4 text-white"
+            >
+              {pendingInvitationCount}
+            </span>
+          </Link>
+        ) : null}
+
+        {/*
+          Gated on being SIGNED IN, not on having an organization. It was
+          previously gated on organizationName, which left a signed-in
+          user without a membership -- an invited user who has not
+          accepted yet, or someone mid-onboarding -- with no way to sign
+          out at all, including on a shared machine.
+        */}
+        {isSignedIn ? (
           <form action={signOutAction}>
             <button
               type="submit"

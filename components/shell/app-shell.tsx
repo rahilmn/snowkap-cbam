@@ -28,6 +28,10 @@ import {
   getCurrentOrgSummary,
 } from "../../src/application/organizations/get-current-org-context";
 
+import {
+  countMyPendingInvitations,
+} from "../../src/application/organizations/invitations";
+
 export interface AppShellProps {
   experience?: Experience;
   activeNavLabel?: string;
@@ -100,6 +104,28 @@ export async function AppShell(
       await getPreferredOrgId(),
     );
 
+  // 2026-09-03 (P14). getCurrentOrgSummary returns null for a signed-OUT
+  // visitor and for a signed-in one with no membership, which the shell
+  // then rendered identically -- so an invited user who landed anywhere
+  // other than /accept-invitation was shown a "Sign in" affordance while
+  // already signed in, and had no sign-out control either, because that
+  // was gated on having an organization.
+  //
+  // One getUser() call separates the two states and lets the shell carry
+  // a route to the invitation, which otherwise appears in no navigation
+  // anywhere in the product.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const pendingInvitationCount =
+    user
+      ? await countMyPendingInvitations(
+          supabase,
+          user.email ?? "",
+        )
+      : 0;
+
   // Resolved once and shared by Topbar (mobile drawer) and Sidebar
   // (desktop) so the two navigations can never disagree about which
   // experience this org is in.
@@ -115,6 +141,8 @@ export async function AppShell(
         experience={resolvedExperience}
         activeNavLabel={activeNavLabel}
         organizationName={orgSummary?.organizationName ?? null}
+        isSignedIn={user !== null}
+        pendingInvitationCount={pendingInvitationCount}
         currentOrgId={orgSummary?.context.org_id}
         organizations={orgSummary?.availableOrganizations.map(
           (org) => (

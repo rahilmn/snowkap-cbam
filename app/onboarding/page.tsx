@@ -9,6 +9,16 @@ import {
 } from "../../src/infrastructure/supabase/server-client";
 
 import {
+  listMyPendingInvitations,
+} from "../../src/application/organizations/invitations";
+
+import {
+  Card,
+} from "../../components/ui/card";
+
+import Link from "next/link";
+
+import {
   OnboardingForm,
 } from "./onboarding-form";
 
@@ -37,6 +47,18 @@ export default async function OnboardingPage() {
     redirect("/");
   }
 
+  // 2026-09-03 (P14). This screen is where a signed-in user without an
+  // organization is sent, which is exactly the state an invited user is
+  // in before they accept -- and it said nothing at all about the
+  // invitation waiting for them, so the only visible way forward was to
+  // create a SECOND organization alongside the one that had invited
+  // them.
+  const pendingInvitations =
+    await listMyPendingInvitations(
+      supabase,
+      user.email ?? "",
+    );
+
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-8 bg-[var(--surface-page)] p-6">
       <Wordmark className="text-lg" />
@@ -50,6 +72,27 @@ export default async function OnboardingPage() {
           You&apos;ll be its first owner.
         </p>
       </div>
+
+      {pendingInvitations.length > 0 ? (
+        <Card className="w-full max-w-md p-4">
+          <p className="text-sm text-[var(--text-primary)]">
+            {pendingInvitations.length === 1
+              ? "You have 1 pending invitation to join an existing organization."
+              : `You have ${pendingInvitations.length} pending invitations to join existing organizations.`}
+          </p>
+
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            You do not need to create a new organization to accept one.
+          </p>
+
+          <Link
+            href="/accept-invitation"
+            className="mt-2 inline-block text-sm font-medium text-[var(--accent-interactive)] hover:text-[var(--accent-interactive-hover)]"
+          >
+            Review invitations →
+          </Link>
+        </Card>
+      ) : null}
 
       <OnboardingForm />
     </div>

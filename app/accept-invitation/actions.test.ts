@@ -418,7 +418,7 @@ describe(
         expect(result).toEqual(
           {
             status: "error",
-            message: "This invitation has already been used.",
+            message: "This invitation is no longer valid -- it was already used or has been revoked. Ask the organization to send a new one.",
           },
         );
       },

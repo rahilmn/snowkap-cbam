@@ -29,6 +29,20 @@ import {
 } from "../../src/application/sharing/manage-sharing-grants";
 
 import {
+  buttonVariants,
+} from "../../components/ui/button";
+
+import {
+  cn,
+} from "../../lib/utils";
+
+import Link from "next/link";
+
+import {
+  signOutAction,
+} from "../(auth)/actions";
+
+import {
   AcceptInvitationList,
 } from "./accept-invitation-list";
 
@@ -92,9 +106,81 @@ export default async function AcceptInvitationPage() {
         </h1>
 
         {hasNothingPending ? (
-          <p className="text-sm text-[var(--text-secondary)]">
-            No pending invitations for {user.email}.
-          </p>
+          // 2026-09-03 (P14). "No pending invitations" alone told an
+          // invitee nothing about WHY, and the three real reasons are
+          // all recoverable -- but only if the person knows which one
+          // they are in. A real invited user spent a support cycle on
+          // exactly this screen.
+          //
+          // Note the invitee genuinely cannot see a lapsed invitation:
+          // organization_invitations_select_own_email carries
+          // expires_at > now(), verified against real RLS on 2026-09-03.
+          // So expiry has to be explained here rather than shown as a
+          // row.
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-[var(--text-secondary)]">
+              No pending invitations for {user.email}.
+            </p>
+
+            <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm text-[var(--text-secondary)]">
+              <li>
+                Invitations are sent to one specific address. If yours went
+                somewhere else, sign out and sign in with that address.
+              </li>
+
+              <li>
+                Invitations expire after seven days, and an administrator
+                can revoke one. Either way, ask them to send a new one.
+              </li>
+
+              <li>
+                If you were invited but never chose a password, use Set a
+                password below and we will email a link to {user.email}.
+              </li>
+            </ul>
+
+            <div className="mt-1 flex flex-wrap gap-2">
+              <Link
+                href="/forgot-password"
+                className={cn(
+                  buttonVariants({ variant: "secondary", size: "sm" }),
+                )}
+              >
+                Set a password
+              </Link>
+
+              {orgSummary ? (
+                <Link
+                  href="/"
+                  className={cn(
+                    buttonVariants({ variant: "secondary", size: "sm" }),
+                  )}
+                >
+                  Go to dashboard
+                </Link>
+              ) : (
+                <Link
+                  href="/onboarding"
+                  className={cn(
+                    buttonVariants({ variant: "secondary", size: "sm" }),
+                  )}
+                >
+                  Set up an organization
+                </Link>
+              )}
+
+              <form action={signOutAction}>
+                <button
+                  type="submit"
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "sm" }),
+                  )}
+                >
+                  Sign out
+                </button>
+              </form>
+            </div>
+          </div>
         ) : (
           <p className="mb-4 text-sm text-[var(--text-secondary)]">
             Signed in as {user.email}.

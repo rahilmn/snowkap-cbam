@@ -28,11 +28,29 @@ import {
   formatDate,
 } from "../../lib/utils";
 
+import {
+  Badge,
+} from "../../components/ui/badge";
+
+import type {
+  InvitationDisplayState,
+} from "../../src/domain/organizations/invitation-state";
+
 export interface PendingInvitationRow {
   invitationId: string;
   email: string;
   role: "ADMIN" | "MEMBER";
   expiresAt: string;
+
+  /**
+   * 2026-09-03 (P14). organization_invitations has no EXPIRED status --
+   * a row sits at PENDING until an acceptance attempt flips it -- and
+   * the admin's own SELECT policy carries no expiry predicate, so
+   * without this an administrator sees a dead invitation looking exactly
+   * like a live one and waits instead of re-sending it. The invitee,
+   * whose policy DOES filter on expiry, sees nothing at all.
+   */
+  state: InvitationDisplayState;
 }
 
 export function PendingInvitationsList(
@@ -94,9 +112,20 @@ function PendingInvitationItem(
             </span>
           </span>
 
-          <span className="text-xs text-[var(--text-tertiary)]">
-            Expires {formatDate(invitation.expiresAt)}
-          </span>
+          {invitation.state === "EXPIRED" ? (
+            <span className="flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]">
+              <Badge tone="danger">
+                Expired
+              </Badge>
+
+              {formatDate(invitation.expiresAt)} — revoke and send a new
+              invitation
+            </span>
+          ) : (
+            <span className="text-xs text-[var(--text-tertiary)]">
+              Awaiting acceptance · expires {formatDate(invitation.expiresAt)}
+            </span>
+          )}
         </div>
 
         <form action={formAction}>

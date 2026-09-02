@@ -41,6 +41,10 @@ import {
   getPreferredOrgId,
 } from "../../components/shell/get-preferred-org-id";
 
+import {
+  describeInvitationState,
+} from "../../src/domain/organizations/invitation-state";
+
 export default async function TeamPage() {
   const supabase =
     await getServerSupabaseClient();
@@ -99,6 +103,12 @@ export default async function TeamPage() {
         )
       : [];
 
+  // One clock reading for the whole render, so two invitations that
+  // lapse either side of an evaluation cannot be described
+  // inconsistently on the same screen.
+  const nowIso =
+    new Date().toISOString() as never;
+
   return (
     <AppShell
       breadcrumbs={[
@@ -120,6 +130,11 @@ export default async function TeamPage() {
             (invitation) => (
               {
                 invitationId: invitation.id,
+                state:
+                  describeInvitationState(
+                    invitation,
+                    nowIso,
+                  ),
                 email: invitation.email,
                 role: invitation.role,
                 expiresAt: invitation.expires_at,

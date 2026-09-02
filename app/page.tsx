@@ -22,6 +22,10 @@ import {
 } from "../src/application/organizations/get-current-org-context";
 
 import {
+  listMyPendingInvitations,
+} from "../src/application/organizations/invitations";
+
+import {
   getPreferredOrgId,
 } from "../components/shell/get-preferred-org-id";
 
@@ -125,6 +129,87 @@ export default async function HomePage() {
   // silent scope expansion. It is recorded as an open finding instead of
   // being either half-done or quietly left unmentioned.
   if (!orgSummary) {
+    // 2026-09-03 (P14). getCurrentOrgSummary returns null for BOTH a
+    // signed-out visitor and a signed-in user with no membership, and
+    // this screen used to render the same thing for each -- so an
+    // invited user who had already signed in was shown "Sign in ->",
+    // with no mention of the invitation waiting for them and no way to
+    // reach it. That is the dead end a real invitee fell into on
+    // 2026-09-02.
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user) {
+      const pendingInvitations =
+        await listMyPendingInvitations(
+          supabase,
+          user.email ?? "",
+        );
+
+      return (
+        <AppShell
+          breadcrumbs={[
+            { label: "Dashboard" },
+          ]}
+          activeNavLabel="Dashboard"
+        >
+          <h1 className="mb-1 text-2xl font-semibold text-[var(--text-primary)]">
+            Snowkap CBAM
+          </h1>
+
+          <p className="mb-6 max-w-xl text-sm text-[var(--text-secondary)]">
+            You are signed in as {user.email}, but you do not belong to an
+            organization yet.
+          </p>
+
+          <div className="grid max-w-3xl gap-3 sm:grid-cols-2">
+            {pendingInvitations.length > 0 ? (
+              <Link
+                href="/accept-invitation"
+                className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--surface-raised)] p-4 transition-colors duration-150 hover:border-[var(--border-strong)]"
+              >
+                <span className="block text-sm font-medium text-[var(--text-primary)]">
+                  {pendingInvitations.length === 1
+                    ? "You have 1 pending invitation"
+                    : `You have ${pendingInvitations.length} pending invitations`}
+                </span>
+
+                <span className="mt-1 block text-sm text-[var(--text-secondary)]">
+                  Join{" "}
+                  {pendingInvitations
+                    .map((item) => item.organizationName)
+                    .join(", ")}
+                  .
+                </span>
+
+                <span className="mt-2 block text-sm font-medium text-[var(--accent-interactive)]">
+                  Review invitations →
+                </span>
+              </Link>
+            ) : null}
+
+            <Link
+              href="/onboarding"
+              className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--surface-raised)] p-4 transition-colors duration-150 hover:border-[var(--border-strong)]"
+            >
+              <span className="block text-sm font-medium text-[var(--text-primary)]">
+                Set up a new organization
+              </span>
+
+              <span className="mt-1 block text-sm text-[var(--text-secondary)]">
+                Create the organization you will import or produce under.
+              </span>
+
+              <span className="mt-2 block text-sm font-medium text-[var(--accent-interactive)]">
+                Start onboarding →
+              </span>
+            </Link>
+          </div>
+        </AppShell>
+      );
+    }
+
     return (
       <AppShell
         breadcrumbs={[
