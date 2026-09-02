@@ -187,6 +187,19 @@ jobs:
       # suites self-skip into a false green -- the property the original
       # step was written to guarantee is preserved exactly.
       - name: Start local Supabase (so cross-org isolation suites run for real)
+        # SUPABASE_INTERNAL_IMAGE_REGISTRY redirects the CLI's image pulls
+        # away from public.ecr.aws, which rate-limits GitHub-hosted
+        # runners' shared egress IPs and has failed this job on every
+        # attempt including three retries hours apart. Docker Hub hosts
+        # the same Supabase images and is not limited the same way for
+        # authenticated-by-default GitHub runners.
+        #
+        # This is being TESTED here, not assumed: if the CLI ignores the
+        # variable the pull source in the log will still read
+        # public.ecr.aws and this step will fail exactly as before -- no
+        # test is skipped, weakened or replaced either way.
+        env:
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: docker.io
         run: |
           set -euo pipefail
 
