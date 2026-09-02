@@ -254,27 +254,17 @@ jobs:
           # enabling it made the container report "not ready: unhealthy"
           # on the DEVELOPER's host -- a machine-specific image/Node
           # incompatibility, documented in that file. The consequence is
-          # that storage.buckets never exists, so the four
-          # storage-touching migrations cannot apply and were marked
-          # applied via `supabase migration repair` instead. Their
-          # storage.objects policies are, in this repo's own words,
-          # "shim-verified only".
+          # that storage.buckets never exists, so four storage-touching
+          # migrations cannot apply and were marked applied via
+          # `supabase migration repair`; their storage.objects policies
+          # are, in this repo's own words, "shim-verified only".
           #
           # A clean ubuntu-latest runner is not that host, so Storage is
           # enabled HERE ONLY. If it comes up, those four migrations
           # apply for real and the evidence-storage RLS is genuinely
-          # exercised -- strictly better than repairing past them. The
-          # committed default is untouched, so the developer's working
-          # configuration is unaffected.
-          python - <<'PY'
-import re, io
-p = "supabase/config.toml"
-s = io.open(p, encoding="utf-8").read()
-s = re.sub(r"(\[storage\]\s*
-)enabled\s*=\s*false", r"enabled = true", s, count=1)
-io.open(p, "w", encoding="utf-8").write(s)
-print("CI-only: [storage] enabled = true")
-PY
+          # exercised. The committed default is untouched.
+          awk '/^\[storage\]/{s=1} s&&/^enabled *= *false/{sub(/false/,"true"); s=0} {print}'             supabase/config.toml > /tmp/config.toml && mv /tmp/config.toml supabase/config.toml
+          grep -A1 '^\[storage\]' supabase/config.toml
 
           mkdir -p /tmp/deferred
           for f in supabase/migrations/*.sql; do
