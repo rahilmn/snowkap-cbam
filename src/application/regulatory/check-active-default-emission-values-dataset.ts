@@ -11,6 +11,29 @@ export type ActiveDefaultEmissionValuesDatasetStatus =
 export interface ActiveDefaultEmissionValuesDatasetCheck {
   status: ActiveDefaultEmissionValuesDatasetStatus;
   dataset_ids: string[];
+
+  /**
+   * 2026-09-03 (P14, WP-K). WHICH dataset is active, and how many value
+   * rows it holds -- reported, never asserted.
+   *
+   * The status above only ever proved that EXACTLY ONE active dataset
+   * row exists. It never looked at which one, or whether it had any
+   * values in it at all. So a deploy pointing at an empty or
+   * half-loaded dataset reported "ok", and the only way to notice was
+   * to run the regulatory verifier by hand.
+   *
+   * Deliberately not turned into a pass/fail condition here: the
+   * application pins no regulatory version, and inventing one in a
+   * health check would be a regulatory decision made in the wrong
+   * place. The smoke script compares these against values the operator
+   * passes in, which keeps the expectation where the operator can see
+   * and change it.
+   *
+   * Null when the status is anything other than "ok" -- there is no
+   * single dataset to describe.
+   */
+  dataset_version: string | null;
+  active_row_count: number | null;
 }
 
 /**
@@ -42,7 +65,7 @@ export async function checkActiveDefaultEmissionValuesDataset(
         "regulatory_datasets",
       )
       .select(
-        "id",
+        "id, version",
       )
       .eq(
         "dataset_type",
@@ -60,16 +83,20 @@ export async function checkActiveDefaultEmissionValuesDataset(
     return {
       status: "error",
       dataset_ids: [],
+      dataset_version: null,
+      active_row_count: null,
     };
   }
 
   const rows =
-    (data ?? []) as { id: string }[];
+    (data ?? []) as { id: string; version: string }[];
 
   if (rows.length === 0) {
     return {
       status: "missing",
       dataset_ids: [],
+      dataset_version: null,
+      active_row_count: null,
     };
   }
 
@@ -77,11 +104,38 @@ export async function checkActiveDefaultEmissionValuesDataset(
     return {
       status: "duplicate",
       dataset_ids: rows.map((row) => row.id),
+      dataset_version: null,
+      active_row_count: null,
     };
   }
 
+  const active =
+    rows[0]!;
+
+  // Counted with head+count so no value rows cross the wire. A failure
+  // here degrades the REPORTED figure to null and never the status:
+  // "how many rows does the active dataset hold" is information for an
+  // operator, not an availability condition, and a health endpoint that
+  // went unhealthy because a count query timed out would be worse than
+  // one that says it does not know.
+  const { count, error: countError } =
+    await supabase
+      .from(
+        "default_emission_values",
+      )
+      .select(
+        "id",
+        { count: "exact", head: true },
+      )
+      .eq(
+        "dataset_id",
+        active.id,
+      );
+
   return {
     status: "ok",
-    dataset_ids: rows.map((row) => row.id),
+    dataset_ids: [active.id],
+    dataset_version: active.version,
+    active_row_count: countError ? null : count ?? null,
   };
 }

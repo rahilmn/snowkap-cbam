@@ -104,17 +104,28 @@ test.describe(
           // rather than the control being silently inert. (Corrected
           // 2026-08-31: this spec still expected the bare label, and had
           // never run in CI to catch it.)
-          const expectedName =
+          // 2026-09-03 (P14, WP-E). The sr-only suffix now carries the
+          // ACTUAL reason rather than the blanket "not available yet",
+          // which for Evidence and Verification was simply false --
+          // both are fully built and live inline on each dataset. So a
+          // disabled item is matched by its label prefix, and the
+          // presence of a reason is asserted rather than its wording.
+          const control =
             role === "button"
-              ? `${label} (not available yet)`
-              : label;
+              ? page.getByRole(
+                  role,
+                  { name: new RegExp(`^${label} \(.+\)$`) },
+                )
+              : page.getByRole(
+                  role,
+                  { name: label, exact: true },
+                );
 
-          await expect(
-            page.getByRole(
-              role,
-              { name: expectedName, exact: true },
-            ),
-          ).toBeVisible();
+          await expect(control).toBeVisible();
+
+          if (role === "button") {
+            await expect(control).toBeDisabled();
+          }
         }
       },
     );

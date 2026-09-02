@@ -26,6 +26,10 @@ interface Recorder {
 function makeMockSupabase(
   result: { data: unknown; error: unknown },
   recorder: Recorder = { ops: [] },
+  // 2026-09-03 (P14, WP-K): the second query -- how many value rows the
+  // active dataset holds. Reported by the check, never asserted by it.
+  countResult: { count: number | null; error: unknown } =
+    { count: 12540, error: null },
 ) {
   function builder(
     table: string,
@@ -37,9 +41,22 @@ function makeMockSupabase(
     };
 
     const chain: Record<string, unknown> = {
-      select: () => {
+      select: (
+        _columns?: unknown,
+        options?: { count?: string; head?: boolean },
+      ) => {
         recorder.ops.push(op);
-        return chain;
+
+        // A head+count select resolves on its own -- there is no
+        // .limit() to terminate the chain.
+        return options?.head
+          ? {
+              eq: (col: string, val: unknown) => {
+                op.filters.push([col, val]);
+                return Promise.resolve(countResult);
+              },
+            }
+          : chain;
       },
       eq: (col: string, val: unknown) => {
         op.filters.push([col, val]);
@@ -68,12 +85,20 @@ describe(
         const result =
           await checkActiveDefaultEmissionValuesDataset(
             makeMockSupabase(
-              { data: [{ id: "dataset-1" }], error: null },
+              { data: [{ id: "dataset-1", version: "2026-definitive-corrected" }], error: null },
             ),
           );
 
         expect(result).toEqual(
-          { status: "ok", dataset_ids: ["dataset-1"] },
+          {
+            status: "ok",
+            dataset_ids: ["dataset-1"],
+            // 2026-09-03 (P14, WP-K): reported alongside the status, so
+            // a deploy pointing at an empty or half-loaded dataset can
+            // be seen rather than inferred.
+            dataset_version: "2026-definitive-corrected",
+            active_row_count: 12540,
+          },
         );
       },
     );
@@ -89,7 +114,7 @@ describe(
           );
 
         expect(result).toEqual(
-          { status: "missing", dataset_ids: [] },
+          { status: "missing", dataset_ids: [], dataset_version: null, active_row_count: null },
         );
       },
     );
@@ -111,6 +136,8 @@ describe(
           {
             status: "duplicate",
             dataset_ids: ["dataset-1", "dataset-2"],
+            dataset_version: null,
+            active_row_count: null,
           },
         );
       },
@@ -127,7 +154,7 @@ describe(
           );
 
         expect(result).toEqual(
-          { status: "error", dataset_ids: [] },
+          { status: "error", dataset_ids: [], dataset_version: null, active_row_count: null },
         );
       },
     );
@@ -191,6 +218,41 @@ describe(
           ),
         ).rejects.toThrow(
           "network unreachable",
+        );
+      },
+    );
+
+    it(
+      "reports a null row count, and stays ok, when the count query fails (P14)",
+      async () => {
+        // "How many rows does the active dataset hold" is information
+        // for an operator, not an availability condition. A health
+        // endpoint that went unhealthy because a count query timed out
+        // would be worse than one that says it does not know.
+        const result =
+          await checkActiveDefaultEmissionValuesDataset(
+            makeMockSupabase(
+              {
+                data: [
+                  { id: "dataset-1", version: "2026-definitive-corrected" },
+                ],
+                error: null,
+              },
+              { ops: [] },
+              { count: null, error: { message: "statement timeout" } },
+            ),
+          );
+
+        expect(result.status).toBe(
+          "ok",
+        );
+
+        expect(result.active_row_count).toBeNull();
+
+        // The version still comes back -- it was read by the query that
+        // succeeded.
+        expect(result.dataset_version).toBe(
+          "2026-definitive-corrected",
         );
       },
     );

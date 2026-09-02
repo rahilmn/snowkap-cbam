@@ -70,6 +70,29 @@ interface HealthCheckResult {
   };
 
   /**
+   * 2026-09-03 (P14, WP-K). WHICH regulatory dataset is active, and how
+   * many value rows it holds.
+   *
+   * REPORTED, NOT ASSERTED. `active_regulatory_dataset: "ok"` only ever
+   * meant "exactly one active dataset row exists" -- never which one,
+   * and never whether it contained anything. A deploy pointing at an
+   * empty or half-loaded dataset read as fully healthy, and the only
+   * way to find out was to run the regulatory verifier by hand.
+   *
+   * Deliberately not a pass/fail condition here: the application pins
+   * no regulatory version, and inventing one inside a health check
+   * would be a regulatory decision taken in the wrong place. The smoke
+   * script compares these against values the operator passes in, which
+   * keeps the expectation somewhere the operator can see and change it.
+   *
+   * Null when there is no single active dataset to describe, or when
+   * the count could not be taken -- never zero, which would read as a
+   * genuinely empty dataset.
+   */
+  dataset_version: string | null;
+  active_row_count: number | null;
+
+  /**
    * Populated only when `product_schema` is "missing", so an operator
    * reading a failing probe sees immediately WHICH part of the schema is
    * absent rather than having to go digging.
@@ -120,6 +143,12 @@ export async function GET(): Promise<NextResponse<HealthCheckResult>> {
       product_schema:
         "ok",
     },
+
+    dataset_version:
+      null,
+
+    active_row_count:
+      null,
   };
 
   // Pure, no I/O, and deliberately evaluated OUTSIDE the try below: a
@@ -151,6 +180,12 @@ export async function GET(): Promise<NextResponse<HealthCheckResult>> {
     // the entire mapping.
     result.checks.active_regulatory_dataset =
       datasetCheck.status;
+
+    result.dataset_version =
+      datasetCheck.dataset_version;
+
+    result.active_row_count =
+      datasetCheck.active_row_count;
 
     if (datasetCheck.status === "error") {
       // The dataset invariant was never actually checked -- it must not

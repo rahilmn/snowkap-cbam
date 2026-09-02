@@ -60,7 +60,7 @@ describe(
           );
 
         expect(result).toEqual(
-          { ok: true },
+          { ok: true, reason: null },
         );
 
         expect(getCapturedPayload()).toEqual(
@@ -125,7 +125,7 @@ describe(
           );
 
         expect(result).toEqual(
-          { ok: false },
+          { ok: false, reason: expect.any(String) },
         );
       },
     );
@@ -161,7 +161,7 @@ describe(
           );
 
         expect(result).toEqual(
-          { ok: false },
+          { ok: false, reason: expect.any(String) },
         );
 
         // Never reached the database.
@@ -193,7 +193,7 @@ describe(
           );
 
         expect(result).toEqual(
-          { ok: true },
+          { ok: true, reason: null },
         );
       },
     );

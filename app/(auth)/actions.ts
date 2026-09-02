@@ -5,6 +5,36 @@ import { z } from "zod";
 import { redirect } from "next/navigation";
 
 import {
+  cookies,
+} from "next/headers";
+
+import {
+  clearAuthCookiesAtScopes,
+} from "@supabase/ssr";
+
+/**
+ * The cookie name @supabase/ssr derives from the project URL, which is
+ * what its own storage adapter uses and therefore what has to be
+ * cleared. Derived rather than hardcoded so it cannot drift from the
+ * project this deployment actually points at.
+ */
+function authStorageKey(): string {
+  // Parsed with a regex rather than `new URL`, which throws on a
+  // missing or malformed value. This runs on the sign-out path: an
+  // exception here would turn "we could not confirm your sign-out" into
+  // a crash, which is strictly worse. A value that cannot be parsed
+  // yields a key that simply matches no cookie, and the redirect still
+  // happens.
+  const url =
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+
+  const projectRef =
+    /^https?:\/\/([^./:]+)/.exec(url)?.[1] ?? "";
+
+  return `sb-${projectRef}-auth-token`;
+}
+
+import {
   getServerSupabaseClient,
 } from "../../src/infrastructure/supabase/server-client";
 
@@ -274,11 +304,79 @@ export async function signUpAction(
   redirect("/onboarding");
 }
 
+/**
+ * 2026-09-03 (P14, F1). Signing out must actually sign this browser out,
+ * whether or not the auth service agrees.
+ *
+ * This was `await supabase.auth.signOut()` with the error discarded,
+ * followed by an unconditional redirect. Most of the time that is fine:
+ * auth-js clears local storage itself on nearly every failure path. The
+ * one that matters is the `sessionError` early return -- when the client
+ * cannot read the current session at all, it returns before touching
+ * storage, so the session cookies survive and the user lands on
+ * /sign-in still holding a live session. On a shared machine that is
+ * precisely the case where someone believed they had signed out.
+ *
+ * A second signOut() call does not help: it re-enters the same path
+ * through auth-js's own refresh-failure cooldown. The cookies have to be
+ * cleared directly, which is what clearAuthCookiesAtScopes does -- every
+ * chunk of the storage key, at the same cookie options this app writes
+ * them with, so a chunked session is not half-deleted.
+ *
+ * The redirect is unconditional either way. Stranding someone on an
+ * error page while their cookies have already been cleared would be the
+ * worst of both: signed out in fact, and told it failed.
+ *
+ * When the service could not confirm the sign-out, /sign-in is told so
+ * it can say what happened. The flag is only ever set here, and the
+ * sign-in page only renders the notice when there is genuinely no
+ * session left -- otherwise a hand-typed query parameter would be a
+ * ready-made phishing line on the real origin.
+ */
 export async function signOutAction(): Promise<void> {
   const supabase =
     await getServerSupabaseClient();
 
-  await supabase.auth.signOut();
+  const { error } =
+    await supabase.auth.signOut();
+
+  if (error) {
+    const cookieStore =
+      await cookies();
+
+    await clearAuthCookiesAtScopes(
+      {
+        getAll: () => cookieStore.getAll(),
+        setAll: (cookiesToSet) => {
+          for (
+            const { name, value, options } of cookiesToSet
+          ) {
+            cookieStore.set(
+              name,
+              value,
+              options,
+            );
+          }
+        },
+        storageKey: authStorageKey(),
+        // Cleared at the same options this app writes them with, and
+        // at the bare path too: a cookie written with a different
+        // `secure`/`sameSite` combination in an earlier deploy would
+        // otherwise survive its own deletion.
+        scopes: [
+          {
+            path: "/",
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax",
+            httpOnly: true,
+          },
+          { path: "/" },
+        ],
+      },
+    );
+
+    redirect("/sign-in?signed_out=unconfirmed");
+  }
 
   redirect("/sign-in");
 }

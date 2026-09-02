@@ -2123,7 +2123,7 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
-      "keeps a previously-valid ACTUAL determination re-savable after the producer flips their OWN emission_data back to UNVERIFIED (P13 review iteration 4, finding #4) -- validating only when emission_determination itself changes means an unrelated cross-org state change can never retroactively brick an existing, unrelated edit",
+      "keeps a previously-valid ACTUAL determination re-savable after the producer DISCARDS their own emission_data (P13 review iteration 4, finding #4) -- validating only when emission_determination itself changes means an unrelated cross-org state change can never retroactively brick an existing, unrelated edit",
       async () => {
         const lineId =
           await insertLine();
@@ -2141,11 +2141,25 @@ describe.skipIf(!localSupabaseReachable)(
 
         expect(setError).toBeNull();
 
+        // 2026-09-03 (P14, F11). This used to flip verification_status
+        // back to UNVERIFIED. That move is now refused outright for an
+        // ACTIVE record, because it reopened the record's evidence for
+        // removal while an importer may already have frozen that
+        // evidence set into a determination -- see migration
+        // 20260903140000.
+        //
+        // The point of THIS test is unchanged and still worth proving:
+        // an unrelated edit to the importer's line must not be bricked
+        // by the producer changing the state of their own record. So it
+        // uses a cross-org state change that remains legitimate --
+        // DISCARD, which changes `status` rather than
+        // `verification_status`, and which F11 deliberately leaves
+        // available so a verified record is never trapped forever.
         const { error: flipError } =
           await serviceClient
             .from("emission_data")
             .update(
-              { verification_status: "UNVERIFIED" },
+              { status: "DISCARDED" },
             )
             .eq(
               "id",
@@ -2171,7 +2185,7 @@ describe.skipIf(!localSupabaseReachable)(
           await serviceClient
             .from("emission_data")
             .update(
-              { verification_status: "VERIFIED" },
+              { status: "ACTIVE" },
             )
             .eq(
               "id",

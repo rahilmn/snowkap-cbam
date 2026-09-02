@@ -556,6 +556,130 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "P14/F11: an ACTIVE, VERIFIED record cannot be un-verified -- the move that reopened its evidence for removal",
+      async () => {
+        /**
+         * The evidence-strip round trip, closed.
+         *
+         * 20260829560000 makes the evidence behind a VERIFIED record
+         * immutable, and determine-from-actual-data.ts relies on that
+         * when it freezes an evidence set into an importer's snapshot.
+         * But the verification gate only ever fired on transitions INTO
+         * VERIFIED or REJECTED -- never out of them -- so an ADMIN could
+         * walk the record back to VERIFICATION_PENDING, remove a file,
+         * and verify it again. verifier_user_id survives untouched, so
+         * nothing in the row records that it happened.
+         *
+         * The party harmed is the OTHER organisation: their frozen
+         * determination now cites documents that no longer exist, the
+         * v10 validator refuses to re-save that line, and the error it
+         * produces explains nothing.
+         */
+        const emissionDataId =
+          await insertDraftEmissionData(
+            {
+              status: "ACTIVE",
+              verification_status: "VERIFIED",
+              verifier_user_id: producerAdminId,
+              evidence_file_ids: [crypto.randomUUID()],
+            },
+          );
+
+        const { error } =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update(
+              { verification_status: "VERIFICATION_PENDING" },
+            )
+            .eq(
+              "id",
+              emissionDataId,
+            );
+
+        expect(error).not.toBeNull();
+
+        expect(error?.message).toContain(
+          "cannot be un-verified",
+        );
+
+        const { data: after } =
+          await serviceClient
+            .from("emission_data")
+            .select("verification_status")
+            .eq(
+              "id",
+              emissionDataId,
+            )
+            .single();
+
+        expect(after?.verification_status).toBe(
+          "VERIFIED",
+        );
+      },
+    );
+
+    it(
+      "P14/F11: the gate is narrow -- a DRAFT record's verification can still move freely",
+      async () => {
+        // A gate that never opens is indistinguishable from a broken
+        // one. Only an ACTIVE record is protected: a DRAFT record is
+        // nobody else's dependency yet, and the ordinary submit /
+        // verify / reject / resubmit loop must keep working.
+        const emissionDataId =
+          await insertDraftEmissionData(
+            {
+              status: "DRAFT",
+              verification_status: "VERIFIED",
+              verifier_user_id: producerAdminId,
+            },
+          );
+
+        const { error } =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update(
+              { verification_status: "VERIFICATION_PENDING" },
+            )
+            .eq(
+              "id",
+              emissionDataId,
+            );
+
+        expect(error).toBeNull();
+      },
+    );
+
+    it(
+      "P14/F11: discarding an ACTIVE, VERIFIED record still works -- the legitimate way out is untouched",
+      async () => {
+        // The gate must not trap a record forever. DISCARD and being
+        // SUPERSEDED both change `status`, not `verification_status`,
+        // and both remain available.
+        const emissionDataId =
+          await insertDraftEmissionData(
+            {
+              status: "ACTIVE",
+              verification_status: "VERIFIED",
+              verifier_user_id: producerAdminId,
+            },
+          );
+
+        const { error } =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update(
+              { status: "DISCARDED" },
+            )
+            .eq(
+              "id",
+              emissionDataId,
+            );
+
+        expect(error).toBeNull();
+      },
+    );
+
+    it(
       "Finding 2: an ADMIN verifying a record cannot name an arbitrary other user as verifier_user_id -- it is force-pinned to their own auth.uid()",
       async () => {
         const emissionDataId =

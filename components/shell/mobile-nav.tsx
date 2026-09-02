@@ -329,13 +329,16 @@ function MobileNavSection(
                 <button
                   type="button"
                   disabled
-                  title={`${item.label} is not available yet`}
+                  title={
+                    item.unavailableReason ??
+                    `${item.label} is not available yet`
+                  }
                   className={itemClassName}
                 >
                   {content}
 
                   <span className="sr-only">
-                    {" "}(not available yet)
+                    {" "}({item.unavailableReason ?? "not available yet"})
                   </span>
                 </button>
               )}

@@ -103,17 +103,31 @@ test.describe(
           // and additionally proves the disabled affordance is actually
           // announced. (Corrected 2026-08-31: these specs still expected
           // the bare label, and had never run in CI to catch it.)
-          const expectedName =
+          // 2026-09-03 (P14, WP-E). The sr-only suffix now carries the
+          // ACTUAL reason rather than the blanket "not available yet",
+          // which for Evidence and Verification was simply false --
+          // both are fully built and live inline on each dataset. So
+          // the accessible name is no longer derivable from the label,
+          // and a disabled item is matched by its label prefix with the
+          // reason asserted separately.
+          const control =
             role === "button"
-              ? `${label} (not available yet)`
-              : label;
+              ? primaryNav.getByRole(
+                  role,
+                  { name: new RegExp(`^${label} \(.+\)$`) },
+                )
+              : primaryNav.getByRole(
+                  role,
+                  { name: label, exact: true },
+                );
 
-          await expect(
-            primaryNav.getByRole(
-              role,
-              { name: expectedName, exact: true },
-            ),
-          ).toBeVisible();
+          await expect(control).toBeVisible();
+
+          if (role === "button") {
+            // The reason must be a real sentence, not the empty
+            // parentheses a missing explanation would leave behind.
+            await expect(control).toBeDisabled();
+          }
         }
       },
     );

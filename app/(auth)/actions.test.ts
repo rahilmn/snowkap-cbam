@@ -59,6 +59,48 @@ vi.mock(
   ),
 );
 
+// 2026-09-03 (P14, F1). signOutAction now clears this browser's session
+// cookies directly when signOut() reports an error, because auth-js's
+// own sessionError early-return leaves them in place -- the exact case
+// where someone on a shared machine believes they signed out and did
+// not.
+const cookieSetMock =
+  vi.fn();
+
+const cookiesMock =
+  vi.fn(
+    async () => (
+      {
+        getAll: () => [],
+        set: (...args: unknown[]) => cookieSetMock(...args),
+      }
+    ),
+  );
+
+vi.mock(
+  "next/headers",
+  () => (
+    {
+      cookies: () => cookiesMock(),
+    }
+  ),
+);
+
+const clearAuthCookiesAtScopesMock =
+  vi.fn(
+    async (..._args: unknown[]) => undefined,
+  );
+
+vi.mock(
+  "@supabase/ssr",
+  () => (
+    {
+      clearAuthCookiesAtScopes: (...args: unknown[]) =>
+        clearAuthCookiesAtScopesMock(...args),
+    }
+  ),
+);
+
 vi.mock(
   "../../src/infrastructure/supabase/server-client",
   () => (
@@ -558,6 +600,107 @@ describe(
 
         expect(signOutOrder).toBeLessThan(
           redirectOrder,
+        );
+      },
+    );
+
+    it(
+      "does NOT touch the cookies itself when signOut() succeeded",
+      async () => {
+        clearAuthCookiesAtScopesMock.mockClear();
+
+        signOutMock.mockResolvedValueOnce(
+          { error: null },
+        );
+
+        await expect(
+          signOutAction(),
+        ).rejects.toBe(
+          REDIRECT_SENTINEL,
+        );
+
+        expect(clearAuthCookiesAtScopesMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "clears this browser's session cookies when signOut() reports an error (P14, F1)",
+      async () => {
+        // auth-js's sessionError path returns BEFORE touching storage,
+        // so the cookies survive and the user lands on /sign-in still
+        // holding a live session. A second signOut() call re-enters the
+        // same path through its own refresh-failure cooldown, so the
+        // cookies have to be cleared directly.
+        clearAuthCookiesAtScopesMock.mockClear();
+
+        // Set so the key derivation is genuinely exercised rather than
+        // asserted against an empty environment.
+        const previousUrl =
+          process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+        process.env.NEXT_PUBLIC_SUPABASE_URL =
+          "https://abcdefghijklm.supabase.co";
+
+        signOutMock.mockResolvedValueOnce(
+          { error: { message: "session missing" } },
+        );
+
+        await expect(
+          signOutAction(),
+        ).rejects.toBe(
+          REDIRECT_SENTINEL,
+        );
+
+        if (previousUrl === undefined) {
+          delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+        } else {
+          process.env.NEXT_PUBLIC_SUPABASE_URL = previousUrl;
+        }
+
+        expect(clearAuthCookiesAtScopesMock).toHaveBeenCalledTimes(1);
+
+        const input =
+          clearAuthCookiesAtScopesMock.mock.calls[0]?.[0] as {
+            storageKey: string;
+            scopes: unknown[];
+          };
+
+        // Derived from the project URL, not hardcoded, so it cannot
+        // drift from the project this deployment points at.
+        expect(input.storageKey).toBe(
+          "sb-abcdefghijklm-auth-token",
+        );
+
+        // Cleared at the options this app writes them with AND at the
+        // bare path: a cookie written with a different
+        // secure/sameSite combination in an earlier deploy would
+        // otherwise survive its own deletion.
+        expect(input.scopes.length).toBeGreaterThan(
+          1,
+        );
+      },
+    );
+
+    it(
+      "still redirects after a failed sign-out, and says the sign-out was unconfirmed (P14, F1)",
+      async () => {
+        // Stranding someone on an error page while their cookies have
+        // already been cleared would be the worst of both: signed out in
+        // fact, and told it failed.
+        redirectMock.mockClear();
+
+        signOutMock.mockResolvedValueOnce(
+          { error: { message: "session missing" } },
+        );
+
+        await expect(
+          signOutAction(),
+        ).rejects.toBe(
+          REDIRECT_SENTINEL,
+        );
+
+        expect(redirectMock).toHaveBeenCalledWith(
+          "/sign-in?signed_out=unconfirmed",
         );
       },
     );

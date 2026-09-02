@@ -57,7 +57,7 @@ const MAX_AUDIT_PAYLOAD_BYTES = 8192;
 export async function recordAuditEvent(
   supabase: SupabaseClient,
   input: RecordAuditEventInput,
-): Promise<{ ok: boolean }> {
+): Promise<{ ok: boolean; reason: string | null }> {
   // Measured the same way the CHECK measures it -- UTF-8 bytes of the
   // JSON text, not character count and not the TOAST-compressed size
   // pg_column_size would report (which compressible filler can game).
@@ -68,6 +68,7 @@ export async function recordAuditEvent(
   ) {
     return {
       ok: false,
+      reason: "payload exceeds the audit payload size bound",
     };
   }
 
@@ -89,5 +90,27 @@ export async function recordAuditEvent(
 
   return {
     ok: !error,
+    // 2026-09-03 (P14, WP-K). WHY it failed, not merely that it did.
+    //
+    // This returned a bare {ok:false} and callers discarded it, so a
+    // rejected audit write -- a payload over the size bound, an
+    // event_type the catalog does not name, an RLS refusal -- vanished
+    // completely. The mutation it described had already committed, so
+    // the record was simply incomplete and nothing said so.
+    //
+    // Deliberately RETURNED rather than logged here. This is the
+    // application layer, and the layering rule
+    // (tests/architecture/layering-rules.ts) permits it exactly one
+    // infrastructure import, which is the regulatory port. Reaching for
+    // the logger from here would trade a real architectural boundary
+    // for a convenience, and the boundary is worth more: the Server
+    // Actions that call this can already reach the logger, and they are
+    // where a request id would come from anyway.
+    //
+    // Threading that through every call site is recorded as a
+    // post-release item rather than done half-way here -- a warning on
+    // three of a dozen paths would be worse than none, because the
+    // silence on the other nine would look deliberate.
+    reason: error ? error.message : null,
   };
 }
