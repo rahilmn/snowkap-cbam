@@ -3957,3 +3957,109 @@ changes:
   `/reset-password` accepts any live session; `getShipmentDetail`,
   `addLine`, `revokeInvitation` lack active-org checks; mobile drawer
   does not restore focus on Escape; no skip-to-content link.
+
+---
+
+## 55. CORRECTION — v9 *did* introduce a CRITICAL regression to production
+
+**§54 §2b and commit `0d11613` both state the R7 clause-2 understatement
+forgery was "pre-existing, NOT a v9 regression." That is wrong.** It was
+my error, it was introduced by a change I made, and it reached
+production. Correcting it here rather than amending the earlier text.
+
+### 55.1 What I got wrong, and how
+
+I tested the fixture against "v8" and "v9" and reported both returned
+`True`, concluding the defect pre-dated v9. **The row I labelled v8 was
+actually v9** — I ran it against the *installed* function, and production
+had already been pushed to v9 minutes earlier. I compared v9 with v9 and
+called the result an attribution.
+
+Re-run with v8's function **genuinely loaded** from its own migration:
+
+| Validator | Understatement forgeries accepted (6 worst fixtures × 3 declared routes) |
+|---|---|
+| **v8** | **0 / 18** — blocked |
+| **v9** | **6 / 18** — regression |
+| **v10** (live) | **0 / 18** — closed |
+
+The adversarial review's attribution was correct and mine was not. I
+dismissed a correct CRITICAL finding on the strength of a broken test,
+and only re-checked because the review's final verdict described a
+variant my own test had not covered.
+
+### 55.2 The mechanism
+
+v9 relaxed the route binding to fire only when **both** the declared
+route and the claimed record's route are non-null. It therefore no longer
+rejects a claim whose record has `route = NULL` — and the R7 clause-2
+precondition it now leans on still filtered the *own* country by exact
+route equality. The two changes interact: the precondition misses the
+origin country's usable value, and the relaxed binding no longer catches
+the claim either.
+
+**My decision memo asserted the opposite** (§A.7: "The only claims newly
+accepted are those the resolver demonstrably produces — i.e. the forgery
+surface shrinks"). That claim was untested against the fallback path.
+Neither the memo, the v9 migration header, nor the function comment
+mentioned the precondition at all.
+
+### 55.3 Corrected scale
+
+The review's numbers are right; mine were incomplete because I counted
+only route-specific own records:
+
+|  | mine (§54) | correct |
+|---|---|---|
+| Combinations | 653 | **954** (301 route-independent + 653 route-specific) |
+| Worst case | −54.3% (Indonesia) | **−68.5%** (India / 7203, 4.200 → 1.325) |
+
+### 55.4 Exposure and data impact
+
+Live from the v9 push until the v10 push — roughly one hour, on a
+pre-release deployment with no real users.
+
+**Data impact: zero, verified against production:**
+
+- 1 shipment line total, and its determination is `ACTUAL` — not the
+  forgeable DEFAULT/fallback class
+- **0** lines carrying an `OTHER_COUNTRIES_FALLBACK` determination
+- **0** determination audit events in the last 24 hours
+- **0** shipment_line audit events in the last 24 hours
+
+No determination was written during the window at all. Nothing to remediate.
+
+### 55.5 Closure, verified across the whole population
+
+**205 probes — 41 fixtures (20 route-independent, 20 route-specific, plus
+the −68.5% worst case) × 5 declared-route values — accepted ZERO** under
+live v10. The class is closed in production.
+
+### 55.6 What this says about the round
+
+Three things, none comfortable:
+
+1. **I shipped a CRITICAL regression to production.** v9 was applied via
+   `supabase db push` after verification that was real but incomplete: it
+   covered the paths I had reasoned about (B1, B2, forgery matrix) and
+   not the fallback path the change also touched.
+2. **I then mis-attributed it and wrote the mis-attribution into the
+   report and a commit message**, on the strength of a test whose control
+   was mislabelled. A wrong attribution in a release report is worse than
+   no attribution.
+3. **The regression suite that would most likely have caught it could not
+   run** — Docker unavailable locally, `public.ecr.aws` rate-limiting in
+   CI. This is the concrete cost of §54's item 2, and it is no longer
+   hypothetical.
+
+The adversarial review earned its cost here: it found a CRITICAL that my
+own verification missed, and was right about the attribution when I was
+wrong.
+
+### 55.7 Consequence for the release decision
+
+**RELEASE BLOCKED stands, and item 2 of §54's rationale is strengthened:**
+validator changes must not ship again until their regression suite can
+actually run. The specificity gap noted in §54's residuals is
+deliberately still unfixed for exactly this reason — a v11 I cannot test
+would be the same mistake a third time.

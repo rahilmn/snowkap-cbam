@@ -140,6 +140,20 @@ Concretely, for the DEFAULT branch:
 
 ### A.7 Security consequence
 
+> **CORRECTION, 2026-09-02.** The claim below that "the forgery surface
+> shrinks" was **WRONG as written**, and I verified it wrongly. v9's
+> relaxed binding fires only when BOTH the declared route and the claimed
+> record's route are non-null, so it stopped rejecting claims whose
+> record has `route = NULL` — and the R7 clause-2 precondition it leans on
+> still filtered the OWN country by exact route equality. Together they
+> re-opened the Other-Countries understatement forgery across **954**
+> combinations, worst case **−68.5%**, which v8 had blocked. v9 was live
+> in production with that regression for about an hour (zero data
+> impact — verified). Closed by **v10** (`20260902140000`), which makes
+> the precondition use the same route filter as the uniqueness rule.
+> Full account: release report §55. The analysis below remains correct
+> for the paths it covers; it simply did not cover the fallback path.
+
 Strictly **stronger**, not weaker:
 
 - It still rejects a claim whose record is not a real dataset row
