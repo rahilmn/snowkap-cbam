@@ -2933,3 +2933,153 @@ three migrations of §40 awaiting the same owner-gated
 `supabase db push`. Stated here rather than left implicit, because
 "the fix is committed" and "the fix is in production" are different
 claims and this report keeps them apart.
+
+---
+
+## 46. First real-external-user authentication test — AWAITING OWNER RESULT
+
+The owner is performing this personally, with a brand-new external
+address they control, against
+`https://snowkap-cbam-production.up.railway.app`. It is the one gate this
+session cannot close on its own: I cannot receive email, and the standing
+instruction correctly forbids substituting the service-role/admin API for
+it.
+
+### 46.1 A real defect found pre-flight, fixed before the test
+
+`signUpAction` called `supabase.auth.signUp({ email, password })` with no
+`options.emailRedirectTo`. With that field absent, GoTrue builds the
+confirmation link from the **project's dashboard Site URL**. A hosted
+project whose Site URL still reads `http://localhost:3000` would
+therefore mail every new user a link to a host that does not exist for
+them: signup succeeds, the UI correctly says "check your email", the mail
+is genuinely delivered — and confirmation is impossible for anyone
+outside the developer's own machine.
+
+Nothing in this repository could have detected that; the broken half
+lives entirely in remote configuration. Fixed in `3ba9710`: signup now
+sends `${getAppOrigin()}/auth/callback?next=/onboarding`, derived from
+`x-forwarded-host`, matching what `forgot-password/actions.ts` and
+`team/actions.ts` already did for their own emails. Signup was the
+outlier.
+
+### 46.2 What could NOT be verified from outside, and why it is said rather than assumed
+
+GoTrue validates `emailRedirectTo` against the project's **Redirect URLs**
+allowlist and falls back to Site URL when it fails. I attempted to probe
+that allowlist without creating an account, using `/auth/v1/recover` with
+a non-existent address, and ran a **control**: a deliberately
+non-allowlisted URL.
+
+Both returned **HTTP 200**. The method does not discriminate — GoTrue
+does not reject a bad `redirect_to`, it silently substitutes. So the
+allowlist cannot be verified from outside the dashboard, and the host in
+the delivered email is the only ground truth. Recorded as an
+inconclusive probe rather than a passed check.
+
+### 46.3 Verified preconditions (not a substitute for the test)
+
+| Precondition | State |
+|---|---|
+| Email confirmation still required | `mailer_autoconfirm: false` — not weakened |
+| Signup open | `disable_signup: false` |
+| Rate limits | unchanged in production; the E2E bypass is now compiled out of production builds entirely (§45.2) |
+| `RESEND_API_KEY` | present only in gitignored `.env`; in no tracked source file, no `NEXT_PUBLIC_*` var, and no Resend key pattern anywhere in git history |
+| Auth pages live | `/sign-up`, `/forgot-password`, `/reset-password`, `/auth/callback` → 200; `/onboarding` → 307 (correctly redirects unauthenticated) |
+| Reset-password code path | **deliberately unmodified** — see §45.4 |
+
+### 46.4 Status
+
+**NOT VERIFIED.** No claim is made anywhere in this report that SMTP is
+production-ready. It will be marked verified only once a real external
+email has been delivered *and* consumed end to end, reported by the
+owner.
+
+---
+
+## 47. Correction: §42 and §44 overstated two of the four blockers
+
+Re-reading §16 while continuing the non-blocked work showed that the
+final report's own blocker list was wrong in the direction of
+**inflating** unresolved work. That is the mirror image of the failure
+the directive warned against, and it damages the release picture just as
+much, so it is corrected here rather than quietly amended.
+
+### 47.1 Blocker #4 was false — the live journeys WERE production-verified
+
+§44 listed "Live producer, cross-org-sharing and declaration-lifecycle
+journeys unexecuted against production — locally verified only."
+
+**That is not what the evidence says.** §16.12 records the producer
+journey and the complete cross-org sharing lifecycle executed against
+`https://snowkap-cbam-production.up.railway.app` on the real hosted
+database, with per-step PASS evidence including the pre-acceptance leak
+check (grantee sees 0 `emission_data`, 0 `evidence_files`), grantee
+read-only enforcement (UPDATE → 0 rows, DELETE → 0 rows), snapshot
+provenance carrying `sharing_grant_id`, dual-org audit events, and
+post-revocation access dropping to 0 across all three tables. §16.14
+records the declaration lifecycle verified live in the same environment.
+
+This blocker is **withdrawn**.
+
+**One real caveat survives it**, and it is the honest residue: every
+production test user to date was provisioned via the service-role admin
+API with `email_confirm: true`, precisely because SMTP was unconfigured.
+So the journeys are production-verified, but the *signup path into them*
+is not. That gap is exactly what §46 closes — which is why §46 is the
+blocker and these journeys are not.
+
+### 47.2 Blocker #3 was overstated — the backup IS production-verified
+
+§44 listed "Production backup/restore and rollback rehearsal unexecuted —
+local evidence only."
+
+§16.15 is more precise and more favourable than that. A logical backup
+**of production** succeeded read-only against the live hosted project
+(4,097,140 bytes, 21 `COPY` blocks — every table): **PRODUCTION-VERIFIED**.
+The restore was executed into a throwaway database and its recovered
+provenance verified by query: **LOCAL-VERIFIED**. Restore *into*
+production was **deliberately not attempted**, which is the correct
+engineering decision — rehearsing a destructive restore over a live
+database needs an owner decision and a maintenance window, and doing it
+unasked would have been reckless, not thorough.
+
+So "local evidence only" was simply wrong about the backup half.
+
+**What genuinely remains** from this item is narrower:
+
+- **Rollback rehearsal — still never executed** (§34). This was blocked
+  when written because Railway was unhealthy. Railway is healthy now, so
+  it is newly *possible*, but it needs Railway control-plane access this
+  session does not have. Real, and still open.
+- **Restore into production — not attempted, by design.** This should be
+  recorded as an accepted limitation with a stated rationale, not carried
+  as a blocker implying someone forgot to do it.
+- **Supabase managed backup / PITR — not independently verified.** The
+  dashboard reports a recent backup (owner-observed), but this session
+  cannot exercise a managed restore.
+
+### 47.3 The corrected blocker list
+
+Superseding §44's four:
+
+1. **SMTP external delivery unverified** (§46) — the real gate. If it
+   does not work, no real user can register, and every production test
+   user to date was admin-provisioned rather than self-registered.
+2. **Production schema/ledger drift** — three migrations applied but
+   unrecorded (§40), plus `20260831140000` (audit_events bounds) applied
+   locally only, so production currently has that fix's Wall 1 but not
+   Wall 2 (§45.6). Both need the same owner-gated `supabase db push`.
+3. **Rollback rehearsal never executed** (§34) — needs Railway
+   control-plane access.
+4. **The reordered CI job has never run on a runner** (§45.3) — the
+   workflow triggers only on `main` push or a PR, and neither applies to
+   this branch. Locally the full suite is green (24/8/0) with all three
+   journeys real, but that is local evidence about a CI change.
+
+Accepted limitations, explicitly **not** blockers: restore-into-production
+(deliberate), PITR (owner-observable only), and the ~36 §16 findings whose
+severities are individually recorded there.
+
+**The classification does not change: RELEASE BLOCKED.** Item 1 alone is
+sufficient, and it is exactly the gate the owner is executing now.
