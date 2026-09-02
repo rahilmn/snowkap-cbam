@@ -4063,3 +4063,68 @@ validator changes must not ship again until their regression suite can
 actually run. The specificity gap noted in §54's residuals is
 deliberately still unfixed for exactly this reason — a v11 I cannot test
 would be the same mistake a third time.
+
+---
+
+## 56. Docker restored and SMTP enabled - two blockers move (2026-09-02)
+
+### 56.1 The full integration suite ran, and it caught three failures
+
+With Docker available, `pnpm test` executed **every** suite for the first
+time this round: **1377 passed / 14 skipped / 0 failed** (skips back to
+the normal 14, from 144).
+
+It did not pass first time. The determination-hardening suite failed
+**3 tests - all three of mine** - which is precisely the gate section 54
+said was missing. Two distinct causes:
+
+1. **Local Postgres was 7 migrations behind.** `supabase start` restored
+   an existing volume rather than replaying migrations, so the local
+   validator was pre-v9. Applied the 7 pending migrations; local ledger
+   now 63/63, matching the repo and production.
+2. **My v9 fixture loader was buggy** - its uniqueness probe omitted the
+   country filter, so it counted usable records for a trade code across
+   all 122 countries, never found `count === 1`, and threw "fixture
+   assumption broken." **The post-v9 adversarial review flagged exactly
+   this**, and the suite then proved it. v9's uniqueness rule is per
+   (dataset, country, trade code) and the fixture now mirrors it.
+
+After both fixes: determination-hardening **37/37 passed**, including the
+rewritten route-blank case, the B1 uniqueness case, the different-route
+rejection, and the listed-claiming-UNLISTED rejection.
+
+**Release blocker "validator changes shipped without their regression
+suite" is CLOSED.** v9/v10 are now exercised by the suite written for
+them.
+
+### 56.2 SMTP: enabled, failing, and diagnosed to one field
+
+Custom SMTP **is now enabled** - `/auth/v1/recover` for an existing user
+changed from `over_email_send_rate_limit` (the built-in sender's ~2/hour
+cap) to **HTTP 500 "Error sending recovery email"**. Supabase is
+attempting an SMTP send; it fails, and **nothing reaches Resend**.
+
+Three sends through Resend SMTP isolate it:
+
+| From | To | Result |
+|---|---|---|
+| `noreply@snowkap.co.in` | `delivered@resend.dev` | **ACCEPTED, delivered** |
+| `noreply@snowkap.com` | `delivered@resend.dev` | **REJECTED - `550 The snowkap.com domain is not verified`** |
+| `noreply@snowkap.co.in` | `p13.importer@snowkaptest.dev` | **ACCEPTED (sent)** |
+
+The recipient domain is **not** the cause - even the throwaway address
+was accepted from `snowkap.co.in`. `snowkap.com` is rejected at the DATA
+stage, and a DATA-stage rejection writes **no log row**, which is exactly
+why Resend's log is empty while Supabase reports 500.
+
+**Fix: change Supabase's Sender email to `noreply@snowkap.co.in`.** Host,
+port, username and API key are already correct (AUTH succeeded; a test
+message was delivered).
+
+**Disclosure:** three real emails were sent as part of this - two to
+Resend's documented test sink `delivered@resend.dev`, and one to the
+throwaway `@snowkaptest.dev` test account. None went to a person. The API
+key was never printed.
+
+**SMTP remains NOT VERIFIED end to end.** No confirmation email has been
+delivered to a real inbox and consumed. That still requires the owner.

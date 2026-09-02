@@ -1,6 +1,7 @@
 # Supabase Auth custom SMTP — exact configuration requirements
 
-**Status as of 2026-09-02: NOT CONFIGURED. This is a release blocker.**
+**Status as of 2026-09-02 (updated): CONFIGURED BUT FAILING - one field is wrong.**
+See section 0 for the diagnosis and the single change that fixes it.
 
 Every transactional auth email the product sends — sign-up
 confirmation, password reset, and team invitation — currently fails to
@@ -12,6 +13,48 @@ repository or by an automated session: Supabase Auth SMTP settings live
 in the hosted dashboard / Management API, and this project's MCP
 integration returns *"You do not have permission to perform this
 action"* for every project-level read.
+
+---
+
+## 0. CURRENT DIAGNOSIS (2026-09-02, after custom SMTP was enabled)
+
+Custom SMTP **is now enabled** - `/auth/v1/recover` for an existing user
+changed from `over_email_send_rate_limit` (the built-in sender's ~2/hour
+cap) to **HTTP 500 `unexpected_failure` "Error sending recovery email"**.
+Supabase is attempting an SMTP send. It fails, and **nothing appears in
+Resend's log at all**.
+
+Three sends issued directly through Resend SMTP isolate the cause:
+
+| From | To | Result |
+|---|---|---|
+| `noreply@snowkap.co.in` | `delivered@resend.dev` (Resend test sink) | **ACCEPTED, delivered** |
+| `noreply@snowkap.com` | `delivered@resend.dev` | **REJECTED - `550 The snowkap.com domain is not verified`** |
+| `noreply@snowkap.co.in` | `p13.importer@snowkaptest.dev` | **ACCEPTED (sent)** |
+
+Two conclusions:
+
+1. **The recipient domain is not the problem.** Even the throwaway
+   `@snowkaptest.dev` address was accepted when sent from
+   `snowkap.co.in`.
+2. **`snowkap.com` is rejected at the DATA stage** because it is not a
+   verified Resend domain - and a DATA-stage rejection creates **no log
+   row**, which is exactly why Resend's log is empty while Supabase
+   reports a 500.
+
+### The fix - one field
+
+In **Supabase > Project Settings > Authentication > SMTP Settings**,
+change the **Sender email** to an address on the verified domain:
+
+    noreply@snowkap.co.in
+
+`snowkap.co.in` is the **only** verified domain on this Resend account
+(confirmed via Resend's `/domains` API). Host, port, username and the API
+key are all already correct - verified by a successful AUTH and a
+delivered test message.
+
+Everything below remains accurate and is kept for the record.
 
 ---
 

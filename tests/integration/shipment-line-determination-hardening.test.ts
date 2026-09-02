@@ -2608,7 +2608,7 @@ describe.skipIf(!localSupabaseReachable)(
         await serviceClient
           .from("default_emission_values")
           .select(
-            "dataset_id, source_sheet, source_row, source_trade_code, emission_unit, direct_value, direct_status, indirect_value, indirect_status, total_value, total_status, countries!inner(name, iso2), production_routes!inner(source_route_indicator), regulatory_datasets!inner(version, status)",
+            "dataset_id, country_id, source_sheet, source_row, source_trade_code, emission_unit, direct_value, direct_status, indirect_value, indirect_status, total_value, total_status, countries!inner(name, iso2), production_routes!inner(source_route_indicator), regulatory_datasets!inner(version, status)",
           )
           .eq("regulatory_datasets.status", "ACTIVE")
           .eq("total_status", "AVAILABLE")
@@ -2625,11 +2625,20 @@ describe.skipIf(!localSupabaseReachable)(
           continue;
         }
 
+        // The country filter is REQUIRED and was missing in the first
+        // version of this loader (caught by the post-v9 adversarial
+        // review, then confirmed by this suite failing with "No unique
+        // route-specific AVAILABLE record found"): without it the probe
+        // counts usable records for that trade code across ALL 122
+        // countries, so `count` is never 1 and no fixture is ever
+        // selected. v9's uniqueness rule is per (dataset, country,
+        // trade code), and the fixture must mirror it exactly.
         const { count } =
           await serviceClient
             .from("default_emission_values")
             .select("id", { count: "exact", head: true })
             .eq("dataset_id", row.dataset_id)
+            .eq("country_id", row.country_id)
             .eq("source_trade_code", row.source_trade_code)
             .eq("total_status", "AVAILABLE");
 
