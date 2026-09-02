@@ -1,7 +1,7 @@
 # Supabase Auth custom SMTP — exact configuration requirements
 
-**Status as of 2026-09-02 (updated): CONFIGURED BUT FAILING - one field is wrong.**
-See section 0 for the diagnosis and the single change that fixes it.
+**Status as of 2026-09-02: CONFIGURED BUT FAILING — the PORT is wrong.**
+Set it to `587`. See §0.
 
 Every transactional auth email the product sends — sign-up
 confirmation, password reset, and team invitation — currently fails to
@@ -16,45 +16,54 @@ action"* for every project-level read.
 
 ---
 
-## 0. CURRENT DIAGNOSIS (2026-09-02, after custom SMTP was enabled)
+## 0. CURRENT DIAGNOSIS (2026-09-02) — THE PORT IS WRONG
 
-Custom SMTP **is now enabled** - `/auth/v1/recover` for an existing user
-changed from `over_email_send_rate_limit` (the built-in sender's ~2/hour
-cap) to **HTTP 500 `unexpected_failure` "Error sending recovery email"**.
-Supabase is attempting an SMTP send. It fails, and **nothing appears in
-Resend's log at all**.
+**Change the port from `465` to `587`. That is the whole fix.**
 
-Three sends issued directly through Resend SMTP isolate the cause:
+### What is actually wrong
 
-| From | To | Result |
+GoTrue (Supabase Auth's mailer) connects in **plaintext and then issues
+`STARTTLS`**. Port **465 expects TLS immediately** (implicit TLS), so
+that handshake hangs and times out — Supabase never completes a
+connection, and therefore **nothing ever reaches Resend**, which is
+exactly why Resend's log stays empty while Supabase returns
+`HTTP 500 "Error sending recovery email"`.
+
+Measured against `smtp.resend.com` with the configured credentials
+(AUTH only, no mail sent):
+
+| Port / handshake | Result |
+|---|---|
+| 465 implicit TLS | **AUTH OK** |
+| **465 STARTTLS — what GoTrue actually does** | **FAIL: connection timed out** |
+| **587 STARTTLS** | **AUTH OK** |
+| 2587 STARTTLS | AUTH OK |
+
+### Everything else is already correct
+
+Confirmed from the dashboard and by direct testing:
+
+| Field | Value | State |
 |---|---|---|
-| `noreply@snowkap.co.in` | `delivered@resend.dev` (Resend test sink) | **ACCEPTED, delivered** |
-| `noreply@snowkap.com` | `delivered@resend.dev` | **REJECTED - `550 The snowkap.com domain is not verified`** |
-| `noreply@snowkap.co.in` | `p13.importer@snowkaptest.dev` | **ACCEPTED (sent)** |
+| Sender email | `noreply@snowkap.co.in` | **correct** — the only verified Resend domain |
+| Sender name | `Snowkap CBAM` | fine |
+| Host | `smtp.resend.com` | **correct** |
+| Username | `resend` | **correct** |
+| Password (API key) | — | **correct** — AUTH succeeds and a test message was delivered |
+| **Port** | **`465`** | **WRONG for GoTrue — set to `587`** |
 
-Two conclusions:
+### Correction to an earlier diagnosis in this runbook
 
-1. **The recipient domain is not the problem.** Even the throwaway
-   `@snowkaptest.dev` address was accepted when sent from
-   `snowkap.co.in`.
-2. **`snowkap.com` is rejected at the DATA stage** because it is not a
-   verified Resend domain - and a DATA-stage rejection creates **no log
-   row**, which is exactly why Resend's log is empty while Supabase
-   reports a 500.
+An earlier revision concluded the **sender domain** was wrong (on
+`snowkap.com` rather than `snowkap.co.in`). **That was incorrect** — the
+dashboard shows `noreply@snowkap.co.in` was already configured. The
+`snowkap.com` rejection observed at the time came from a *control* send I
+issued myself, not from Supabase's configuration. The real cause is the
+port/handshake mismatch above.
 
-### The fix - one field
-
-In **Supabase > Project Settings > Authentication > SMTP Settings**,
-change the **Sender email** to an address on the verified domain:
-
-    noreply@snowkap.co.in
-
-`snowkap.co.in` is the **only** verified domain on this Resend account
-(confirmed via Resend's `/domains` API). Host, port, username and the API
-key are all already correct - verified by a successful AUTH and a
-delivered test message.
-
-Everything below remains accurate and is kept for the record.
+This runbook's own §3 previously recommended port 465, following the
+original instruction. **That recommendation was wrong for GoTrue** and is
+corrected here and in §3.
 
 ---
 
@@ -98,7 +107,7 @@ state.
 | Field | Value |
 |---|---|
 | Host | `smtp.resend.com` |
-| Port | `465` |
+| Port | `587` (STARTTLS — **not** 465; see §0) |
 | Username | `resend` (the literal string — Resend's SMTP username is always this) |
 | Password | your Resend **API key** |
 | Sender email | an address **on `snowkap.co.in`**, e.g. `noreply@snowkap.co.in` |

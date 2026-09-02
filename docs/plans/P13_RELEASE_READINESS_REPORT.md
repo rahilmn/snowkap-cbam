@@ -4128,3 +4128,48 @@ key was never printed.
 
 **SMTP remains NOT VERIFIED end to end.** No confirmation email has been
 delivered to a real inbox and consumed. That still requires the owner.
+
+---
+
+## 57. SMTP root cause: the PORT, not the sender (2026-09-02)
+
+**Correction to §56.2.** That section concluded Supabase's sender address
+was on an unverified domain. **It was not.** The dashboard shows
+`noreply@snowkap.co.in` — correct, and the only verified Resend domain.
+The `snowkap.com` rejection I cited came from a *control* send I issued
+myself, not from Supabase's configuration. I generalised from my own
+control to the system under test, which was wrong.
+
+### The actual cause
+
+GoTrue connects in **plaintext then issues `STARTTLS`**. Port **465
+expects TLS immediately** (implicit TLS), so the handshake hangs and
+times out. Supabase never completes a connection, so **nothing reaches
+Resend** — precisely why its log is empty while Supabase returns
+`HTTP 500 "Error sending recovery email"`.
+
+Measured against `smtp.resend.com` with the configured credentials
+(AUTH only, no mail sent):
+
+| Port / handshake | Result |
+|---|---|
+| 465 implicit TLS | AUTH OK |
+| **465 STARTTLS — what GoTrue does** | **FAIL: connection timed out** |
+| **587 STARTTLS** | **AUTH OK** |
+| 2587 STARTTLS | AUTH OK |
+
+My earlier direct sends succeeded only because Python's `SMTP_SSL`
+speaks **implicit** TLS on 465 — the one handshake GoTrue does not use.
+That is why my credential test passed while Supabase's send failed, and
+why I misread the cause twice.
+
+### Fix
+
+**Set the port to `587`.** Sender, host, username and API key are all
+already correct — AUTH succeeds and a test message was delivered.
+
+This runbook's own §3 had recommended 465, following the original
+instruction. That recommendation was wrong for GoTrue and is corrected.
+
+**SMTP remains NOT VERIFIED end to end** until a real confirmation email
+is delivered to a real inbox and consumed.
