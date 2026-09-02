@@ -3200,3 +3200,90 @@ production), HSTS `max-age=63072000; includeSubDomains`,
 `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
 `Referrer-Policy: strict-origin-when-cross-origin`, and
 `X-Powered-By` correctly absent.
+
+---
+
+## 49. The internal design gallery was live on production (2026-08-31)
+
+Found by the owner, not by any audit in this session — including the
+adversarial ones, which is worth noting: twelve dimensions of security
+review and two remaining-findings sweeps all missed a page anyone could
+load without signing in.
+
+### 49.1 Two mistakes compounding
+
+**`/design` was never actually dev-only.** `app/design/page.tsx`'s own
+doc comment claimed "Dev-only design-system review venue, per
+MASTER_PLAN.md §26" and "Not linked from product navigation". Both
+halves were false in practice: nothing enforced dev-only, so the gallery
+answered **HTTP 200 to an unauthenticated request** on the live
+deployment.
+
+**And the dashboard was still the Phase-2 walking skeleton.** That is
+how an internal page became easy to find: `app/page.tsx`, the
+post-sign-in landing page, showed every real user the text *"Application
+shell walking skeleton (Phase 2). Product screens begin at Phase 4."*
+and offered exactly one action — *"View the design system gallery →"*.
+The release report had listed the placeholder landing page as a known
+gap (§35) without connecting it to the gallery being publicly linked
+from it.
+
+### 49.2 Severity, stated accurately
+
+Not a data disclosure. The gallery renders design tokens and component
+samples — no org, user, shipment or emissions data. This is a scope and
+professionalism defect: an internal surface reachable by anyone with the
+URL, contradicting the approved plan, on a compliance tool.
+
+### 49.3 Fixed (`45d2b1c`)
+
+`/design` now `notFound()`s under `NODE_ENV=production`. Deliberately
+`NODE_ENV` rather than a bespoke build flag — unlike the E2E rate-limit
+bypass (§45.2), which had to survive `pnpm build && pnpm start`, there
+is no reason for this gallery to exist in *any* production build,
+including Playwright's. The spec was rewritten to assert it is **gone**
+there rather than kept alive for the test's convenience.
+
+The landing page now shows capability-aware starting points into screens
+that actually exist, derived with the same `deriveExperience()` the
+sidebar uses so the two can never disagree.
+
+**Deliberately not** the dashboard §27.8 specifies (KPI row, period
+completeness, emissions by sector/country, action queue). That needs
+real aggregate queries, and inventing plausible-looking numbers on a
+compliance tool's front page would be far worse than an honest index.
+**The real dashboard remains unbuilt.**
+
+Verified on production after deploy: `/design` → **404**; `/` no longer
+contains "walking skeleton" or any gallery link; `/api/health` all green.
+
+### 49.4 Found while fixing, NOT fixed, and deliberately so
+
+**Production `/` returns 200 to signed-out visitors and renders the
+entire application shell** — nav, breadcrumbs, topbar. `proxy.ts` only
+refreshes the session; it never redirects. This is pre-existing and was
+already tracked in `importer-auth-smoke.spec.ts`'s own header comment
+("not merely that the shell renders while signed out").
+
+Closing it means requiring auth on `/` and re-basing **seven** signed-out
+specs onto the authenticated fixture, each of which performs a real
+sign-up. That is its own change with its own risk, and bundling it into
+a placeholder-content fix would have been a silent scope expansion. The
+landing page therefore keeps an explicit signed-out state, and this is
+recorded as **open**.
+
+### 49.5 What this says about the audits
+
+A page serving HTTP 200 unauthenticated on production was found by a
+human looking at the product, after this session ran a 12-dimension
+adversarial security audit (204 sub-agents), two remaining-findings
+sweeps, and a live UI/responsive/a11y pass. Every one of those searched
+*code paths and data boundaries*; none asked the simpler question "what
+does this deployment actually serve to someone who is not logged in?"
+
+That is a real gap in method, not bad luck — and it is the second time
+this session the phrase "dev-only" turned out to be a comment rather
+than a control (the first being the rate-limit bypass, §45.2). An
+enumeration of every route the production deployment answers, with its
+authentication requirement, belongs in the release evidence and does not
+currently exist.
