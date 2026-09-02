@@ -1,6 +1,7 @@
 export type AppUrlStatus =
   | "ok"
   | "missing"
+  | "malformed"
   | "not_required";
 
 /**
@@ -50,8 +51,38 @@ export function checkAppUrl(
     env.APP_URL?.trim();
 
   if (appUrl) {
+    // 2026-09-02. Presence alone was NOT enough, and the gap was found
+    // in production: APP_URL was set to
+    // "snowkap-cbam-production.up.railway.app" -- correct host, NO
+    // SCHEME. getAppOrigin() returns APP_URL verbatim, so every auth
+    // email was built as
+    //   snowkap-cbam-production.up.railway.app/auth/callback?next=...
+    // a scheme-relative string that is not a usable link. Confirmed from
+    // the project's own API log:
+    //   POST /auth/v1/signup?redirect_to=snowkap-cbam-production.up.
+    //   railway.app%2Fauth%2Fcallback%3Fnext%3D%2Fonboarding
+    //
+    // This check reported "ok" for that value, which is exactly the kind
+    // of false green it exists to prevent -- so it now validates the
+    // SHAPE, not just that something is set. An absolute http(s) URL
+    // with a host is the only form getAppOrigin can safely concatenate.
+    let parsed: URL | null = null;
+
+    try {
+      parsed = new URL(appUrl);
+    } catch {
+      parsed = null;
+    }
+
+    const usable =
+      parsed !== null &&
+      (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+      parsed.hostname.length > 0;
+
     return {
-      status: "ok",
+      status: usable
+        ? "ok"
+        : "malformed",
     };
   }
 

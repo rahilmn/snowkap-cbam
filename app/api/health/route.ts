@@ -60,6 +60,7 @@ interface HealthCheckResult {
     app_url:
       | "ok"
       | "missing"
+      | "malformed"
       | "not_required";
 
     product_schema:
@@ -130,7 +131,7 @@ export async function GET(): Promise<NextResponse<HealthCheckResult>> {
   result.checks.app_url =
     appUrlCheck.status;
 
-  if (appUrlCheck.status === "missing") {
+  if (appUrlCheck.status === "missing" || appUrlCheck.status === "malformed") {
     result.status =
       "degraded";
   }

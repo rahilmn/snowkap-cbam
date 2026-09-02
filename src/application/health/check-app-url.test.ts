@@ -97,5 +97,56 @@ describe(
         );
       },
     );
+
+    it(
+      "reports malformed when APP_URL has no scheme -- the real production failure",
+      () => {
+        // Found 2026-09-02 in the project's own API log: APP_URL was set
+        // to the bare host, so every auth email link was built as
+        // "snowkap-cbam-production.up.railway.app/auth/callback?..." --
+        // not a usable URL. This check previously reported "ok" for it.
+        expect(
+          checkAppUrl(
+            {
+              NODE_ENV: "production",
+              APP_URL: "snowkap-cbam-production.up.railway.app",
+            },
+          ),
+        ).toEqual(
+          { status: "malformed" },
+        );
+      },
+    );
+
+    it(
+      "reports malformed for other unusable shapes",
+      () => {
+        for (const value of ["//host/path", "ftp://host", "not a url", "/relative"]) {
+          expect(
+            checkAppUrl(
+              { NODE_ENV: "production", APP_URL: value },
+            ),
+          ).toEqual(
+            { status: "malformed" },
+          );
+        }
+      },
+    );
+
+    it(
+      "still reports ok for a well-formed absolute URL",
+      () => {
+        expect(
+          checkAppUrl(
+            {
+              NODE_ENV: "production",
+              APP_URL: "https://snowkap-cbam-production.up.railway.app",
+            },
+          ),
+        ).toEqual(
+          { status: "ok" },
+        );
+      },
+    );
   },
 );
