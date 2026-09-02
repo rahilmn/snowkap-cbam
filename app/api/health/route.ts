@@ -21,6 +21,10 @@ import {
 } from "../../../src/application/health/check-product-schema";
 
 import {
+  checkAppUrl,
+} from "../../../src/application/health/check-app-url";
+
+import {
   resolveGitSha,
 } from "../../../src/application/health/resolve-git-sha";
 
@@ -49,6 +53,15 @@ interface HealthCheckResult {
     // route reported "ok" against a database with ZERO product tables --
     // see check-product-schema.ts's own doc comment and
     // docs/plans/P13_RELEASE_READINESS_REPORT.md §16.11/§32.
+    // 2026-08-31: a deploy without APP_URL emails
+    // http://localhost:3000 confirmation/reset/invite links to every
+    // real user while every other check here reads "ok" -- see
+    // check-app-url.ts. Configuration is part of readiness.
+    app_url:
+      | "ok"
+      | "missing"
+      | "not_required";
+
     product_schema:
       | "ok"
       | "missing"
@@ -100,10 +113,27 @@ export async function GET(): Promise<NextResponse<HealthCheckResult>> {
       active_regulatory_dataset:
         "ok",
 
+      app_url:
+        "ok",
+
       product_schema:
         "ok",
     },
   };
+
+  // Pure, no I/O, and deliberately evaluated OUTSIDE the try below: a
+  // database outage must not hide a configuration fault, and this check
+  // cannot itself fail.
+  const appUrlCheck =
+    checkAppUrl();
+
+  result.checks.app_url =
+    appUrlCheck.status;
+
+  if (appUrlCheck.status === "missing") {
+    result.status =
+      "degraded";
+  }
 
   try {
     const supabase =
