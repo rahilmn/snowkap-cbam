@@ -66,20 +66,35 @@ function calculationResultRow(
   };
 }
 
+/**
+ * Chainable and recording. Chainable because the query now carries two
+ * .eq() filters rather than one; recording because the org filter added
+ * on 2026-09-03 IS the fix, and a mock that swallowed filters would let
+ * it be deleted again without a single test failing.
+ */
 function mockSupabase(
   result: { data: unknown; error: unknown },
+  recorder?: { filters: [string, unknown][] },
 ) {
+  const builder: Record<string, unknown> = {
+    eq: (column: string, value: unknown) => {
+      recorder?.filters.push([column, value]);
+      return builder;
+    },
+
+    then: (
+      resolve: (value: unknown) => unknown,
+      reject: (reason: unknown) => unknown,
+    ) =>
+      Promise.resolve(
+        result,
+      ).then(resolve, reject),
+  };
+
   return {
     from: () => (
       {
-        select: () => (
-          {
-            eq: () =>
-              Promise.resolve(
-                result,
-              ),
-          }
-        ),
+        select: () => builder,
       }
     ),
   } as never;
@@ -96,6 +111,7 @@ describe(
             mockSupabase(
               { data: null, error: { message: "boom" } },
             ),
+            "org-1" as never,
             "ship-1" as never,
           );
 
@@ -113,6 +129,7 @@ describe(
             mockSupabase(
               { data: null, error: null },
             ),
+            "org-1" as never,
             "ship-1" as never,
           );
 
@@ -137,6 +154,7 @@ describe(
                 error: null,
               },
             ),
+            "org-1" as never,
             "ship-1" as never,
           );
 
@@ -199,6 +217,7 @@ describe(
                 error: null,
               },
             ),
+            "org-1" as never,
             "ship-1" as never,
           );
 
@@ -225,6 +244,38 @@ describe(
         );
         expect(result["line-3"].embedded_emissions_tco2e).toBe(
           "1.000",
+        );
+      },
+    );
+
+    /**
+     * 2026-09-03 (P14). latest_calculation_results is RLS-scoped to every
+     * org the USER belongs to, not the org they are acting as. Production
+     * has a user who owns two organizations, so the active-org filter has
+     * to be explicit here for the same reason it does on the shipment
+     * itself.
+     */
+    it(
+      "filters by the caller's ACTIVE org as well as the shipment, rather than relying on RLS alone",
+      async () => {
+        const recorder =
+          { filters: [] as [string, unknown][] };
+
+        await getLatestCalculationsByShipment(
+          mockSupabase(
+            { data: [], error: null },
+            recorder,
+          ),
+          "org-1" as never,
+          "ship-1" as never,
+        );
+
+        expect(recorder.filters).toContainEqual(
+          ["org_id", "org-1"],
+        );
+
+        expect(recorder.filters).toContainEqual(
+          ["shipment_id", "ship-1"],
         );
       },
     );

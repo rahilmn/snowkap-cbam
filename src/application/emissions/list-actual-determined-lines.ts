@@ -309,6 +309,7 @@ export async function listActualDeterminedLines(
       stalenessByLineId,
       await checkActualDeterminationStalenessByShipment(
         supabase,
+        orgId,
         lines,
         period,
       ),

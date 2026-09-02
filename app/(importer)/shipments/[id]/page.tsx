@@ -92,6 +92,7 @@ export default async function ShipmentDetailPage(
   const shipment =
     await getShipmentDetail(
       supabase,
+      orgSummary.context.org_id,
       id as never,
     );
 
@@ -104,6 +105,7 @@ export default async function ShipmentDetailPage(
   const latestCalculations =
     await getLatestCalculationsByShipment(
       supabase,
+      orgSummary.context.org_id,
       shipment.id,
     );
 
@@ -152,6 +154,7 @@ export default async function ShipmentDetailPage(
   const actualDeterminationStaleness =
     await checkActualDeterminationStalenessByShipment(
       supabase,
+      orgSummary.context.org_id,
       shipment.lines,
       shipment.reporting_period,
     );

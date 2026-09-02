@@ -16,6 +16,7 @@ import type {
 } from "../../domain/shared/reporting-period";
 
 import type {
+  OrganizationId,
   CalculationResultId,
   ShipmentId,
 } from "../../domain/shared/ids";
@@ -80,6 +81,7 @@ interface CalculationResultRow {
  */
 export async function getLatestCalculationsByShipment(
   supabase: SupabaseClient,
+  orgId: OrganizationId,
   shipmentId: ShipmentId,
 ): Promise<Record<string, LatestLineCalculation>> {
   const { data, error } =
@@ -88,6 +90,11 @@ export async function getLatestCalculationsByShipment(
       .select(
         "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at, determination",
       )
+      // Pinned to the ACTIVE org, not left to RLS, for the reason
+      // get-shipment-detail.ts sets out: the view is org-scoped by RLS to
+      // every org the USER belongs to, which is not the same as the org
+      // they are acting as.
+      .eq("org_id", orgId)
       .eq("shipment_id", shipmentId);
 
   if (error || !data) {

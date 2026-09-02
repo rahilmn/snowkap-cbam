@@ -744,9 +744,18 @@ describe(
           orgId,
         );
 
+        // There are now TWO sharing_grants queries in this call path, and
+        // they have opposite requirements: the staleness helper looks up
+        // the ACTIVE grants this org currently holds (and must filter by
+        // status), while the grantor-name lookup resolves the grant a
+        // FROZEN snapshot was taken through (and must not). Target the
+        // latter by its distinguishing filter -- it keys on the grant ids
+        // from the snapshots, not on grantee_org_id.
         const grantsSelect =
           recorder.ops.find(
-            (op) => op.table === "sharing_grants",
+            (op) =>
+              op.table === "sharing_grants" &&
+              op.filters.some(([column]) => column === "id"),
           );
 
         expect(grantsSelect).toBeDefined();

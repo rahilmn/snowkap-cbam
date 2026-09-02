@@ -114,7 +114,14 @@ function mockRepository(
 
 function mockSupabase(
   {
-    shipmentResult = { data: { release_date: "2026-03-15" }, error: null },
+    // 2026-09-03 (P14): addLine now reads org_id alongside release_date,
+    // so it can refuse a shipment belonging to a different organization
+    // BEFORE running a regulatory resolution against that org's release
+    // date. The default fixture is the caller's own org.
+    shipmentResult = {
+      data: { org_id: "org-1", release_date: "2026-03-15" },
+      error: null,
+    },
     lineFetchResult = {
       data: { org_id: "org-1", shipment_id: "ship-1", shipments: { release_date: "2026-03-15" } },
       error: null,
@@ -904,6 +911,68 @@ describe(
               { status: "OK" },
             );
           },
+        );
+      },
+    );
+
+    /**
+     * 2026-09-03 (P14). shipments_select_own_org admits every org the
+     * USER belongs to, not the org they are acting as, and production has
+     * a user who owns two organizations.
+     *
+     * The INSERT was never at risk -- shipment_lines_insert_parent_not_
+     * terminal requires s.org_id = shipment_lines.org_id, so RLS refuses
+     * it and no audit event is written. The problem was everything that
+     * happened first: a full regulatory resolution run against the OTHER
+     * org's shipment release_date, in the wrong organizational context,
+     * surfacing to the user as a write error rather than a not-found.
+     */
+    it(
+      "rejects SHIPMENT_NOT_FOUND for a shipment in a different org, before running any regulatory resolution",
+      async () => {
+        const repositoryCalls =
+          { count: 0 };
+
+        const repository =
+          {
+            findCbamGoodsByExactCode: async () => {
+              repositoryCalls.count += 1;
+              return [];
+            },
+
+            findActiveDefaultEmissionCandidates: async () => {
+              repositoryCalls.count += 1;
+              return [];
+            },
+
+            mapCountry: async () => {
+              repositoryCalls.count += 1;
+              return { status: "UNLISTED" as const };
+            },
+          } as never;
+
+        const result =
+          await addLine(
+            mockSupabase(
+              {
+                shipmentResult: {
+                  data: { org_id: "org-2", release_date: "2026-03-15" },
+                  error: null,
+                },
+              },
+            ),
+            repository,
+            memberContext(),
+            shipmentId,
+            validInput,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "SHIPMENT_NOT_FOUND" },
+        );
+
+        expect(repositoryCalls.count).toBe(
+          0,
         );
       },
     );

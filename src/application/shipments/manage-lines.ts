@@ -279,7 +279,7 @@ export async function addLine(
   const { data: shipmentRow, error: shipmentError } =
     await supabase
       .from("shipments")
-      .select("release_date")
+      .select("org_id, release_date")
       .eq("id", shipmentId)
       .maybeSingle();
 
@@ -291,6 +291,27 @@ export async function addLine(
   }
 
   if (!shipmentRow) {
+    return {
+      status: "REJECTED",
+      reason: "SHIPMENT_NOT_FOUND",
+    };
+  }
+
+  // 2026-09-03 (P14). The explicit active-org check updateLine and
+  // removeLine already carry, applied here too.
+  //
+  // The insert itself was never at risk: shipment_lines_insert_parent_
+  // not_terminal requires s.org_id = shipment_lines.org_id, so a
+  // cross-org insert is refused by RLS and no audit event is written.
+  // What WAS happening is that the refusal came only AFTER
+  // resolveLineClassification had already run a full regulatory
+  // resolution against the OTHER org's shipment release_date -- work
+  // done in the wrong organizational context, surfacing to the user as
+  // a confusing write error rather than a plain not-found.
+  //
+  // Indistinguishable from a missing shipment, matching this module's
+  // existing posture and getShipmentDetail's.
+  if ((shipmentRow as { org_id: string }).org_id !== orgId) {
     return {
       status: "REJECTED",
       reason: "SHIPMENT_NOT_FOUND",

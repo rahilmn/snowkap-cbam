@@ -137,10 +137,38 @@ interface Recorder {
  * since reportingPeriodColumns' ANNUAL branch filters via
  * `.is("reporting_period_quarter", null)`.
  */
+/**
+ * 2026-09-03 (P14). The fixtures in this file describe a SHARED
+ * installation (entered_by_org_id is "org-producer", the caller is
+ * "org-1"), and since the active-org pin was added a shared row only
+ * produces a staleness signal when the caller currently holds a live
+ * grant for it. That grant is therefore part of the scenario these tests
+ * have always been describing, and is supplied by default here rather
+ * than repeated in every case.
+ *
+ * A caller that passes its own `sharing_grants` entry -- including an
+ * empty one, meaning revoked -- overrides it. See the two tests at the
+ * end of this file, which is where that matters.
+ */
 function makeMockSupabase(
   tables: Record<string, { data: unknown; error: unknown }>,
   recorder: Recorder = { fromCalls: [], ops: [] },
 ) {
+  const withDefaults: Record<string, { data: unknown; error: unknown }> =
+    {
+      sharing_grants: {
+        data: [
+          {
+            installation_id: "installation-1",
+            expires_at: null,
+          },
+        ],
+        error: null,
+      },
+
+      ...tables,
+    };
+
   function builder(
     table: string,
   ) {
@@ -169,7 +197,7 @@ function makeMockSupabase(
         reject: (reason: unknown) => unknown,
       ) =>
         Promise.resolve(
-          tables[table] ?? { data: null, error: null },
+          withDefaults[table] ?? { data: null, error: null },
         ).then(resolve, reject),
     };
 
@@ -197,6 +225,7 @@ describe(
                 emission_data: { data: [currentActiveRowSameVersion], error: null },
               },
             ),
+            "org-1" as never,
             [actualLine()],
             annualPeriod,
           );
@@ -217,6 +246,7 @@ describe(
                 emission_data: { data: [currentActiveRowNewerVersion], error: null },
               },
             ),
+            "org-1" as never,
             [actualLine()],
             annualPeriod,
           );
@@ -237,6 +267,7 @@ describe(
                 emission_data: { data: [], error: null },
               },
             ),
+            "org-1" as never,
             [actualLine()],
             annualPeriod,
           );
@@ -257,6 +288,7 @@ describe(
                 emission_data: { data: [currentActiveRowSameVersion], error: null },
               },
             ),
+            "org-1" as never,
             [actualLine(), defaultLine(), undeterminedLine()],
             annualPeriod,
           );
@@ -281,6 +313,7 @@ describe(
               },
               recorder,
             ),
+            "org-1" as never,
             [defaultLine(), undeterminedLine()],
             annualPeriod,
           );
@@ -307,6 +340,7 @@ describe(
                 emission_data: { data: null, error: { message: "denied" } },
               },
             ),
+            "org-1" as never,
             [actualLine()],
             annualPeriod,
           );
@@ -330,6 +364,7 @@ describe(
             },
             recorder,
           ),
+            "org-1" as never,
           [actualLine()],
           annualPeriod,
         );
@@ -349,6 +384,109 @@ describe(
 
         expect(emissionDataSelect?.filters).toContainEqual(
           ["reporting_period_year", 2026],
+        );
+      },
+    );
+
+    /**
+     * 2026-09-03 (P14). app.user_shared_installation_ids() resolves
+     * grants for every org the USER belongs to, not the org they are
+     * acting as -- so RLS alone would keep showing org A a staleness
+     * signal for an installation whose grant to A was revoked, purely
+     * because the same person also belongs to org B which still holds
+     * one. That signal is itself a disclosure: it tells A that the
+     * producer has published a newer verified version, which is exactly
+     * what revoking access was supposed to stop telling them.
+     */
+    it(
+      "reports CURRENT, not STALE, for a shared installation this org no longer holds a live grant for",
+      async () => {
+        const result =
+          await checkActualDeterminationStalenessByShipment(
+            makeMockSupabase(
+              {
+                emission_data: { data: [currentActiveRowNewerVersion], error: null },
+
+                // Revoked: the grant lookup returns nothing for this org.
+                sharing_grants: { data: [], error: null },
+              },
+            ),
+            "org-1" as never,
+            [actualLine()],
+            annualPeriod,
+          );
+
+        expect(result).toEqual(
+          { "line-1": "CURRENT" },
+        );
+      },
+    );
+
+    it(
+      "reports CURRENT for a shared installation whose grant has lapsed, even though its status is still ACTIVE",
+      async () => {
+        // There is no expiry job, so a lapsed grant sits at ACTIVE with
+        // expires_at in the past indefinitely. The status alone is not
+        // enough to decide this.
+        const result =
+          await checkActualDeterminationStalenessByShipment(
+            makeMockSupabase(
+              {
+                emission_data: { data: [currentActiveRowNewerVersion], error: null },
+                sharing_grants: {
+                  data: [
+                    {
+                      installation_id: "installation-1",
+                      expires_at: "2020-01-01T00:00:00.000Z",
+                    },
+                  ],
+                  error: null,
+                },
+              },
+            ),
+            "org-1" as never,
+            [actualLine()],
+            annualPeriod,
+          );
+
+        expect(result).toEqual(
+          { "line-1": "CURRENT" },
+        );
+      },
+    );
+
+    it(
+      "asks about grants only for installations whose data belongs to another org",
+      async () => {
+        // An org looking at its own data already knows the answer, so it
+        // should issue no second query at all.
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        await checkActualDeterminationStalenessByShipment(
+          makeMockSupabase(
+            {
+              emission_data: {
+                data: [
+                  {
+                    ...currentActiveRowSameVersion,
+                    entered_by_org_id: "org-1",
+                  },
+                ],
+                error: null,
+              },
+            },
+            recorder,
+          ),
+          "org-1" as never,
+          [actualLine()],
+          annualPeriod,
+        );
+
+        expect(
+          recorder.fromCalls.includes("sharing_grants"),
+        ).toBe(
+          false,
         );
       },
     );

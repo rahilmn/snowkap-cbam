@@ -329,6 +329,7 @@ test.describe(
 
               await inviteePage.getByLabel(
                 "New password",
+                { exact: true },
               ).fill(
                 INVITEE_PASSWORD,
               );

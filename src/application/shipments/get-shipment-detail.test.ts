@@ -41,48 +41,64 @@ const lineRow =
     emission_determination: null,
   };
 
+interface SelectRecorder {
+  filters: [string, string, unknown][];
+}
+
+/**
+ * Chainable so an arbitrary number of .eq() calls resolve, and recording
+ * so the ORG filter can be asserted rather than assumed -- the pin added
+ * on 2026-09-03 is a filter, and a mock that ignores filters would let it
+ * be removed again without any test noticing.
+ */
 function mockSupabase(
   {
     shipmentResult,
     linesResult,
+    recorder,
   }: {
     shipmentResult: { data: unknown; error: unknown };
     linesResult: { data: unknown; error: unknown };
+    recorder?: SelectRecorder;
   },
 ) {
+  function chain(
+    table: string,
+    result: { data: unknown; error: unknown },
+  ) {
+    const builder: Record<string, unknown> = {
+      eq: (column: string, value: unknown) => {
+        recorder?.filters.push([table, column, value]);
+        return builder;
+      },
+
+      order: () =>
+        Promise.resolve(
+          result,
+        ),
+
+      maybeSingle: () =>
+        Promise.resolve(
+          result,
+        ),
+    };
+
+    return builder;
+  }
+
   return {
     from: (
       table: string,
     ) => (
-      table === "shipment_lines"
-        ? {
-            select: () => (
-              {
-                eq: () => (
-                  {
-                    order: () =>
-                      Promise.resolve(
-                        linesResult,
-                      ),
-                  }
-                ),
-              }
-            ),
-          }
-        : {
-            select: () => (
-              {
-                eq: () => (
-                  {
-                    maybeSingle: () =>
-                      Promise.resolve(
-                        shipmentResult,
-                      ),
-                  }
-                ),
-              }
-            ),
-          }
+      {
+        select: () =>
+          chain(
+            table,
+            table === "shipment_lines"
+              ? linesResult
+              : shipmentResult,
+          ),
+      }
     ),
   } as never;
 }
@@ -101,6 +117,7 @@ describe(
                 linesResult: { data: [lineRow], error: null },
               },
             ),
+            "org-1" as never,
             "ship-1" as never,
           );
 
@@ -139,10 +156,82 @@ describe(
                 linesResult: { data: [], error: null },
               },
             ),
+            "org-1" as never,
             "ship-1" as never,
           );
 
         expect(result).toBeNull();
+      },
+    );
+
+    /**
+     * 2026-09-03 (P14). shipments_select_own_org admits every org the
+     * USER belongs to (app.user_org_ids()), which is not the same as the
+     * org they are currently acting as. Production has a user who is an
+     * OWNER of two organizations, so without an explicit pin they could
+     * open the other org's shipment inside this org's shell -- and every
+     * downstream computation on that page, including which shared actual
+     * data is offered and which org an audit event is attributed to,
+     * would then run in the wrong organizational context.
+     */
+    it(
+      "returns null for a shipment belonging to a DIFFERENT org than the caller's active one, and never reads its lines",
+      async () => {
+        const recorder: SelectRecorder =
+          { filters: [] };
+
+        const result =
+          await getShipmentDetail(
+            mockSupabase(
+              {
+                shipmentResult: {
+                  data: { ...shipmentRow, org_id: "org-2" },
+                  error: null,
+                },
+                linesResult: { data: [lineRow], error: null },
+                recorder,
+              },
+            ),
+            "org-1" as never,
+            "ship-1" as never,
+          );
+
+        expect(result).toBeNull();
+
+        // Indistinguishable from not-found, and it stops before the
+        // second query: a caller who supplied the wrong org learns
+        // nothing about whether the id exists.
+        expect(
+          recorder.filters.filter(
+            ([table]) => table === "shipment_lines",
+          ),
+        ).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "scopes the line query to the active org as well, rather than relying on RLS alone",
+      async () => {
+        const recorder: SelectRecorder =
+          { filters: [] };
+
+        await getShipmentDetail(
+          mockSupabase(
+            {
+              shipmentResult: { data: shipmentRow, error: null },
+              linesResult: { data: [lineRow], error: null },
+              recorder,
+            },
+          ),
+          "org-1" as never,
+          "ship-1" as never,
+        );
+
+        expect(recorder.filters).toContainEqual(
+          ["shipment_lines", "org_id", "org-1"],
+        );
       },
     );
   },

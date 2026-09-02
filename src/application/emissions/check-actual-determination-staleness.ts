@@ -1,4 +1,8 @@
 import type {
+  OrganizationId,
+} from "../../domain/shared/ids";
+
+import type {
   SupabaseClient,
 } from "@supabase/supabase-js";
 
@@ -72,8 +76,55 @@ function actualSnapshotOf(
  * audited importer action, never automatic), so failing quiet here is
  * strictly safer than surfacing a broken picker.
  */
+
+/**
+ * The installations the ACTIVE org currently holds a live sharing grant
+ * for. Deliberately the same predicate listAvailableActualEmissionData
+ * applies to its own grant lookup -- ACTIVE, unexpired, granted to THIS
+ * org -- so the staleness hint can never point at data the picker would
+ * refuse to offer.
+ */
+async function activeGrantedInstallationIds(
+  supabase: SupabaseClient,
+  orgId: OrganizationId,
+  installationIds: string[],
+): Promise<Set<string>> {
+  if (installationIds.length === 0) {
+    return new Set();
+  }
+
+  const { data, error } =
+    await supabase
+      .from("sharing_grants")
+      .select("installation_id, expires_at")
+      .eq("grantee_org_id", orgId)
+      .eq("status", "ACTIVE")
+      .in("installation_id", installationIds);
+
+  if (error || !data) {
+    // Fails CLOSED: no grant evidence means no staleness signal for a
+    // shared installation, which is the same quiet degradation this
+    // module already chooses for a failed primary query.
+    return new Set();
+  }
+
+  const now =
+    Date.now();
+
+  return new Set(
+    (data as { installation_id: string; expires_at: string | null }[])
+      .filter(
+        (row) =>
+          row.expires_at === null ||
+          new Date(row.expires_at).getTime() > now,
+      )
+      .map((row) => row.installation_id),
+  );
+}
+
 export async function checkActualDeterminationStalenessByShipment(
   supabase: SupabaseClient,
+  orgId: OrganizationId,
   lines: ShipmentLine[],
   period: ReportingPeriod,
 ): Promise<Record<string, ActualSnapshotStaleness>> {
@@ -131,11 +182,44 @@ export async function checkActualDeterminationStalenessByShipment(
     return {};
   }
 
+  const rows =
+    (data ?? []) as EmissionDataRow[];
+
+  // Scope to what the ACTIVE org may legitimately see: its own data, or
+  // an installation it currently holds a live grant for. Anything else
+  // reached this result through a DIFFERENT membership of the same user,
+  // and must not produce a staleness signal on this org's screen.
+  //
+  // Only foreign rows need a grant lookup, so an org looking at its own
+  // data issues no extra query at all -- which is both the common case
+  // and the one where the answer is already known.
+  const foreignInstallationIds =
+    Array.from(
+      new Set(
+        rows
+          .filter((row) => row.entered_by_org_id !== orgId)
+          .map((row) => row.installation_id),
+      ),
+    );
+
+  const grantedInstallationIds =
+    await activeGrantedInstallationIds(
+      supabase,
+      orgId,
+      foreignInstallationIds,
+    );
+
   const currentByInstallation =
     new Map(
-      ((data ?? []) as EmissionDataRow[]).map(
-        (row) => [row.installation_id, toEmissionData(row)] as const,
-      ),
+      rows
+        .filter(
+          (row) =>
+            row.entered_by_org_id === orgId ||
+            grantedInstallationIds.has(row.installation_id),
+        )
+        .map(
+          (row) => [row.installation_id, toEmissionData(row)] as const,
+        ),
     );
 
   const result: Record<string, ActualSnapshotStaleness> =
