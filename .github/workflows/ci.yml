@@ -263,8 +263,19 @@ jobs:
           # enabled HERE ONLY. If it comes up, those four migrations
           # apply for real and the evidence-storage RLS is genuinely
           # exercised. The committed default is untouched.
+          # 2026-09-03 (Phase 2 review): the awk edit and Storage itself
+          # are now ASSERTED, not printed. Previously this step only
+          # `grep`ped the result, so a silent revert to `enabled = false`
+          # -- or a Storage container that came up unhealthy -- left the
+          # storage-touching migrations unapplied while the job stayed
+          # green, and producer-journey.spec.ts's live probe simply took
+          # its disabled branch. That is green-by-omission on the exact
+          # controls 20260829510000 exists for.
           awk '/^\[storage\]/{s=1} s&&/^enabled *= *false/{sub(/false/,"true"); s=0} {print}'             supabase/config.toml > /tmp/config.toml && mv /tmp/config.toml supabase/config.toml
-          grep -A1 '^\[storage\]' supabase/config.toml
+          if ! sed -n '/^\[storage\]/,/^\[/p' supabase/config.toml | grep -q '^enabled = true'; then
+            echo "::error::The [storage] section was not switched to enabled = true -- the awk edit did not apply."
+            exit 1
+          fi
 
           mkdir -p /tmp/deferred
           for f in supabase/migrations/*.sql; do
@@ -314,10 +325,44 @@ jobs:
             echo "::error::Local Supabase not reachable after the second migration pass."
             exit 1
           fi
-          echo "Local Supabase is reachable and the ACTIVE dataset is loaded -- the isolation suites will run for real."
 
+          # Storage must be genuinely up, or the evidence-storage RLS and
+          # bucket-limit tests silently do not run. 503 is what an
+          # unhealthy/absent Storage container returns through Kong.
+          STORAGE_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:54321/storage/v1/bucket || echo "000")
+          echo "storage/v1/bucket -> ${STORAGE_CODE}"
+          if [ "${STORAGE_CODE}" = "503" ] || [ "${STORAGE_CODE}" = "000" ]; then
+            echo "::error::Supabase Storage is not available (HTTP ${STORAGE_CODE}) -- the evidence-storage security tests would not run."
+            exit 1
+          fi
+
+          # storage.buckets must exist for the four storage-touching
+          # migrations to have applied for real rather than been shimmed.
+          BUCKETS=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -tAc "select count(*) from storage.buckets where id = 'evidence'" | tr -d '[:space:]')
+          if [ "${BUCKETS}" != "1" ]; then
+            echo "::error::The 'evidence' storage bucket does not exist (found ${BUCKETS}) -- 20260829510000's limits are not in force."
+            exit 1
+          fi
+          echo "Local Supabase is reachable, Storage is up, the evidence bucket exists and the ACTIVE dataset is loaded."
+
+      # 2026-09-03 (Phase 2 review). This step previously ran with NO
+      # Supabase environment, so tests/integration/regulatory-repository
+      # .test.ts (10 tests) and regulatory-resolution.test.ts (4) --
+      # gated on SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY, and the ONLY
+      # coverage of the protected regulatory adapter and resolver against
+      # a real database -- have never executed in CI. .env.local is
+      # written later and only for Playwright, and vitest reads no
+      # .env file. Supplying the local values here runs them against the
+      # 12,540-row ACTIVE dataset this job just loaded, which is the
+      # exact dataset their assertions name. Values come from
+      # `supabase status -o env` via eval, so nothing is printed.
       - name: Test
-        run: pnpm test
+        run: |
+          set -euo pipefail
+          eval "$(pnpm exec supabase status -o env)"
+          export SUPABASE_URL="${API_URL}"
+          export SUPABASE_SERVICE_ROLE_KEY="${SERVICE_ROLE_KEY}"
+          pnpm test
 
       # 2026-08-31 (P13 remaining-findings review). This step used to sit
       # HERE, before Playwright ran -- so every Playwright job in this

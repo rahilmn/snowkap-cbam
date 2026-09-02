@@ -101,6 +101,23 @@ test.describe(
             .then((r) => r.status() !== 503)
             .catch(() => false);
 
+        // 2026-09-03 (Phase 2 review). The branch above asserts each
+        // environment's real outcome, which is right for the developer
+        // host -- but in CI, where .github/workflows/ci.yml enables
+        // Storage precisely so the four storage-touching migrations
+        // apply for real, taking the disabled branch means the evidence
+        // upload/verify path silently did not run while the job still
+        // reported "passed". A silent revert to `[storage] enabled =
+        // false`, or an unhealthy Storage container, would therefore be
+        // indistinguishable from success. Under CI it is a hard failure.
+        if (process.env.CI && !storageAvailable) {
+          throw new Error(
+            "Supabase Storage is unavailable under CI. This job enables Storage on purpose; " +
+              "without it the evidence-upload, verification and activation assertions below do " +
+              "not execute. Failing loudly rather than passing on the disabled branch.",
+          );
+        }
+
         test.skip(
           isMobile,
           "primary nav, org-switcher, and the multi-column tables this journey depends on are hidden/reflowed below md/sm -- desktop-only, same discipline as importer-auth-smoke.spec.ts / importer-journey.spec.ts",
