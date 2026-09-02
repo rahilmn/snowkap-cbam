@@ -10,14 +10,28 @@ outline into an actual step-by-step procedure. It assumes
 [`DEPLOYMENT.md`](./DEPLOYMENT.md) has already been read (this document
 does not repeat that document's environment/build/healthcheck details).
 
-**Status, honestly, as of 2026-08-30 (corrected)**: a production
-Railway project now exists (see `DEPLOYMENT.md`'s corrected status
-note) but is currently down (`502`, container never bound to a port) —
-there is a real deployment to roll back *from*, but rolling *back* to a
-previous build presupposes a previous *working* build exists in
-Railway's history, which cannot be confirmed without dashboard access
-this session doesn't have. **This procedure has not been rehearsed
-against a real Railway environment.** Master plan §43 itself flags the rehearsal as a
+**Status as of 2026-09-03**: the production deployment is **live and
+healthy** (see `DEPLOYMENT.md`'s current status note), so there is a real
+deployment to roll back *from*. Rolling *back* still presupposes a
+previous *working* build in Railway's history, and the build-retention
+setting is plan-dependent and **has not been read**. **This procedure has
+still not been rehearsed against a real Railway environment.**
+
+Two things the rehearsal must get right, both established in the
+2026-09-03 plan review:
+
+1. **Roll back to a named, recorded known-good SHA**, not to "the
+   previous build". After a release, the immediately-previous build is
+   whatever happened to deploy last, which is not necessarily healthy.
+   Record the known-good SHA in the release report *before* the release
+   deploy.
+2. **Rehearse BEFORE the Auth email templates are switched**, or revert
+   the templates first and wait out the hosted OTP expiry window. A
+   previous build has no `/auth/confirm` route, so every invitation,
+   confirmation and recovery link issued under the new templates would
+   404 for the duration of the rehearsal.
+
+Master plan §43 itself flags the rehearsal as a
 P12 deliverable ("rehearsed P12"), not something already done, and §44
 lists "Rollback rehearsed" as an outstanding production-readiness
 checklist item. What follows is the precise, ready procedure — derived

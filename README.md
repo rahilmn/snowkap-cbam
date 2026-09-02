@@ -148,13 +148,17 @@ docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t snowkap-cbam:l
 docker run --rm -p 3000:3000 --env-file .env snowkap-cbam:local
 ```
 
-CI (`.github/workflows/ci.yml`) runs `pnpm typecheck`, `pnpm test`,
-`next build`, and the Playwright smoke suite against that build on
-every push to `main` and every pull request, with no secrets required
-(the health-check smoke test self-skips). `pnpm regulatory:verify` is
-not yet part of CI — it needs live database credentials and a Python
-environment, and remains a locally-run / manually-dispatched gate for
-now.
+CI (`.github/workflows/ci.yml`) runs on **every branch** and every pull
+request, in two jobs. `fast-gates` needs no containers: `pnpm typecheck`,
+`pnpm test`, `next build`, secret scan. `build-and-test` starts a real
+local Supabase (Storage enabled, the regulatory dataset loaded from the
+committed workbook through the project's own Python pipeline, and the
+count of ACTIVE rows asserted), then runs the full test suite --
+including the integration, RLS-isolation and regulatory-adapter suites --
+followed by the whole Playwright suite against a production build.
+`pnpm regulatory:verify` is still not a CI step: it needs live database
+credentials and a Python environment, and remains a locally-run /
+manually-dispatched gate that is mandatory before a release.
 
 ## Documentation
 

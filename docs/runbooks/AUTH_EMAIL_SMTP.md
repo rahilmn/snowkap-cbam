@@ -1,9 +1,20 @@
 # Runbook — Supabase Auth transactional email (SMTP)
 
-**Status: OWNER ACTION REQUIRED. This is a release blocker.**
+**Status as of 2026-09-03: RESOLVED. Not a release blocker.**
+
+Custom SMTP is configured and verified end to end — real mail delivered
+and consumed in production for both sign-up confirmation and password
+recovery. See [`SUPABASE_AUTH_SMTP.md`](./SUPABASE_AUTH_SMTP.md) §0 for
+the verified configuration and the two corrected mis-diagnoses, and
+`docs/plans/P13_RELEASE_READINESS_REPORT.md` §61-§63 for the evidence.
+
+Everything below is retained as the historical account of the outage and
+the procedure that resolved it. The problem statement is written in the
+present tense because that is how it was written on 2026-08-30; it no
+longer describes the current state.
 
 Written 2026-08-30 after live verification of the Railway deployment found
-that **no real user can complete signup today**. Everything below is the
+that **no real user could complete signup at that time**. Everything below is the
 exact configuration required; none of it can be completed from the
 repository, because it needs an email provider account, DNS records on a
 Snowkap-controlled domain, and Supabase dashboard access.

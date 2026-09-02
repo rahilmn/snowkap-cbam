@@ -20,8 +20,8 @@ built exactly as specced — check the actual code, and see README.md's
 "Current state" section and
 [`docs/plans/P13_RELEASE_READINESS_REPORT.md`](docs/plans/P13_RELEASE_READINESS_REPORT.md)
 for a precise account of what's implemented, tested, verified,
-deferred, or still blocked on Railway access (currently down — see
-that report's §29).
+deferred, or still verified only outside CI. The production
+deployment is live and healthy as of 2026-09-03.
 
 ## Protected regulatory foundation
 
