@@ -293,6 +293,16 @@ jobs:
           mv /tmp/deferred/*.sql supabase/migrations/
           pnpm exec supabase migration up --local
 
+          # seed.sql runs as the LAST step of `supabase start`, which
+          # here was when only two migrations existed -- so the 61 tables
+          # created by the second pass never received the base-table
+          # grants it exists to replicate, and the isolation suites
+          # failed with "permission denied for table ...". Re-applying it
+          # now covers every table. This is a consequence of the
+          # deferral, not a pre-existing defect, and seed.sql is
+          # idempotent (grants only).
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/seed.sql
+
           ACTIVE=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -tAc "select count(*) from public.default_emission_values dev join public.regulatory_datasets rd on rd.id=dev.dataset_id where rd.status='ACTIVE'" | tr -d '[:space:]')
           echo "ACTIVE regulatory rows: ${ACTIVE}"
           if [ "${ACTIVE}" != "12540" ]; then
