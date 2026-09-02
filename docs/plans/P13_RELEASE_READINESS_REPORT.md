@@ -4500,3 +4500,67 @@ clears the `degraded` health status, which Railway's healthcheck watches.
 The probe created one account: `delivered@resend.dev`, unconfirmed, no
 organization or membership. Disclosed rather than left silent; it can be
 deleted at any time and holds no data.
+
+---
+
+## 62. Auth URL Configuration is wrong — proven from a delivered email (2026-09-02)
+
+Now that SMTP delivers, the message body can be read back from Resend's
+API. That makes the redirect allowlist — which §46.2 recorded as
+**unverifiable from outside** — directly testable. It is wrong.
+
+### 62.1 Evidence
+
+Recovery requested **with an explicit redirect**:
+
+```
+requested redirect_to:
+  https://snowkap-cbam-production.up.railway.app/auth/callback?next=/reset-password
+```
+
+The **delivered** message contains:
+
+```
+https://tjwzlbujbsnoacbhzmax.supabase.co/auth/v1/verify
+  ?token=<redacted>&type=recovery&redirect_to=http://localhost:3000
+```
+
+GoTrue **silently substituted Site URL**. A second probe with no explicit
+redirect produced the same `http://localhost:3000`, confirming Site URL
+itself is still the local default.
+
+This is the exact failure mode §46.2 predicted: GoTrue does not reject a
+non-allowlisted `redirect_to`, it substitutes — so the API returns 200
+and nothing is observable until you read the delivered link.
+
+### 62.2 Two settings are wrong
+
+**Supabase → Authentication → URL Configuration:**
+
+| Setting | Current | Required |
+|---|---|---|
+| Site URL | `http://localhost:3000` | `https://snowkap-cbam-production.up.railway.app` |
+| Redirect URLs | does not admit the production origin | add `https://snowkap-cbam-production.up.railway.app/**` |
+
+### 62.3 Why this still blocks the real-user test
+
+SMTP delivery is verified (§61) and `APP_URL` is now correct
+(`/api/health` → `app_url: "ok"`, `status: "ok"`). But the application's
+explicit `emailRedirectTo` is **discarded by the allowlist**, so a real
+user would receive a correctly-delivered email whose link sends them to
+`http://localhost:3000`. Confirmation cannot be completed from any
+machine but the developer's.
+
+`APP_URL` and this are independent: `APP_URL` controls what the app
+*asks for*; the allowlist controls whether GoTrue *honours* it. Both must
+be right, and until now only the first was.
+
+### 62.4 Method note
+
+This check was previously impossible. It became possible only because
+SMTP now works and Resend exposes the delivered body — the same
+capability that verifies delivery also verifies link correctness. It
+should be part of the standing release evidence, not a one-off.
+
+**SMTP: delivery PASS, consumption still NOT VERIFIED**, and now blocked
+on Auth URL Configuration rather than on sending.
