@@ -232,44 +232,60 @@ jobs:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: docker.io
           SUPABASE_DB_PASSWORD: postgres
         run: |
-          set -uo pipefail
+          set -euo pipefail
 
-          # First pass. Expected to fail at the activation migration on a
-          # fresh database (see above); the containers and every earlier
-          # migration survive that failure, which is what the next steps
-          # build on. A genuine infrastructure failure is caught by the
-          # reachability probe below, not swallowed here.
-          pnpm exec supabase start || echo "::notice::first pass stopped at the activation migration, as expected on a fresh database"
+          # The migration set is not self-sufficient on a fresh database:
+          # 20260827110000 (PROTECTED) asserts a DRAFT dataset of 12,540
+          # rows already exists, but that data is produced by the Python
+          # pipeline, which needs a running database -- which only exists
+          # after migrations. `supabase start` runs them all in one pass
+          # and TEARS THE STACK DOWN when one fails (confirmed in run
+          # 2165415: Postgres was unreachable afterwards), so it cannot be
+          # sequenced by letting the first pass fail.
+          #
+          # Deferring is therefore deterministic rather than opportunistic:
+          # apply only the two migrations that CREATE the regulatory
+          # tables, load the dataset the project's own pipeline derives
+          # from the COMMITTED workbook, then apply the remaining 61.
+          # No migration content is edited and no test is skipped,
+          # weakened or replaced -- only the order in which the CLI is
+          # handed them.
+          mkdir -p /tmp/deferred
+          for f in supabase/migrations/*.sql; do
+            case "$(basename "$f")" in
+              20260826133116_*|20260827093000_*) ;;
+              *) mv "$f" /tmp/deferred/ ;;
+            esac
+          done
+          echo "applying $(ls supabase/migrations/*.sql | wc -l) schema migrations first; $(ls /tmp/deferred/*.sql | wc -l) deferred"
 
-          if ! curl -sf --max-time 10 http://127.0.0.1:54322 >/dev/null 2>&1              && ! pg_isready -h 127.0.0.1 -p 54322 >/dev/null 2>&1; then
-            echo "::error::Local Postgres is not reachable on 54322 -- Supabase did not come up at all."
+          pnpm exec supabase start
+
+          if ! curl -sf --max-time 5 http://127.0.0.1:54321/auth/v1/health >/dev/null; then
+            echo "::error::Local Supabase did not come up reachable at 127.0.0.1:54321."
             exit 1
           fi
-
-          set -e
 
           # Regenerate the canonical dataset from the COMMITTED workbook.
           python scripts/regulatory/parse-definitive-default-values.py
 
-          # Point the loader at local Postgres (it reads this file plus
-          # SUPABASE_DB_PASSWORD, exactly as it does against hosted).
           mkdir -p supabase/.temp
           printf 'postgresql://postgres@127.0.0.1:54322/postgres' > supabase/.temp/pooler-url
-
           python scripts/regulatory/load-definitive-default-values.py
 
-          # Second pass: the activation migration and everything after it.
+          # Restore and apply the remaining migrations, activation first.
+          mv /tmp/deferred/*.sql supabase/migrations/
           pnpm exec supabase migration up --local
 
-          if ! curl -sf --max-time 5 http://127.0.0.1:54321/auth/v1/health >/dev/null; then
-            echo "::error::Local Supabase did not come up reachable at 127.0.0.1:54321 -- the cross-org isolation suites would silently self-skip instead of running. Failing the job rather than letting that happen quietly."
-            exit 1
-          fi
-
-          ACTIVE=$(psql "postgresql://postgres@127.0.0.1:54322/postgres" -tAc "select count(*) from public.default_emission_values dev join public.regulatory_datasets rd on rd.id=dev.dataset_id where rd.status='ACTIVE'")
+          ACTIVE=$(psql "postgresql://postgres@127.0.0.1:54322/postgres" -tAc "select count(*) from public.default_emission_values dev join public.regulatory_datasets rd on rd.id=dev.dataset_id where rd.status='ACTIVE'" | tr -d '[:space:]')
           echo "ACTIVE regulatory rows: ${ACTIVE}"
           if [ "${ACTIVE}" != "12540" ]; then
             echo "::error::Expected 12540 ACTIVE regulatory rows, found ${ACTIVE} -- the regulatory suites would run against wrong data."
+            exit 1
+          fi
+
+          if ! curl -sf --max-time 5 http://127.0.0.1:54321/auth/v1/health >/dev/null; then
+            echo "::error::Local Supabase not reachable after the second migration pass."
             exit 1
           fi
           echo "Local Supabase is reachable and the ACTIVE dataset is loaded -- the isolation suites will run for real."
