@@ -4173,3 +4173,84 @@ instruction. That recommendation was wrong for GoTrue and is corrected.
 
 **SMTP remains NOT VERIFIED end to end** until a real confirmation email
 is delivered to a real inbox and consumed.
+
+---
+
+## 58. CORRECTION: the SMTP test fixture was invalid all along (2026-09-02)
+
+**Every SMTP diagnosis after §56.1 was built on a broken fixture, and two
+of them were wrong. Recording that plainly.**
+
+### 58.1 The fixture
+
+All three production test users are on **`snowkaptest.dev`**, and that
+domain **does not exist**:
+
+```
+snowkaptest.dev   A/AAAA: does not resolve
+                  MX:     *** Non-existent domain (NXDOMAIN)
+```
+
+(By contrast `snowkap.co.in` resolves with MX `mx1/mx2.emailsrvr.com`.)
+
+A password reset to an address on a non-existent domain **cannot
+succeed**, whatever the SMTP configuration is. So `HTTP 500 "Error
+sending recovery email"` is fully explained by the recipient alone, and
+carries **no information** about whether SMTP is correctly configured.
+
+I used those accounts as the probe for every diagnosis after the initial
+one, and then reasoned from the result as though the recipient were
+sound. It was not.
+
+### 58.2 What that invalidates
+
+| Claim | Status |
+|---|---|
+| §51: custom SMTP not configured (429 `over_email_send_rate_limit` at ~2 attempts) | **STANDS** — a rate-limit signature, independent of the recipient |
+| §56.2 / §57: SMTP now enabled (429 → 500 after the owner enabled it) | **STANDS** — the change in error class is real evidence |
+| §56.2: the *sender domain* was wrong (`snowkap.com`) | **WITHDRAWN** — the dashboard shows `noreply@snowkap.co.in` was already set; the `snowkap.com` rejection came from a control send I issued myself |
+| §57: the *port* was the root cause (465 vs 587) | **UNPROVEN** — the port matrix is valid on its own terms (GoTrue uses STARTTLS; 465 implicit TLS fails STARTTLS), so 587 is the correct setting regardless. But it was **not** demonstrated to be the cause of the 500, because the 500 has a sufficient other explanation. |
+
+The port matrix result itself is sound and recipient-independent:
+
+| Port / handshake | Result |
+|---|---|
+| 465 implicit TLS | AUTH OK |
+| 465 STARTTLS (what GoTrue does) | FAIL: timeout |
+| 587 STARTTLS | AUTH OK |
+
+So **587 is the right port to keep**. What is not established is that 465
+was what was breaking the send.
+
+### 58.3 What can and cannot be determined from here
+
+**Cannot:** whether Supabase→Resend now works. No production account has
+a deliverable address, and creating one is a signup — reserved for the
+owner by standing instruction. Supabase Auth SMTP settings are not
+readable through this session's MCP integration.
+
+**Can, and already established:** the credentials, host, username and
+sender are all valid (AUTH succeeds on 587; a test message from
+`noreply@snowkap.co.in` was delivered to Resend's test sink), and custom
+SMTP is enabled.
+
+### 58.4 The two steps that settle it
+
+1. **Read the actual SMTP error.** Supabase → **Logs → Auth**, search the
+   `error_id` from a failed attempt (most recent:
+   `01a061fc-2581-711b-a491-fe0f50e4cb22`). That log line names the real
+   failure — auth, TLS, or recipient — and ends the guessing.
+2. **Sign up with a real address you control** at
+   `https://snowkap-cbam-production.up.railway.app/sign-up`. That is both
+   the definitive SMTP test and the outstanding real-user gate (§46).
+
+**SMTP remains NOT VERIFIED.** No mail has been delivered to a real inbox
+and consumed.
+
+### 58.5 Process note
+
+Three diagnoses, two wrong, all from the same invalid fixture. The error
+was not any single inference — it was continuing to reason from a probe I
+had never validated. The domain check that settled it costs one DNS
+lookup and should have been the *first* thing I did when a send failed,
+not the fourth.
