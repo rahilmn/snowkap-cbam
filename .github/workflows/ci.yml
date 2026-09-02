@@ -88,7 +88,22 @@ jobs:
       - name: Unit / domain / architecture tests
         run: pnpm test
 
+      # The build needs these two PRESENT (browser-client.ts /
+      # server-client.ts do a bare `!url || !anonKey` check -- no format
+      # validation), because pages such as app/page.tsx construct a
+      # Supabase client during prerendering. build-and-test below gets
+      # them from `supabase status`; this job has no Supabase, so it
+      # supplies deliberately NON-FUNCTIONAL placeholders.
+      #
+      # They are obviously fake by construction and are not JWT-shaped,
+      # so they cannot be mistaken for credentials and do not trip the
+      # secret scan below. Nothing in a build talks to Supabase -- this
+      # job proves the bundle COMPILES, and makes no claim about runtime
+      # connectivity, which build-and-test covers for real.
       - name: Production build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-not-a-real-key
         run: pnpm build
 
       - name: Scan for committed secrets
