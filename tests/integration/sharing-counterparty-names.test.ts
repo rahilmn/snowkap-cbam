@@ -674,5 +674,102 @@ describe.skipIf(!localSupabaseReachable)(
         );
       },
     );
+
+    /**
+     * 2026-09-03 (P14). The database half of the acceptance capability
+     * gate, proven live rather than inferred from the SQL.
+     *
+     * Accepting binds a producer's verified emissions data to an
+     * organization permanently -- grantee_org_id may change exactly once,
+     * from null -- and admits every member of that organization to the
+     * data. The RPC previously required only that the caller be an active
+     * member of the target org, and the target is supplied by the
+     * application from the cookie-derived ACTIVE organization. So a user
+     * belonging to two non-grantor orgs bound the grant to whichever one
+     * they were acting as.
+     *
+     * This is the dual-org case exactly: the same user is an owner of the
+     * importer org AND a member of a second, producer-only org.
+     */
+    it(
+      "refuses, in the database, to bind a grant to an organization that does not hold IMPORTER_DECLARANT",
+      async () => {
+        const wrongOrgId =
+          await createOrg("wrong-target", ["PRODUCER_OPERATOR"]);
+
+        await addMembership(
+          wrongOrgId,
+          importerOwnerId,
+          "OWNER",
+        );
+
+        const { data: grant, error: grantError } =
+          await clientProducerOwner
+            .from("sharing_grants")
+            .insert(
+              {
+                grantor_org_id: producerOrgId,
+                invited_email: `counterparty-importer-owner-${runId}@example.com`,
+                installation_id: fourthInstallationId,
+                created_by_user_id: producerOwnerId,
+              },
+            )
+            .select("id")
+            .single();
+
+        expect(grantError).toBeNull();
+
+        // The user is a genuine, active OWNER of the target org and the
+        // invitation is genuinely addressed to them. Membership alone
+        // used to be enough.
+        const { data: refused, error: refusedError } =
+          await clientImporterOwner.rpc(
+            "accept_sharing_grant_invitation",
+            {
+              p_grant_id: grant!.id,
+              p_org_id: wrongOrgId,
+            },
+          );
+
+        expect(refusedError).toBeNull();
+
+        expect(
+          (refused as { result_status: string }[])[0]?.result_status,
+        ).toBe(
+          "CAPABILITY_NOT_HELD",
+        );
+
+        // Nothing was bound.
+        const { data: unchanged } =
+          await serviceClient
+            .from("sharing_grants")
+            .select("status, grantee_org_id")
+            .eq("id", grant!.id)
+            .single();
+
+        expect(unchanged?.status).toBe(
+          "INVITED",
+        );
+
+        expect(unchanged?.grantee_org_id).toBeNull();
+
+        // And the same user, accepting into their IMPORTER org, still
+        // succeeds -- the gate blocks the wrong target, not the person.
+        const { data: accepted } =
+          await clientImporterOwner.rpc(
+            "accept_sharing_grant_invitation",
+            {
+              p_grant_id: grant!.id,
+              p_org_id: importerOrgId,
+            },
+          );
+
+        expect(
+          (accepted as { result_status: string }[])[0]?.result_status,
+        ).toBe(
+          "OK",
+        );
+      },
+    );
   },
 );

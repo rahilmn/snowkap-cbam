@@ -424,7 +424,59 @@ test.describe(
                 ),
               ).toBeVisible();
 
-              await importerPage.getByRole("button", { name: "Accept" }).click();
+              // 2026-09-03 (P14). Accepting is a cross-party,
+              // irreversible bind, so it asks first -- and it names the
+              // organization it is binding to, because that is the
+              // choice the dialog exists to surface. This importer user
+              // belongs to exactly one importer organization, so there
+              // is nothing to choose and it is preselected.
+              await expect(
+                importerPage.getByText(
+                  `Accepting into ${importerOrgName}.`,
+                ),
+              ).toBeVisible();
+
+              await importerPage.getByRole("button", { name: "Accept", exact: true }).click();
+
+              const acceptDialog =
+                importerPage.getByRole(
+                  "dialog",
+                  { name: `Accept shared data into ${importerOrgName}?` },
+                );
+
+              await expect(acceptDialog).toBeVisible();
+
+              await expect(
+                acceptDialog.getByText(
+                  `Every member of ${importerOrgName} will be able to read`,
+                  { exact: false },
+                ),
+              ).toBeVisible();
+
+              // Cancel first: the dialog must be a real gate, not
+              // decoration -- nothing may be bound by opening it.
+              await acceptDialog.getByRole(
+                "button",
+                { name: "Cancel" },
+              ).click();
+
+              await expect(acceptDialog).toBeHidden();
+
+              await expect(
+                importerPage.getByText(
+                  `Wants to share ${installationName}'s emissions data with you`,
+                ),
+              ).toBeVisible();
+
+              await importerPage.getByRole("button", { name: "Accept", exact: true }).click();
+
+              await importerPage.getByRole(
+                "dialog",
+                { name: `Accept shared data into ${importerOrgName}?` },
+              ).getByRole(
+                "button",
+                { name: `Accept into ${importerOrgName}` },
+              ).click();
 
               // acceptSharingGrantInvitationAction deliberately does NOT
               // redirect on success (see its own doc comment) -- it

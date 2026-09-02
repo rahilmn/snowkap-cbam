@@ -2,11 +2,17 @@
 
 import {
   useActionState,
+  useId,
+  useState,
 } from "react";
 
 import {
   Button,
 } from "../../components/ui/button";
+
+import {
+  ConfirmSubmitButton,
+} from "../../components/ui/confirm-submit-button";
 
 import {
   FieldError,
@@ -35,17 +41,31 @@ export interface AcceptableSharingGrantInvitation {
   expiresAt: string | null;
 }
 
+/**
+ * One organization this user could accept INTO: a membership whose
+ * organization actually holds IMPORTER_DECLARANT.
+ *
+ * The page filters by capability rather than offering every membership
+ * and letting the server refuse, because that refusal
+ * (CAPABILITY_NOT_HELD, migration 20260903100000) is an authorization
+ * boundary, and a chooser should not invite the user to cross one.
+ */
+export interface EligibleAcceptingOrganization {
+  orgId: string;
+  organizationName: string;
+}
+
 export function AcceptSharingGrantList(
   {
     invitations,
-    activeOrganizationName,
+    eligibleOrganizations,
   }: {
     invitations: AcceptableSharingGrantInvitation[];
-    // null when the caller isn't a member of any org yet -- accepting
-    // requires an active org (see acceptSharingGrantInvitation's own doc
-    // comment), so the accept button is disabled with an explanatory
-    // note instead of being offered.
-    activeOrganizationName: string | null;
+    // Empty when the caller belongs to no organization yet, or to no
+    // importer/declarant organization -- accepting requires one, so the
+    // accept button is disabled with an explanatory note instead of
+    // being offered.
+    eligibleOrganizations: EligibleAcceptingOrganization[];
   },
 ) {
   return (
@@ -55,7 +75,7 @@ export function AcceptSharingGrantList(
           <AcceptSharingGrantItem
             key={invitation.grantId}
             invitation={invitation}
-            activeOrganizationName={activeOrganizationName}
+            eligibleOrganizations={eligibleOrganizations}
           />
         ),
       )}
@@ -63,13 +83,26 @@ export function AcceptSharingGrantList(
   );
 }
 
+/**
+ * 2026-09-03 (P14). The organization is CHOSEN here and submitted as a
+ * form field. It is never read from the active-organization cookie.
+ *
+ * Accepting binds the producer's verified emissions data to the chosen
+ * organization permanently (app.prevent_sharing_grant_fact_change lets
+ * grantee_org_id change exactly once, from null) and admits every member
+ * of that organization to it. A user belonging to more than one importer
+ * organization was previously binding it to whichever one the cookie
+ * happened to name, with nothing in the flow surfacing the choice. The
+ * server re-validates the submitted id against the caller's own
+ * memberships and refuses rather than falling back to a default.
+ */
 function AcceptSharingGrantItem(
   {
     invitation,
-    activeOrganizationName,
+    eligibleOrganizations,
   }: {
     invitation: AcceptableSharingGrantInvitation;
-    activeOrganizationName: string | null;
+    eligibleOrganizations: EligibleAcceptingOrganization[];
   },
 ) {
   const [
@@ -82,17 +115,40 @@ function AcceptSharingGrantItem(
       initialAcceptInvitationActionState,
     );
 
+  const selectId =
+    useId();
+
+  const onlyOrganization =
+    eligibleOrganizations.length === 1
+      ? eligibleOrganizations[0]
+      : null;
+
+  // With exactly one eligible organization there is nothing to choose,
+  // so it is preselected and named both in the copy and in the dialog.
+  // With more than one, nothing is preselected -- the user picks, and
+  // the button stays disabled until they do.
+  const [selectedOrgId, setSelectedOrgId] =
+    useState<string>(
+      onlyOrganization?.orgId ?? "",
+    );
+
+  const selectedOrganization =
+    eligibleOrganizations.find(
+      (organization) =>
+        organization.orgId === selectedOrgId,
+    ) ?? null;
+
   return (
     <li className="flex flex-col gap-2 rounded-[var(--radius-md)] border border-[var(--border-default)] p-4">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col">
           <span className="text-sm font-medium text-[var(--text-primary)]">
             {invitation.grantorOrganizationName}
           </span>
 
           <span className="text-sm text-[var(--text-secondary)]">
-            Wants to share {invitation.installationName}'s emissions data
-            with you
+            Wants to share {invitation.installationName}&apos;s emissions
+            data with you
           </span>
 
           {invitation.expiresAt ? (
@@ -102,39 +158,110 @@ function AcceptSharingGrantItem(
           ) : null}
         </div>
 
-        {activeOrganizationName ? (
-          <form action={formAction}>
+        {eligibleOrganizations.length > 0 ? (
+          <form
+            action={formAction}
+            className="flex flex-col items-stretch gap-2 sm:items-end"
+          >
             <input
               type="hidden"
               name="grantId"
               value={invitation.grantId}
             />
 
-            <Button
-              type="submit"
-              loading={pending}
+            {onlyOrganization ? (
+              <input
+                type="hidden"
+                name="orgId"
+                value={onlyOrganization.orgId}
+              />
+            ) : (
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor={selectId}
+                  className="text-xs font-medium text-[var(--text-secondary)]"
+                >
+                  Accept into
+                </label>
+
+                <select
+                  id={selectId}
+                  name="orgId"
+                  value={selectedOrgId}
+                  onChange={(event) =>
+                    setSelectedOrgId(event.target.value)
+                  }
+                  className="h-9 rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--surface-default)] px-2 text-sm text-[var(--text-primary)]"
+                >
+                  <option value="">
+                    Choose an organization...
+                  </option>
+
+                  {eligibleOrganizations.map(
+                    (organization) => (
+                      <option
+                        key={organization.orgId}
+                        value={organization.orgId}
+                      >
+                        {organization.organizationName}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+            )}
+
+            <ConfirmSubmitButton
+              pending={pending}
+              disabled={selectedOrganization === null}
+              confirm={{
+                title:
+                  selectedOrganization
+                    ? `Accept shared data into ${selectedOrganization.organizationName}?`
+                    : "Accept shared data?",
+                description:
+                  selectedOrganization
+                    ? `Every member of ${selectedOrganization.organizationName} will be able to ` +
+                      `read this installation's verified emissions data. The grant is bound to ` +
+                      `${selectedOrganization.organizationName} permanently -- ` +
+                      `${invitation.grantorOrganizationName} would have to revoke it and invite ` +
+                      "you again to move it to a different organization."
+                    : undefined,
+                confirmLabel:
+                  selectedOrganization
+                    ? `Accept into ${selectedOrganization.organizationName}`
+                    : "Accept",
+                cancelLabel: "Cancel",
+              }}
             >
               Accept
-            </Button>
+            </ConfirmSubmitButton>
           </form>
         ) : (
           <Button
             type="button"
             disabled
-            title="Join or create an organization first"
+            title="Join or create an importer / declarant organization first"
           >
             Accept
           </Button>
         )}
       </div>
 
-      {activeOrganizationName ? (
+      {onlyOrganization ? (
         <span className="text-xs text-[var(--text-tertiary)]">
-          Accepting into {activeOrganizationName}.
+          Accepting into {onlyOrganization.organizationName}.
+        </span>
+      ) : eligibleOrganizations.length > 1 ? (
+        <span className="text-xs text-[var(--text-tertiary)]">
+          You belong to more than one importer organization. Choose which
+          one this data should be shared with. The choice cannot be
+          changed afterwards.
         </span>
       ) : (
         <span className="text-xs text-[var(--text-tertiary)]">
-          You need to belong to an organization before you can accept this.
+          Shared emissions data can only be accepted into an importer /
+          declarant organization. You do not belong to one yet.
         </span>
       )}
 

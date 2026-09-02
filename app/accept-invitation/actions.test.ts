@@ -490,6 +490,15 @@ describe(
   },
 );
 
+/**
+ * 2026-09-03 (P14). The organization a sharing grant is accepted into is
+ * submitted by the user, not read from the active-organization cookie,
+ * so these cases have to supply it -- and one of them has to prove the
+ * action refuses a value the caller is not a member of.
+ */
+const ACCEPTING_ORG_ID =
+  "11111111-1111-4111-8111-111111111111";
+
 describe(
   "acceptSharingGrantInvitationAction",
   () => {
@@ -504,7 +513,7 @@ describe(
           await acceptSharingGrantInvitationAction(
             { status: "idle" },
             formData(
-              { grantId: "grant-1" },
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
             ),
           );
 
@@ -562,7 +571,7 @@ describe(
           await acceptSharingGrantInvitationAction(
             { status: "idle" },
             formData(
-              { grantId: "grant-1" },
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
             ),
           );
 
@@ -585,7 +594,7 @@ describe(
         );
 
         getCurrentOrgSummaryMock.mockResolvedValueOnce(
-          { context: { org_id: "org-1" } },
+          { context: { org_id: ACCEPTING_ORG_ID } },
         );
 
         acceptSharingGrantInvitationMock.mockResolvedValueOnce(
@@ -596,7 +605,7 @@ describe(
           await acceptSharingGrantInvitationAction(
             { status: "idle" },
             formData(
-              { grantId: "grant-1" },
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
             ),
           );
 
@@ -618,7 +627,7 @@ describe(
         );
 
         getCurrentOrgSummaryMock.mockResolvedValueOnce(
-          { context: { org_id: "org-1" } },
+          { context: { org_id: ACCEPTING_ORG_ID } },
         );
 
         acceptSharingGrantInvitationMock.mockResolvedValueOnce(
@@ -629,7 +638,7 @@ describe(
           await acceptSharingGrantInvitationAction(
             { status: "idle" },
             formData(
-              { grantId: "grant-1" },
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
             ),
           );
 
@@ -650,7 +659,7 @@ describe(
         );
 
         getCurrentOrgSummaryMock.mockResolvedValueOnce(
-          { context: { org_id: "org-1" } },
+          { context: { org_id: ACCEPTING_ORG_ID } },
         );
 
         acceptSharingGrantInvitationMock.mockResolvedValueOnce(
@@ -661,7 +670,7 @@ describe(
           await acceptSharingGrantInvitationAction(
             { status: "idle" },
             formData(
-              { grantId: "grant-1" },
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
             ),
           );
 
@@ -682,7 +691,7 @@ describe(
         );
 
         getCurrentOrgSummaryMock.mockResolvedValueOnce(
-          { context: { org_id: "org-1" } },
+          { context: { org_id: ACCEPTING_ORG_ID } },
         );
 
         acceptSharingGrantInvitationMock.mockResolvedValueOnce(
@@ -693,7 +702,7 @@ describe(
           await acceptSharingGrantInvitationAction(
             { status: "idle" },
             formData(
-              { grantId: "grant-1" },
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
             ),
           );
 
@@ -714,7 +723,7 @@ describe(
         );
 
         getCurrentOrgSummaryMock.mockResolvedValueOnce(
-          { context: { org_id: "org-1" } },
+          { context: { org_id: ACCEPTING_ORG_ID } },
         );
 
         acceptSharingGrantInvitationMock.mockResolvedValueOnce(
@@ -725,7 +734,7 @@ describe(
           await acceptSharingGrantInvitationAction(
             { status: "idle" },
             formData(
-              { grantId: "grant-1" },
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
             ),
           );
 
@@ -746,7 +755,7 @@ describe(
         );
 
         getCurrentOrgSummaryMock.mockResolvedValueOnce(
-          { context: { org_id: "org-1" } },
+          { context: { org_id: ACCEPTING_ORG_ID } },
         );
 
         acceptSharingGrantInvitationMock.mockResolvedValueOnce(
@@ -757,7 +766,7 @@ describe(
           await acceptSharingGrantInvitationAction(
             { status: "idle" },
             formData(
-              { grantId: "grant-1" },
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
             ),
           );
 
@@ -778,7 +787,7 @@ describe(
         );
 
         getCurrentOrgSummaryMock.mockResolvedValueOnce(
-          { context: { org_id: "org-1" } },
+          { context: { org_id: ACCEPTING_ORG_ID } },
         );
 
         acceptSharingGrantInvitationMock.mockResolvedValueOnce(
@@ -789,7 +798,7 @@ describe(
           await acceptSharingGrantInvitationAction(
             { status: "idle" },
             formData(
-              { grantId: "grant-1" },
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
             ),
           );
 
@@ -810,11 +819,35 @@ describe(
         );
 
         getCurrentOrgSummaryMock.mockResolvedValueOnce(
-          { context: { org_id: "org-1" } },
+          { context: { org_id: ACCEPTING_ORG_ID } },
         );
 
         acceptSharingGrantInvitationMock.mockResolvedValueOnce(
           { status: "NOT_FOUND" },
+        );
+
+        const result =
+          await acceptSharingGrantInvitationAction(
+            { status: "idle" },
+            formData(
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "That invitation could not be found.",
+          },
+        );
+      },
+    );
+
+    it(
+      "returns an invalid-request error, without calling Supabase, when no organization was chosen",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
         );
 
         const result =
@@ -828,7 +861,108 @@ describe(
         expect(result).toEqual(
           {
             status: "error",
-            message: "That invitation could not be found.",
+            message: "Invalid request.",
+          },
+        );
+
+        expect(getServerSupabaseClientMock).not.toHaveBeenCalled();
+        expect(acceptSharingGrantInvitationMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "resolves the org context from the SUBMITTED organization, never from the active-organization cookie",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: ACCEPTING_ORG_ID } },
+        );
+
+        acceptSharingGrantInvitationMock.mockResolvedValueOnce(
+          { status: "OK" },
+        );
+
+        await acceptSharingGrantInvitationAction(
+          { status: "idle" },
+          formData(
+            { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
+          ),
+        );
+
+        expect(getCurrentOrgSummaryMock).toHaveBeenCalledWith(
+          expect.anything(),
+          ACCEPTING_ORG_ID,
+        );
+      },
+    );
+
+    it(
+      "refuses, without calling acceptSharingGrantInvitation, when the resolved org is not the one that was chosen",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        // getCurrentOrgSummary treats its argument as a PREFERENCE: an
+        // id the caller is not a member of falls back to their oldest
+        // membership. That silent fallback is the whole defect being
+        // closed -- binding a producer's data to an organization the
+        // user did not choose -- so the action must notice and refuse.
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: "22222222-2222-4222-8222-222222222222" } },
+        );
+
+        const result =
+          await acceptSharingGrantInvitationAction(
+            { status: "idle" },
+            formData(
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "You are not a member of the organization you chose. Reload the page and try again.",
+          },
+        );
+
+        expect(acceptSharingGrantInvitationMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "surfaces CAPABILITY_NOT_HELD as an importer-organization message",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(
+          { context: { org_id: ACCEPTING_ORG_ID } },
+        );
+
+        acceptSharingGrantInvitationMock.mockResolvedValueOnce(
+          { status: "CAPABILITY_NOT_HELD" },
+        );
+
+        const result =
+          await acceptSharingGrantInvitationAction(
+            { status: "idle" },
+            formData(
+              { grantId: "grant-1", orgId: ACCEPTING_ORG_ID },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message:
+              "Shared emissions data can only be accepted into an importer / " +
+              "declarant organization. Switch to one and try again.",
           },
         );
       },

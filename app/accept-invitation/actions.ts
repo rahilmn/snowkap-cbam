@@ -221,13 +221,21 @@ const acceptSharingGrantInvitationSchema =
   z.object({
     grantId:
       z.string().min(1),
+    // 2026-09-03 (P14). The organization to bind the grant to, chosen
+    // explicitly by the user. uuid() rather than min(1) so a malformed
+    // value is refused before it reaches getCurrentOrgSummary, whose
+    // fallback behaviour is precisely what must not be relied on here.
+    orgId:
+      z.string().uuid(),
   });
 
 /**
- * Accepts a bootstrap (invited-by-email) sharing_grants row into the
- * caller's own currently active org (resolved server-side via
- * getCurrentOrgSummary, same as every other action in this codebase --
- * never trusted from client input) -- see
+ * Accepts a bootstrap (invited-by-email) sharing_grants row into an org
+ * the caller EXPLICITLY chose (submitted as orgId and re-validated
+ * server-side against their own memberships via getCurrentOrgSummary --
+ * the id is client-supplied, so membership is what authorizes it, never
+ * the id itself; see the comment inside the action on why the cookie is
+ * deliberately not read here) -- see
  * src/application/sharing/manage-sharing-grants.ts's own doc comment on
  * acceptSharingGrantInvitation for why this needs an org, unlike
  * acceptInvitation above (which resolves org_id FROM the invitation
@@ -256,6 +264,7 @@ export async function acceptSharingGrantInvitationAction(
     acceptSharingGrantInvitationSchema.safeParse(
       {
         grantId: formData.get("grantId"),
+        orgId: formData.get("orgId"),
       },
     );
 
@@ -269,16 +278,43 @@ export async function acceptSharingGrantInvitationAction(
   const supabase =
     await getServerSupabaseClient();
 
+  // 2026-09-03 (P14). The organization is taken from the SUBMITTED
+  // field, not from the active-organization cookie, and it is not
+  // allowed to fall back.
+  //
+  // Accepting binds a producer's verified emissions data to this
+  // organization permanently -- app.prevent_sharing_grant_fact_change
+  // permits grantee_org_id to change exactly once, from null -- and
+  // admits every member of it to that data. Reading the cookie meant a
+  // user belonging to two organizations bound the grant to whichever
+  // one they happened to be acting as, with nothing in the flow
+  // surfacing the choice; app/accept-invitation/accept-sharing-grant-
+  // list.tsx now makes them pick.
+  //
+  // getCurrentOrgSummary treats its argument as a PREFERENCE and falls
+  // back to the caller's oldest membership when it does not match one
+  // (a deliberate, documented behaviour for the shell's org switcher).
+  // A silent fallback is exactly the defect being closed here, so the
+  // resolved context is compared against the submitted id and the
+  // request is refused when they differ -- an id the caller is not a
+  // member of, or a stale one from a revoked membership.
   const orgSummary =
     await getCurrentOrgSummary(
       supabase,
-      await getPreferredOrgId(),
+      parsed.data.orgId,
     );
 
   if (!orgSummary) {
     return {
       status: "error",
       message: "You need to belong to an organization before you can accept a data-sharing invitation.",
+    };
+  }
+
+  if (orgSummary.context.org_id !== parsed.data.orgId) {
+    return {
+      status: "error",
+      message: "You are not a member of the organization you chose. Reload the page and try again.",
     };
   }
 
@@ -327,6 +363,14 @@ export async function acceptSharingGrantInvitationAction(
       return {
         status: "error",
         message: "You are not a member of your currently active organization.",
+      };
+
+    case "CAPABILITY_NOT_HELD":
+      return {
+        status: "error",
+        message:
+          "Shared emissions data can only be accepted into an importer / " +
+          "declarant organization. Switch to one and try again.",
       };
 
     case "ALREADY_GRANTED":

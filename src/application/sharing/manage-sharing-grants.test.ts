@@ -1016,6 +1016,81 @@ describe(
 // (src/application/organizations/invitations.test.ts) already establish
 // for accept_organization_invitation.
 describe(
+  "acceptSharingGrantInvitation capability gate (P14)",
+  () => {
+    /**
+     * 2026-09-03. Accepting binds a producer's verified emissions data to
+     * an organization PERMANENTLY -- grantee_org_id may change exactly
+     * once, from null, so the producer cannot move it afterwards -- and
+     * admits every member of that organization to the data.
+     *
+     * The RPC required only active membership of the target org, and the
+     * target comes from the cookie-derived ACTIVE organization. A user
+     * belonging to two non-grantor orgs therefore bound the grant to
+     * whichever one they happened to be acting as, with nothing in the
+     * flow surfacing the choice.
+     */
+    it(
+      "refuses to bind a producer's data to an organization that is not an importer, without calling the RPC at all",
+      async () => {
+        const recorder =
+          { fromCalls: [] as string[], ops: [] as unknown[] };
+
+        const result =
+          await acceptSharingGrantInvitation(
+            makeMockSupabase(
+              {},
+              recorder as never,
+              {
+                data: [{ result_status: "OK", result_org_id: "org-1" }],
+                error: null,
+              },
+            ),
+            adminContext,
+            "grant-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "CAPABILITY_NOT_HELD" },
+        );
+
+        // Even though the mocked RPC would have said OK. The point is
+        // that the application refuses before asking.
+        expect(recorder.fromCalls).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "maps the RPC's own CAPABILITY_NOT_HELD, which is the authorization boundary a direct call would hit",
+      async () => {
+        // The application-side check above is reachable only through the
+        // application. Anyone calling the RPC directly gets stopped by
+        // the database, and that outcome has to be mapped too.
+        const result =
+          await acceptSharingGrantInvitation(
+            makeMockSupabase(
+              {},
+              { fromCalls: [], ops: [] },
+              {
+                data: [{ result_status: "CAPABILITY_NOT_HELD", result_org_id: null }],
+                error: null,
+              },
+            ),
+            granteeAdminContext,
+            "grant-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "CAPABILITY_NOT_HELD" },
+        );
+      },
+    );
+  },
+);
+
+describe(
   "acceptSharingGrantInvitation",
   () => {
     it(
@@ -1168,7 +1243,7 @@ describe(
                 error: null,
               },
             ),
-            adminContext,
+            granteeAdminContext,
             "grant-1" as never,
           );
 

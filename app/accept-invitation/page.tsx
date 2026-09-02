@@ -96,6 +96,37 @@ export default async function AcceptInvitationPage() {
     invitations.length === 0 &&
     sharingGrantInvitations.length === 0;
 
+  // 2026-09-03 (P14). Which organizations a producer's shared emissions
+  // data may be accepted into.
+  //
+  // Only an organization holding IMPORTER_DECLARANT qualifies -- see
+  // public.accept_sharing_grant_invitation (migration 20260903100000)
+  // and the application guard in acceptSharingGrantInvitation. Offering
+  // only those means the chooser never invites the user to cross an
+  // authorization boundary; the server re-checks regardless, because a
+  // rendered list is not an authorization decision.
+  //
+  // Sourced from availableOrganizations (every membership this user
+  // holds, read under RLS) rather than from the active organization, so
+  // a user who belongs to several does not silently bind the grant to
+  // whichever one a cookie names.
+  const eligibleAcceptingOrganizations =
+    (orgSummary?.availableOrganizations ?? [])
+      .filter(
+        (organization) =>
+          organization.capabilities.includes(
+            "IMPORTER_DECLARANT",
+          ),
+      )
+      .map(
+        (organization) => (
+          {
+            orgId: organization.orgId,
+            organizationName: organization.organizationName,
+          }
+        ),
+      );
+
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-8 bg-[var(--surface-page)] p-6">
       <Wordmark className="text-lg" />
@@ -219,7 +250,7 @@ export default async function AcceptInvitationPage() {
                   }
                 ),
               )}
-              activeOrganizationName={orgSummary?.organizationName ?? null}
+              eligibleOrganizations={eligibleAcceptingOrganizations}
             />
           </div>
         ) : null}

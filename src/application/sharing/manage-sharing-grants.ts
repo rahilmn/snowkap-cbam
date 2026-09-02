@@ -632,6 +632,7 @@ export type AcceptSharingGrantInvitationResult =
   | { status: "NOT_PENDING" }
   | { status: "SELF_GRANT_NOT_ALLOWED" }
   | { status: "NOT_A_MEMBER" }
+  | { status: "CAPABILITY_NOT_HELD" }
   | { status: "ALREADY_GRANTED" }
   | { status: "NOT_FOUND" };
 
@@ -667,6 +668,27 @@ export async function acceptSharingGrantInvitation(
   context: OrgContext,
   grantId: SharingGrantId,
 ): Promise<AcceptSharingGrantInvitationResult> {
+  // 2026-09-03 (P14). Accepting binds a producer's verified emissions
+  // data to this organization PERMANENTLY -- grantee_org_id may change
+  // exactly once, from null, so the producer cannot move it afterwards
+  // -- and admits every member of the organization to that data.
+  //
+  // The RPC previously required only that the caller be an active member
+  // of the target org, never that the target org is an importer at all.
+  // The target comes from context.org_id, i.e. the cookie-derived ACTIVE
+  // organization, so a user who belongs to two non-grantor orgs bound
+  // the grant to whichever one they happened to be acting as.
+  //
+  // Checked here as well as in the RPC (20260903100000) so the user gets
+  // a specific message rather than a generic refusal; the RPC remains
+  // the authorization boundary, because this check is reachable only
+  // through the application.
+  if (!hasCapability(context, "IMPORTER_DECLARANT")) {
+    return {
+      status: "CAPABILITY_NOT_HELD",
+    };
+  }
+
   const { data, error } =
     await supabase.rpc(
       "accept_sharing_grant_invitation",
@@ -719,6 +741,9 @@ export async function acceptSharingGrantInvitation(
 
     case "SELF_GRANT_NOT_ALLOWED":
       return { status: "SELF_GRANT_NOT_ALLOWED" };
+
+    case "CAPABILITY_NOT_HELD":
+      return { status: "CAPABILITY_NOT_HELD" };
 
     case "NOT_A_MEMBER":
       return { status: "NOT_A_MEMBER" };
