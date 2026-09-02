@@ -3287,3 +3287,145 @@ than a control (the first being the rate-limit bypass, §45.2). An
 enumeration of every route the production deployment answers, with its
 authentication requirement, belongs in the release evidence and does not
 currently exist.
+
+---
+
+## 50. Production route enumeration (2026-08-31)
+
+The evidence §49.5 said was missing: every route the production
+deployment answers, probed **unauthenticated**, with its actual status.
+31 routes were enumerated from `app/**` (`page.tsx` / `route.ts`), route
+groups resolved, and each probed live.
+
+### 50.1 Result — clean
+
+| Class | Count | Behaviour |
+|---|---|---|
+| Product pages | 20 | **307 → `/sign-in`**, every one |
+| Public by design | 6 | `/sign-in`, `/sign-up`, `/forgot-password`, `/reset-password`, `/auth/callback`, and `/` |
+| Health | 2 | `/api/health`, `/api/live` — 200, no sensitive content |
+| API, authenticated | 3 | `/api/evidence/upload` → **401**, `/api/evidence/[id]/download` → **401**, `/api/reports/export` → **401** |
+| Dev-only | 1 | `/design` → **404** (fixed, §49) |
+
+**No route returned org, user, shipment, emissions or evidence data to
+an unauthenticated caller.** Probes searched every response body for
+`eori`, `cbam_declarant`, `tCO2e`, `cn_code`, `installation`,
+`net_mass` and PDF magic bytes; zero hits.
+
+### 50.2 IDOR probes with REAL production identifiers
+
+Not random UUIDs — actual ids read from the production database, so a
+missing guard would have returned real content:
+
+| Probe | Result |
+|---|---|
+| `/shipments/3941a029-…` (real shipment) | 307 → `/sign-in` |
+| `/declarations/040e02af-…` (real declaration) | 307 → `/sign-in` |
+| `/api/evidence/241e87d1-…/download` (real evidence file) | 401 |
+
+### 50.3 One ordering nit, explicitly judged not a finding
+
+`/api/reports/export` validates its `year`/`quarter` parameters **before**
+authenticating, so an unauthenticated caller gets `400 INVALID_PERIOD`
+rather than `401`. I verified this does not leak: with valid parameters
+(`?year=2026`, `?year=2026&quarter=1`, `?year=2025`) it returns
+`401 UNAUTHENTICATED` and zero bytes of CSV/XLSX — confirmed by dumping
+the raw response, which is the JSON error and nothing else. The only
+information disclosed is that period validation exists. Recorded, not
+fixed.
+
+### 50.4 What this closes and what it does not
+
+It closes §49.5's stated gap. It does **not** substitute for
+authenticated authorization testing — a route correctly demanding a
+session says nothing about whether a signed-in user of org A can reach
+org B's row. That is the standing isolation suites' job, and the final
+adversarial review's `authz` lens (§51).
+
+---
+
+## 51. SMTP delivery verification — FAILED, and this is the release blocker
+
+Per the directive: *"Do not claim SMTP is verified based only on
+configuration existing; perform an actual end-to-end delivery test."*
+I performed one. **It failed.**
+
+### 51.1 What was actually done
+
+1. **Submitted the real production password-reset form** in a browser at
+   `https://snowkap-cbam-production.up.railway.app/forgot-password` — the
+   genuine user-facing path, not an API shortcut, not the admin API.
+   Result: **"Something went wrong. Please try again."**
+2. **Queried the Resend account** with the configured key (never
+   printed). One verified domain: `snowkap.co.in`, status `verified`.
+3. **Read Resend's own send log.** **Zero** emails related to this
+   product, ever. The most recent send on the entire account is
+   `2026-08-28`, five days earlier, from an unrelated Snowkap ESG system.
+4. **Called Supabase Auth `/auth/v1/recover` directly** to surface the
+   real error the UI deliberately masks (anti-enumeration). Two distinct
+   errors:
+   - `email_address_invalid` — Supabase itself rejects
+     `@snowkaptest.dev`, the domain every existing production test
+     account uses.
+   - `over_email_send_rate_limit` (HTTP 429) after roughly **two**
+     attempts.
+
+### 51.2 The conclusion the evidence supports
+
+**Custom SMTP (Resend) is not active on the Supabase project.** Two
+independent lines point the same way:
+
+- **No email from this project has ever reached Resend.** If Supabase
+  were relaying through this account, sends would appear in its
+  account-wide log. None do.
+- **`over_email_send_rate_limit` at ~2 attempts** is the signature of
+  Supabase's *built-in* email service, whose cap is about 2/hour. A
+  project on custom SMTP does not throttle at two.
+
+This matches, and now supersedes with direct evidence, the earlier §37
+observation that confirmations fell back to the built-in sender.
+
+### 51.3 What this means in practice
+
+Email confirmation is **enabled** (`mailer_autoconfirm: false` — correctly
+never weakened). Signup is **open**. So today, on production:
+
+- a new user can submit the sign-up form, and
+- the confirmation email they must click to finish **will not be
+  delivered**.
+
+**No real user can complete registration.** Password reset fails the same
+way. This is not a code defect — the application-side path is correct and
+`APP_URL` is verified configured (§48.1), so the links *would* carry the
+production origin — it is a missing/incorrect Supabase Auth SMTP
+configuration.
+
+### 51.4 What I could not do, stated plainly
+
+I cannot configure it. Supabase Auth SMTP settings are dashboard/
+Management-API only; this session's MCP integration returns *"You do not
+have permission to perform this action"* for every project-level read
+(`get_advisors`, `list_migrations`, `query_logs`). **This is an
+owner-level blocker by access, not by difficulty.**
+
+I also did not create an account to test signup delivery: the standing
+instruction reserves the real-user test for the owner, and every existing
+test address is one Supabase refuses to send to anyway.
+
+### 51.5 Exact owner actions
+
+1. In **Supabase → Project Settings → Authentication → SMTP Settings**,
+   enable custom SMTP:
+   - Host `smtp.resend.com`, port `465`, username `resend`,
+     password = the Resend API key.
+   - **Sender address must be on `snowkap.co.in`** — that is the only
+     verified domain on the Resend account, and Resend rejects any other
+     sender. This is the single most likely reason a previous attempt
+     would have silently failed.
+2. Raise the Auth email rate limit above the built-in default once custom
+   SMTP is active.
+3. Then run the real-user check in §46 with an address you control.
+
+Until a real external email is **delivered and consumed**, SMTP remains
+**NOT VERIFIED** and no claim to the contrary appears anywhere in this
+report.
