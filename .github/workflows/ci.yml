@@ -44,6 +44,63 @@ permissions:
   contents: read
 
 jobs:
+  # 2026-09-02. Split out of build-and-test so that the gates which need
+  # NO container images actually report against the deployed commit.
+  #
+  # Why: `supabase start` pulls ~10 images from public.ecr.aws, which
+  # rate-limits GitHub-hosted runners' shared egress IPs. Three
+  # consecutive runs failed there -- before typecheck's result was even
+  # visible -- so an infrastructure limit was masking the status of every
+  # other gate on the commit serving production.
+  #
+  # This does NOT weaken anything. build-and-test below still runs the
+  # full suite against real Supabase and is still required; nothing was
+  # made non-blocking, and no check was removed or relaxed. The split
+  # only means an external registry outage can no longer hide whether
+  # typecheck, the unit suites, the production build and the secret scan
+  # pass on the deployed commit.
+  fast-gates:
+    name: Typecheck, unit tests, build, secret scan (no containers)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # The Supabase-backed suites self-skip here by design; they run for
+      # real in build-and-test below. This step therefore proves the pure
+      # domain/application/architecture suites pass, and does not claim
+      # to cover the integration ones.
+      - name: Unit / domain / architecture tests
+        run: pnpm test
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Scan for committed secrets
+        run: |
+          set -euo pipefail
+          PATTERN='eyJ[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|re_[A-Za-z0-9]{20,}|sb_(publishable|secret)_[A-Za-z0-9_-]{10,}'
+          if git grep -InE "$PATTERN" -- . ':!pnpm-lock.yaml' ':!.github/workflows/ci.yml'                | grep -vF 'eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6'; then
+            echo "::error::Possible committed secret found."
+            exit 1
+          fi
+          echo "Secret scan clean."
+
   build-and-test:
     name: Typecheck, test, build, smoke, secret scan
     runs-on: ubuntu-latest
