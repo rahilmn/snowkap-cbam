@@ -17,9 +17,15 @@ import {
  * is attempted for real through evidence-section.tsx's actual upload
  * control, then verification is attempted as far as it genuinely goes.
  *
- * REAL, CONFIRMED ENVIRONMENT LIMITATION: local Supabase Storage is
- * disabled (supabase/config.toml's own `[storage] enabled = false`,
- * with a header comment on the full history -- do not re-enable it).
+ * ENVIRONMENT-DEPENDENT, PROBED AT RUNTIME (updated 2026-09-02): local
+ * Supabase Storage is disabled on the developer host
+ * (supabase/config.toml's `[storage] enabled = false`, for the
+ * machine-specific reason documented there -- do not re-enable it
+ * THERE). CI enables it so the four storage-touching migrations can
+ * apply for real, so the upload genuinely SUCCEEDS there. Every
+ * Storage-dependent assertion below branches on a live probe
+ * (`storageAvailable`) and asserts each environment's real outcome.
+ * The paragraphs that follow describe the disabled-Storage branch.
  * uploadEvidenceFile (src/application/evidence/upload-evidence.ts) has
  * no metadata-only path -- it always calls
  * `supabase.storage.from(EVIDENCE_STORAGE_BUCKET).upload(...)` for the
@@ -76,8 +82,25 @@ test.describe(
           page,
           producerOrgSession,
           isMobile,
+          request,
         },
       ) => {
+        // Probed LIVE rather than assumed from an env var or from
+        // config.toml, because the question is whether the storage-api
+        // container actually answers -- which is exactly what differs
+        // between the developer host (where it is disabled and kong
+        // returns 503 "name resolution failed") and CI (where it is
+        // enabled so the storage-touching migrations can apply).
+        //
+        // Every Storage-dependent assertion below branches on this, so
+        // the spec asserts each environment's REAL outcome instead of
+        // encoding one environment's limitation as the expected result.
+        const storageAvailable =
+          await request
+            .get("http://127.0.0.1:54321/storage/v1/bucket", { timeout: 10_000 })
+            .then((r) => r.status() !== 503)
+            .catch(() => false);
+
         test.skip(
           isMobile,
           "primary nav, org-switcher, and the multi-column tables this journey depends on are hidden/reflowed below md/sm -- desktop-only, same discipline as importer-auth-smoke.spec.ts / importer-journey.spec.ts",
@@ -266,15 +289,42 @@ test.describe(
             // resolution failed" after ~5.4s) before this session ever
             // wrote this spec. Generous timeout to cover that real
             // round trip, not flakiness insurance.
-            await expect(
-              page.getByText("Upload failed. Please try again."),
-            ).toBeVisible(
-              { timeout: 20_000 },
-            );
+            // 2026-09-02. This step used to assert ONLY the failure
+            // path, because local Supabase Storage is disabled
+            // (config.toml `[storage] enabled = false`, for a
+            // machine-specific reason documented there). CI now enables
+            // Storage so the four storage-touching migrations apply for
+            // real, which means the upload GENUINELY SUCCEEDS there --
+            // and the old assertion correctly failed.
+            //
+            // Branching rather than weakening: each environment now
+            // asserts its own real outcome, and the success branch is
+            // NEW coverage of a path this repo previously described as
+            // "shim-verified only". `storageAvailable` is probed live
+            // (below), not assumed from an env var.
+            if (storageAvailable) {
+              await expect(
+                page.getByText("Upload failed. Please try again."),
+              ).toBeHidden();
 
-            // Evidence genuinely never attached -- the record is still
-            // honestly Incomplete, not silently assumed complete.
-            await expect(page.getByText("No evidence attached.")).toBeVisible();
+              // Real bytes stored: the file is listed and the record is
+              // no longer evidence-incomplete.
+              await expect(
+                page.getByText(`evidence-${producerOrgSession.runId}.pdf`),
+              ).toBeVisible({ timeout: 20_000 });
+
+              await expect(page.getByText("No evidence attached.")).toBeHidden();
+            } else {
+              await expect(
+                page.getByText("Upload failed. Please try again."),
+              ).toBeVisible(
+                { timeout: 20_000 },
+              );
+
+              // Evidence genuinely never attached -- the record is still
+              // honestly Incomplete, not silently assumed complete.
+              await expect(page.getByText("No evidence attached.")).toBeVisible();
+            }
           },
         );
 
@@ -313,18 +363,31 @@ test.describe(
               page.getByRole("button", { name: "Verify", exact: true });
 
             await expect(verifyButton).toBeVisible();
-            await expect(verifyButton).toBeDisabled();
 
-            await expect(verifyButton).toHaveAttribute(
-              "title",
-              EVIDENCE_INCOMPLETE_NOTICE,
-            );
+            if (storageAvailable) {
+              // Evidence really attached, so evidenceComplete is true and
+              // the gate correctly RELEASES. Asserting the release is as
+              // important as asserting the block: a gate that never opens
+              // is indistinguishable from a broken control.
+              await expect(verifyButton).toBeEnabled();
 
-            // The persistent, non-dismissible Incomplete state (the
-            // owner's directive: "must be a persistent, visible state on
-            // the record") is still present after the real transition
-            // above, not just at record-creation time.
-            await expect(page.getByText("Incomplete", { exact: true })).toBeVisible();
+              await expect(
+                page.getByText("Incomplete", { exact: true }),
+              ).toBeHidden();
+            } else {
+              await expect(verifyButton).toBeDisabled();
+
+              await expect(verifyButton).toHaveAttribute(
+                "title",
+                EVIDENCE_INCOMPLETE_NOTICE,
+              );
+
+              // The persistent, non-dismissible Incomplete state (the
+              // owner's directive: "must be a persistent, visible state
+              // on the record") is still present after the real
+              // transition above, not just at record-creation time.
+              await expect(page.getByText("Incomplete", { exact: true })).toBeVisible();
+            }
           },
         );
 
