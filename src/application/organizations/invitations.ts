@@ -323,14 +323,44 @@ interface MyInvitationRow
 
 /**
  * PENDING invitations addressed to the *caller's own* authenticated
- * email, across every organization -- RLS
- * (organization_invitations_select_own_email) is what actually scopes
- * this; the caller need not be a member of any of these orgs yet
- * (that's the whole point of /accept-invitation).
+ * email, across every organization. The caller need not be a member of
+ * any of these orgs yet -- that is the whole point of
+ * /accept-invitation.
+ *
+ * 2026-09-03 (P14): the caller's email is now filtered EXPLICITLY rather
+ * than left to RLS, and the caller must supply it.
+ *
+ * RLS alone is the wrong tool here, because Postgres OR-combines
+ * permissive SELECT policies and this table has two:
+ * organization_invitations_select_own_email (addressed to me) and
+ * organization_invitations_select_admin_or_owner (issued by an org I
+ * administer). An ADMIN or OWNER therefore reads every PENDING
+ * invitation their own organization has sent to *other people* -- and
+ * this function rendered them on /accept-invitation as though they were
+ * addressed to the caller, with a live Accept button that can only ever
+ * fail EMAIL_MISMATCH.
+ *
+ * Verified against real RLS on 2026-09-03 (rolled-back probe): an org
+ * OWNER querying status = 'PENDING' saw both an invitation addressed to
+ * someone-else@example.com and one addressed to the invitee. Observable
+ * in production: ABC's owner sees a phantom "ABC / MEMBER / Accept" row
+ * for the invitation addressed to rahil.naik@powerweave.com.
+ *
+ * manage-sharing-grants.ts's listMyPendingSharingGrantInvitations
+ * already documents and fixes this exact class for its own table; this
+ * is the same fix, and the two should be read together.
  */
 export async function listMyPendingInvitations(
   supabase: SupabaseClient,
+  callerConfirmedEmail: string,
 ): Promise<MyPendingInvitation[]> {
+  const normalizedEmail =
+    callerConfirmedEmail.trim().toLowerCase();
+
+  if (normalizedEmail.length === 0) {
+    return [];
+  }
+
   const { data, error } =
     await supabase
       .from("organization_invitations")
@@ -340,6 +370,13 @@ export async function listMyPendingInvitations(
       .eq(
         "status",
         "PENDING",
+      )
+      .eq(
+        // The RLS policy compares lower(email) to the caller's confirmed
+        // email; invitations are stored already-normalized by
+        // inviteMember, so an equality filter here matches it exactly.
+        "email",
+        normalizedEmail,
       )
       .order(
         "created_at",
@@ -363,4 +400,52 @@ export async function listMyPendingInvitations(
       };
     },
   );
+}
+
+/**
+ * How many PENDING invitations are addressed to the caller. Used by the
+ * application shell to surface a "Pending invitations" entry, so an
+ * invited user who lands anywhere other than /accept-invitation still
+ * has a way to find it.
+ *
+ * Carries the same explicit caller-email filter as
+ * listMyPendingInvitations, and for the same reason: without it an
+ * ADMIN would carry a permanent, wrong badge counting invitations their
+ * own organization had sent to other people.
+ *
+ * head + count rather than fetching rows: the shell needs a number, and
+ * this runs on every authenticated render.
+ */
+export async function countMyPendingInvitations(
+  supabase: SupabaseClient,
+  callerConfirmedEmail: string,
+): Promise<number> {
+  const normalizedEmail =
+    callerConfirmedEmail.trim().toLowerCase();
+
+  if (normalizedEmail.length === 0) {
+    return 0;
+  }
+
+  const { count, error } =
+    await supabase
+      .from("organization_invitations")
+      .select(
+        "id",
+        { count: "exact", head: true },
+      )
+      .eq(
+        "status",
+        "PENDING",
+      )
+      .eq(
+        "email",
+        normalizedEmail,
+      );
+
+  if (error) {
+    return 0;
+  }
+
+  return count ?? 0;
 }

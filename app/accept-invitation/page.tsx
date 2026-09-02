@@ -68,6 +68,7 @@ export default async function AcceptInvitationPage() {
       [
         listMyPendingInvitations(
           supabase,
+          user.email ?? "",
         ),
 
         listMyPendingSharingGrantInvitations(

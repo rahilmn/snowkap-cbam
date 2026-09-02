@@ -6,6 +6,7 @@ import {
 
 import {
   acceptInvitation,
+  countMyPendingInvitations,
   inviteMember,
   listMyPendingInvitations,
   listPendingInvitationsForOrg,
@@ -28,9 +29,13 @@ function mockUserScopedSupabase(
     insertResult?: { data: unknown; error: unknown };
     updateError?: unknown;
     updateRowsAffected?: number;
-    selectResult?: { data: unknown; error: unknown };
+    selectResult?: { data: unknown[] | null; error: unknown };
+    selectFilters?: [string, unknown][];
   },
 ) {
+  const selectFilters =
+    arguments[0].selectFilters ?? [];
+
   return {
     auth: {
       getUser: () =>
@@ -80,27 +85,42 @@ function mockUserScopedSupabase(
           }
         ),
 
-        select: () => (
-          {
-            eq: () => (
-              {
-                eq: () => (
-                  {
-                    order: () =>
-                      Promise.resolve(
-                        selectResult,
-                      ),
-                  }
-                ),
+        select: (
+          _columns?: unknown,
+          options?: { count?: string; head?: boolean },
+        ) => {
+          const chain: Record<string, unknown> = {
+            eq: (column: string, value: unknown) => {
+              selectFilters.push([column, value]);
+              return chain;
+            },
 
-                order: () =>
-                  Promise.resolve(
-                    selectResult,
-                  ),
-              }
-            ),
-          }
-        ),
+            order: () =>
+              Promise.resolve(
+                selectResult,
+              ),
+
+            // head + count (countMyPendingInvitations) resolves the
+            // builder itself rather than going through .order().
+            then: (
+              resolve: (value: unknown) => unknown,
+              reject: (reason: unknown) => unknown,
+            ) =>
+              Promise.resolve(
+                options?.head
+                  ? {
+                      count:
+                        Array.isArray(selectResult?.data)
+                          ? selectResult.data.length
+                          : 0,
+                      error: selectResult?.error ?? null,
+                    }
+                  : selectResult,
+              ).then(resolve, reject),
+          };
+
+          return chain;
+        },
       }
     ),
   } as never;
@@ -532,6 +552,7 @@ describe(
                 },
               },
             ),
+            "me@example.com",
           );
 
         expect(result).toEqual(
@@ -550,6 +571,170 @@ describe(
               organizationName: "Acme Importers",
             },
           ],
+        );
+      },
+    );
+
+    /**
+     * 2026-09-03 (P14). This table carries TWO permissive SELECT
+     * policies, and Postgres OR-combines them: one for invitations
+     * addressed to the caller, one for invitations issued by an org the
+     * caller administers. Leaving the scoping to RLS therefore showed an
+     * ADMIN or OWNER every PENDING invitation their OWN organization had
+     * sent to other people, rendered on /accept-invitation as though
+     * addressed to them, behind an Accept button that can only ever fail
+     * EMAIL_MISMATCH.
+     *
+     * Verified against real RLS on 2026-09-03 with a rolled-back probe:
+     * an org OWNER querying status = 'PENDING' saw an invitation
+     * addressed to someone-else@example.com. Observable in production --
+     * ABC's owner sees a phantom row for the invitation addressed to
+     * rahil.naik@powerweave.com.
+     *
+     * The sibling listMyPendingSharingGrantInvitations
+     * (manage-sharing-grants.ts) already documents and fixes this exact
+     * class; these pin the same fix here.
+     */
+    it(
+      "filters on the caller's own email explicitly, so an admin never sees their own org's outgoing invitations as if addressed to them",
+      async () => {
+        const selectFilters: [string, unknown][] =
+          [];
+
+        await listMyPendingInvitations(
+          mockUserScopedSupabase(
+            {
+              selectResult: { data: [], error: null },
+              selectFilters,
+            },
+          ),
+          "Me@Example.com  ",
+        );
+
+        expect(selectFilters).toContainEqual(
+          ["status", "PENDING"],
+        );
+
+        // Normalized: invitations are stored lower-cased by inviteMember,
+        // and the RLS policy compares lower(email) to the caller's
+        // confirmed email.
+        expect(selectFilters).toContainEqual(
+          ["email", "me@example.com"],
+        );
+      },
+    );
+
+    it(
+      "returns nothing, without querying, when the caller has no confirmed email",
+      async () => {
+        const selectFilters: [string, unknown][] =
+          [];
+
+        const result =
+          await listMyPendingInvitations(
+            mockUserScopedSupabase(
+              {
+                selectResult: { data: [], error: null },
+                selectFilters,
+              },
+            ),
+            "",
+          );
+
+        expect(result).toEqual(
+          [],
+        );
+
+        expect(selectFilters).toEqual(
+          [],
+        );
+      },
+    );
+  },
+);
+
+describe(
+  "countMyPendingInvitations",
+  () => {
+    it(
+      "counts only invitations addressed to the caller",
+      async () => {
+        const selectFilters: [string, unknown][] =
+          [];
+
+        const count =
+          await countMyPendingInvitations(
+            mockUserScopedSupabase(
+              {
+                selectResult: {
+                  data: [{ id: "a" }, { id: "b" }],
+                  error: null,
+                },
+                selectFilters,
+              },
+            ),
+            "me@example.com",
+          );
+
+        expect(count).toBe(
+          2,
+        );
+
+        expect(selectFilters).toContainEqual(
+          ["email", "me@example.com"],
+        );
+
+        expect(selectFilters).toContainEqual(
+          ["status", "PENDING"],
+        );
+      },
+    );
+
+    it(
+      "reports zero rather than throwing when the count query fails, so a shell badge can never break the page",
+      async () => {
+        const count =
+          await countMyPendingInvitations(
+            mockUserScopedSupabase(
+              {
+                selectResult: {
+                  data: null,
+                  error: { message: "boom" },
+                },
+              },
+            ),
+            "me@example.com",
+          );
+
+        expect(count).toBe(
+          0,
+        );
+      },
+    );
+
+    it(
+      "reports zero, without querying, when the caller has no confirmed email",
+      async () => {
+        const selectFilters: [string, unknown][] =
+          [];
+
+        const count =
+          await countMyPendingInvitations(
+            mockUserScopedSupabase(
+              {
+                selectResult: { data: [{ id: "a" }], error: null },
+                selectFilters,
+              },
+            ),
+            "   ",
+          );
+
+        expect(count).toBe(
+          0,
+        );
+
+        expect(selectFilters).toEqual(
+          [],
         );
       },
     );

@@ -21,6 +21,11 @@ import {
   removeMember,
 } from "../../src/application/organizations/manage-membership";
 
+import {
+  countMyPendingInvitations,
+  listMyPendingInvitations,
+} from "../../src/application/organizations/invitations";
+
 // Standing two-org isolation suite (docs/plans/MASTER_PLAN.md §13: "a
 // standing test, not an assumption... from P3 on every new port/policy").
 // Runs against a LOCAL, disposable Supabase instance (`supabase start`
@@ -2366,6 +2371,146 @@ describe.skipIf(!localSupabaseReachable)(
     describe(
       "organization invitations (20260828130000)",
       () => {
+        /**
+         * 2026-09-03 (P14). organization_invitations carries TWO
+         * permissive SELECT policies -- _select_own_email (addressed to
+         * me) and _select_admin_or_owner (issued by an org I administer)
+         * -- and Postgres OR-combines them. listMyPendingInvitations
+         * therefore could not be left to RLS to scope: an ADMIN read
+         * every PENDING invitation their own org had sent to other
+         * people, and /accept-invitation rendered them as though they
+         * were addressed to the caller, behind an Accept button that can
+         * only ever fail EMAIL_MISMATCH.
+         *
+         * This proves both halves live: RLS genuinely does return the
+         * other person's row to the admin (so the explicit filter is
+         * load-bearing, not belt-and-braces), and the application
+         * function with the filter in place returns nothing.
+         */
+        it(
+          "RLS returns an org admin their own org's outgoing invitations, so listMyPendingInvitations must filter on the caller's email itself",
+          async () => {
+            const password =
+              `isolation-invite-scope-${runId}!`;
+
+            const { data: scopeOrg, error: scopeOrgError } =
+              await serviceClient
+                .from("organizations")
+                .insert(
+                  {
+                    name: `Invite Scope Org ${runId}`,
+                    slug: `invite-scope-org-${runId}`,
+                    capabilities: ["IMPORTER_DECLARANT"],
+                  },
+                )
+                .select("id")
+                .single();
+
+            expect(scopeOrgError).toBeNull();
+
+            const { data: adminUser, error: adminUserError } =
+              await serviceClient.auth.admin.createUser(
+                {
+                  email: `invite-scope-admin-${runId}@example.com`,
+                  password,
+                  email_confirm: true,
+                },
+              );
+
+            expect(adminUserError).toBeNull();
+
+            const { error: membershipError } =
+              await serviceClient
+                .from("memberships")
+                .insert(
+                  {
+                    org_id: scopeOrg!.id,
+                    user_id: adminUser!.user!.id,
+                    role: "OWNER",
+                  },
+                );
+
+            expect(membershipError).toBeNull();
+
+            const { error: inviteError } =
+              await serviceClient
+                .from("organization_invitations")
+                .insert(
+                  {
+                    org_id: scopeOrg!.id,
+                    email: `invite-scope-someone-else-${runId}@example.com`,
+                    role: "MEMBER",
+                    invited_by: adminUser!.user!.id,
+                  },
+                );
+
+            expect(inviteError).toBeNull();
+
+            const adminClient =
+              createClient(
+                LOCAL_API_URL,
+                LOCAL_ANON_KEY,
+                { auth: { persistSession: false } },
+              );
+
+            const { error: signInError } =
+              await adminClient.auth.signInWithPassword(
+                {
+                  email: `invite-scope-admin-${runId}@example.com`,
+                  password,
+                },
+              );
+
+            expect(signInError).toBeNull();
+
+            // Half one: RLS alone hands the admin the other person's row.
+            const { data: rlsRows, error: rlsError } =
+              await adminClient
+                .from("organization_invitations")
+                .select("id, email")
+                .eq("status", "PENDING");
+
+            expect(rlsError).toBeNull();
+
+            expect(
+              (rlsRows ?? []).map((row) => row.email),
+            ).toContain(
+              `invite-scope-someone-else-${runId}@example.com`,
+            );
+
+            // Half two: the application function, with its explicit
+            // caller-email filter, returns nothing for that admin.
+            const mine =
+              await listMyPendingInvitations(
+                adminClient,
+                `invite-scope-admin-${runId}@example.com`,
+              );
+
+            expect(mine).toEqual(
+              [],
+            );
+
+            const count =
+              await countMyPendingInvitations(
+                adminClient,
+                `invite-scope-admin-${runId}@example.com`,
+              );
+
+            expect(count).toBe(
+              0,
+            );
+
+            await serviceClient
+              .from("organizations")
+              .delete()
+              .eq("id", scopeOrg!.id);
+
+            await serviceClient.auth.admin.deleteUser(
+              adminUser!.user!.id,
+            );
+          },
+        );
+
         it(
           "a plain MEMBER cannot create or revoke an invitation; an ADMIN can do both",
           async () => {
