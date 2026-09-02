@@ -20,6 +20,10 @@ import {
   initialLineActionState,
 } from "./action-state";
 
+import {
+  formatReportingPeriod,
+} from "../../../../src/domain/shared/reporting-period";
+
 import type {
   ShipmentLine,
 } from "../../../../src/domain/shipments/types";
@@ -86,8 +90,26 @@ function defaultResolutionButtonLabel(
 function formatActualDataOptionLabel(
   option: AvailableActualEmissionDataOption,
 ): string {
+  // 2026-08-31 (P13 Bucket C/D sweep): the dataset's own REPORTING PERIOD
+  // is now part of the label.
+  //
+  // Every option already carried `reporting_period`; the label simply
+  // never showed it. So the picker listed a 2024 dataset and a 2026
+  // dataset as visually indistinguishable rows, and an importer choosing
+  // actual emissions for a 2026 shipment had no way to see which period
+  // the figures they were about to declare actually came from.
+  //
+  // Deliberately DISPLAY-ONLY. Whether a dataset whose period differs
+  // from the shipment's may legitimately be used is a regulatory
+  // question, and no rule in docs/regulatory/CALCULATION_RULE_REGISTER.md
+  // answers it -- so filtering these options out, or rejecting the
+  // determination, would be inventing a regulatory rule, which CLAUDE.md
+  // forbids. Showing the period lets the human apply the judgement;
+  // making that judgement here would not be ours to make. The open
+  // question is recorded in the release report rather than silently
+  // decided either way.
   const base =
-    `${option.installation_name} (${option.installation_country}) — ${option.direct_specific} ${option.emission_unit} direct`;
+    `${option.installation_name} (${option.installation_country}) — ${formatReportingPeriod(option.reporting_period)} — ${option.direct_specific} ${option.emission_unit} direct`;
 
   return option.provenance === "SHARED"
     ? `${base} (shared by ${option.grantor_organization_name})`

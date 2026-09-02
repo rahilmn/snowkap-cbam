@@ -111,6 +111,49 @@ export async function recordDeclarationFiled(
     };
   }
 
+  // Pre-flight ACTIVE-org scoping, matching markDeclarationReady's own
+  // `declaration.org_id !== context.org_id` guard.
+  //
+  // `declarationId` is caller-supplied. The RPC (20260829470000) does
+  // re-check membership and ADMIN/OWNER against the declaration's OWN
+  // org, so this was never an "anyone can file anyone's declaration"
+  // hole -- and this guard is deliberately NOT the security boundary,
+  // which is why the RPC is left untouched.
+  //
+  // What it restores is ACTIVE-org scoping: a user who is ADMIN/OWNER of
+  // both org A (active) and org B could otherwise replay this Server
+  // Action with a READY declaration id from B and file it while acting
+  // as A. That also matters because the IMPORTER_DECLARANT check above
+  // is evaluated against the ACTIVE org, and the database enforces
+  // capabilities nowhere at all -- so without this, B's declaration
+  // could be filed on the strength of A's capability.
+  //
+  // NOT_FOUND rather than anything more specific, matching the sibling:
+  // never confirm a foreign id exists. (P13 Bucket C sweep, 2026-08-31.)
+  const { data: scopeRow, error: scopeError } =
+    await supabase
+      .from("declarations")
+      .select("org_id")
+      .eq("id", declarationId)
+      .maybeSingle();
+
+  if (scopeError) {
+    return {
+      status: "REJECTED",
+      reason: "RPC_FAILED",
+    };
+  }
+
+  const scopedOrgId =
+    (scopeRow as { org_id?: string } | null)?.org_id;
+
+  if (!scopedOrgId || scopedOrgId !== context.org_id) {
+    return {
+      status: "REJECTED",
+      reason: "NOT_FOUND",
+    };
+  }
+
   const { data, error } =
     await supabase.rpc(
       "record_declaration_filed",

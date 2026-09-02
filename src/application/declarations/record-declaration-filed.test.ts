@@ -46,8 +46,31 @@ interface RpcCall {
 function makeMockSupabase(
   rpcResult: { data: unknown; error: unknown },
   calls: RpcCall[] = [],
+  // 2026-08-31: recordDeclarationFiled now performs a pre-flight
+  // active-org fetch before the RPC (see its own comment), so the mock
+  // has to answer `.from("declarations")` too. Defaults to a row in the
+  // caller's own org, which is what every pre-existing case here means.
+  declarationRow: { data: unknown; error: unknown } =
+    { data: { org_id: orgId }, error: null },
 ) {
   return {
+    from: () => (
+      {
+        select: () => (
+          {
+            eq: () => (
+              {
+                maybeSingle: () =>
+                  Promise.resolve(
+                    declarationRow,
+                  ),
+              }
+            ),
+          }
+        ),
+      }
+    ),
+
     rpc: (fnName: string, args: unknown) => {
       calls.push(
         { fnName, args },
@@ -238,6 +261,105 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "RPC_FAILED" },
+        );
+      },
+    );
+  },
+);
+
+describe(
+  "recordDeclarationFiled active-org scoping (P13 Bucket C sweep, 2026-08-31)",
+  () => {
+    it(
+      "rejects NOT_FOUND for a declaration belonging to a DIFFERENT org, without calling the RPC",
+      async () => {
+        // The gap: `declarationId` is caller-supplied. A user who is
+        // ADMIN/OWNER of both org A (active) and org B could replay this
+        // Server Action with a READY declaration id from B and file it
+        // while acting as A. The RPC does re-check membership and role
+        // against the declaration's OWN org, so this was never a
+        // "any user can file anyone's declaration" hole -- but it broke
+        // ACTIVE-org scoping, and the IMPORTER_DECLARANT capability gate
+        // above is checked against the ACTIVE org, not the declaration's,
+        // and the database does not enforce capabilities at all.
+        //
+        // NOT_FOUND rather than a more specific reason matches the
+        // sibling markDeclarationReady's posture: never confirm a foreign
+        // id exists.
+        const calls: RpcCall[] = [];
+
+        const result =
+          await recordDeclarationFiled(
+            makeMockSupabase(
+              { data: null, error: null },
+              calls,
+              { data: { org_id: "org-2" }, error: null },
+            ),
+            adminContext,
+            "declaration-1" as never,
+            "CBAM-2026-0001",
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "NOT_FOUND" },
+        );
+
+        expect(calls).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "rejects NOT_FOUND when the declaration does not exist at all",
+      async () => {
+        const calls: RpcCall[] = [];
+
+        const result =
+          await recordDeclarationFiled(
+            makeMockSupabase(
+              { data: null, error: null },
+              calls,
+              { data: null, error: null },
+            ),
+            adminContext,
+            "declaration-missing" as never,
+            "CBAM-2026-0001",
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "NOT_FOUND" },
+        );
+
+        expect(calls).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "surfaces a failed pre-flight fetch instead of proceeding to the RPC",
+      async () => {
+        const calls: RpcCall[] = [];
+
+        const result =
+          await recordDeclarationFiled(
+            makeMockSupabase(
+              { data: null, error: null },
+              calls,
+              { data: null, error: { message: "statement timeout" } },
+            ),
+            adminContext,
+            "declaration-1" as never,
+            "CBAM-2026-0001",
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "RPC_FAILED" },
+        );
+
+        expect(calls).toEqual(
+          [],
         );
       },
     );
