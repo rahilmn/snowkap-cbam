@@ -293,7 +293,7 @@ jobs:
           mv /tmp/deferred/*.sql supabase/migrations/
           pnpm exec supabase migration up --local
 
-          ACTIVE=$(psql "postgresql://postgres@127.0.0.1:54322/postgres" -tAc "select count(*) from public.default_emission_values dev join public.regulatory_datasets rd on rd.id=dev.dataset_id where rd.status='ACTIVE'" | tr -d '[:space:]')
+          ACTIVE=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -tAc "select count(*) from public.default_emission_values dev join public.regulatory_datasets rd on rd.id=dev.dataset_id where rd.status='ACTIVE'" | tr -d '[:space:]')
           echo "ACTIVE regulatory rows: ${ACTIVE}"
           if [ "${ACTIVE}" != "12540" ]; then
             echo "::error::Expected 12540 ACTIVE regulatory rows, found ${ACTIVE} -- the regulatory suites would run against wrong data."
