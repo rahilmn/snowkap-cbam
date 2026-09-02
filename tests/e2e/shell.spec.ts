@@ -114,73 +114,47 @@ test.describe(
     );
 
     test(
-      "navigates to the design gallery and renders every section",
+      "does not expose the internal design gallery in a production build",
       async ({ page }) => {
-        await page.goto(
-          "/",
-        );
+        // 2026-08-31. This test used to click through from "/" to the
+        // /design gallery and assert every section rendered. Both halves
+        // of that were wrong to keep:
+        //
+        //  - the landing page no longer links to the gallery (it was the
+        //    ONLY action the Phase-2 placeholder offered, which is how an
+        //    internal page ended up being the first thing a signed-in
+        //    user saw), and
+        //  - the gallery is dev-only per MASTER_PLAN.md §26 and now
+        //    notFound()s under NODE_ENV=production, which is exactly what
+        //    playwright.config.ts's `pnpm build && pnpm start` webServer
+        //    runs.
+        //
+        // So the useful assertion is the inverse one: the gate holds in
+        // the same kind of build we deploy.
+        const response =
+          await page.goto(
+            "/design",
+          );
 
-        await page.getByRole(
-          "link",
-          { name: /design system gallery/i },
-        ).click();
+        expect(
+          response?.status(),
+        ).toBe(
+          404,
+        );
 
         await expect(
-          page,
-        ).toHaveURL(
-          /\/design$/,
+          page.getByRole(
+            "heading",
+            { name: /Snowkap CBAM design system/i },
+          ),
+        ).toHaveCount(
+          0,
         );
-
-        for (
-          const heading of [
-            "Snowkap CBAM design system",
-            "Neutral",
-            "Brand (verified: #DF5900)",
-            "Interactive (this product's own extension)",
-            "Semantic",
-            "Typography",
-            "Buttons",
-            "Badges",
-            "Regulatory status badges",
-            "Card",
-          ]
-        ) {
-          await expect(
-            page.getByRole(
-              "heading",
-              { name: heading, exact: true },
-            ),
-          ).toBeVisible();
-        }
-
-        // All 10 regulatory resolution reasons render as distinct badges
-        // (the "status honesty" element -- docs/plans/MASTER_PLAN.md §25).
-        for (
-          const label of [
-            "Resolved (TARIC)",
-            "Resolved (CN8)",
-            "Resolved (HS6)",
-            "Resolved (HS4)",
-            "Fallback territory",
-            "Reference required",
-            "Unavailable",
-            "Not applicable",
-            "Ambiguous",
-            "No match",
-          ]
-        ) {
-          await expect(
-            page.getByText(
-              label,
-              { exact: true },
-            ),
-          ).toBeVisible();
-        }
       },
     );
 
     test(
-      "no console errors on the home or design pages",
+      "no console errors on the home or sign-in pages",
       async ({ page }) => {
         const errors: string[] =
           [];
@@ -200,8 +174,11 @@ test.describe(
           "/",
         );
 
+        // Was "/design" -- that route is gated out of production builds
+        // now (MASTER_PLAN.md §26), so this sweep uses a real product
+        // route instead, which is a better subject for it anyway.
         await page.goto(
-          "/design",
+          "/sign-in",
         );
 
         expect(
@@ -262,8 +239,13 @@ test.describe(
     test(
       "switches between light and dark and the choice persists across reload",
       async ({ page }) => {
+        // Was "/design"; that route is gated out of production builds
+        // now. "/" is the right substitute: the toggle lives in the
+        // topbar (components/shell/topbar.tsx), which only AppShell
+        // renders -- "/sign-in" is a standalone centered card and has no
+        // toggle at all.
         await page.goto(
-          "/design",
+          "/",
         );
 
         const html =

@@ -1,4 +1,8 @@
 import {
+  notFound,
+} from "next/navigation";
+
+import {
   AppShell,
 } from "../../components/shell/app-shell";
 
@@ -86,11 +90,37 @@ const SEMANTIC_SWATCHES = [
 /**
  * Dev-only design-system review venue, per
  * docs/plans/MASTER_PLAN.md §26 ("Review venue: dev-only in-app
- * /design gallery route (no Storybook dependency)"). Not linked from
- * product navigation; reachable directly at /design for design review
- * during development.
+ * /design gallery route (no Storybook dependency)").
+ *
+ * 2026-08-31: this comment used to ALSO claim "Not linked from product
+ * navigation", and both halves of the description were false in
+ * practice. Nothing enforced "dev-only", so the gallery answered HTTP
+ * 200 to an unauthenticated request on the live production deployment;
+ * and app/page.tsx -- the post-sign-in landing page -- linked to it
+ * directly, making it the most prominent thing a signed-in user was
+ * offered. The owner found it on production and asked why it was there,
+ * which is a fair question about a page the plan had designated
+ * internal.
+ *
+ * It leaks no org or user data -- design tokens and component samples
+ * only -- so this is a scope/professionalism fix, not a disclosure fix.
+ * But an internal surface reachable by anyone with the URL is surface
+ * that need not exist, and the approved plan already said so.
+ *
+ * `notFound()` rather than a redirect: in production this route should
+ * be indistinguishable from a route that was never built.
  */
 export default function DesignGalleryPage() {
+  // Deliberately NODE_ENV and not a bespoke flag. Unlike the E2E
+  // rate-limit bypass -- which had to survive `pnpm build && pnpm start`
+  // and therefore could not use NODE_ENV -- there is no reason for this
+  // gallery to be reachable in ANY production build, including the one
+  // Playwright builds. The specs are updated to assert it is gone there
+  // rather than to keep it alive for their convenience.
+  if (process.env.NODE_ENV === "production") {
+    notFound();
+  }
+
   return (
     <AppShell
       breadcrumbs={[
