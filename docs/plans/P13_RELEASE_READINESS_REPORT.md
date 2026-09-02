@@ -3083,3 +3083,120 @@ severities are individually recorded there.
 
 **The classification does not change: RELEASE BLOCKED.** Item 1 alone is
 sufficient, and it is exactly the gate the owner is executing now.
+
+---
+
+## 48. Bucket C/D sweep (2026-08-31, while the §46 test was in the owner's hands)
+
+Fourteen of §16's Bucket C/D findings re-verified at HEAD by six grouped
+verifiers, each surviving finding then independently challenged by a
+skeptic instructed to refute. 25 agents, 0 errors.
+
+### 48.1 A correction I made in the reassuring direction, and the HIGH it hid
+
+I had read `getAppOrigin()` earlier this session and reported that it
+falls back to `x-forwarded-host`, so Railway would resolve the right
+origin for auth emails. **That was wrong.** It reads the header, then
+rejects it unless it matches `^(localhost|127\.0\.0\.1)(:\d+)?$`, and
+the rejection branch returns the constant `http://localhost:3000`. I had
+seen a gap in my own `grep` output and read past it.
+
+That fallback is **correct and must not be removed** — it is the
+fail-safe half of the P11 host-header-injection fix, which refuses to
+trust an attacker-suppliable `x-forwarded-host` when building a link
+that gets emailed. The repository's own regression test pins it.
+
+The real gap was that nothing supplied the authoritative value and
+nothing noticed. With `APP_URL` unset, **all three** transactional auth
+emails point at localhost — sign-up confirmation, password reset, and
+team invitation — while `/api/health` reported `"ok"`, because it
+checked the database, the regulatory dataset and the product schema, and
+nothing about configuration.
+
+`checkAppUrl()` now degrades `/api/health` (503) when `APP_URL` is unset
+in production (`8ffa604`). Since `railway.json` points `healthcheckPath`
+at `/api/health`, a deploy that would email localhost links now fails
+its healthcheck instead of succeeding quietly.
+
+**And then the check answered the question empirically**: production
+returns `app_url: "ok"`. `APP_URL` *is* set on this Railway service, so
+the risk — real as a class — was never live on this deployment. The
+alarm I raised before deploying the check was premature, and is recorded
+as such.
+
+### 48.2 Fixed
+
+| Finding | Severity | Commit |
+|---|---|---|
+| `recordDeclarationFiled` had no ACTIVE-org check | MEDIUM | `1eaaee9` |
+| Actual-data picker concealed each dataset's reporting period | MEDIUM | `1eaaee9` |
+| A missing `APP_URL` was undetectable | HIGH (as a class) | `8ffa604` |
+| Integration suite flaked under file-parallel execution | MEDIUM | `b7e34d6` |
+
+On `recordDeclarationFiled`: every sibling declaration service fetches
+the row and rejects `declaration.org_id !== context.org_id`. This one
+went straight to the RPC on a caller-supplied id. Not an "anyone can
+file anyone's declaration" hole — the RPC re-derives authorization from
+the declaration's own org and is deliberately left untouched as the real
+boundary — but `app.user_org_ids()` is membership-wide, not active-org,
+so a user who is ADMIN/OWNER of both org A (active) and org B could file
+B's declaration while acting as A. That compounds because the
+`IMPORTER_DECLARANT` gate is evaluated against the ACTIVE org and the
+database enforces capabilities nowhere at all. The consequences are
+irreversible: `FILED_RECORDED`, a frozen `filed_snapshot`, and every
+member shipment LOCKed.
+
+### 48.3 Deliberately NOT fixed, and why
+
+**Enforcing that an ACTUAL dataset's period matches the shipment's.**
+The sweep proposed filtering mismatched options out and rejecting the
+determination. Whether a dataset from a different period may
+legitimately be used is a **regulatory** question, and no rule in
+`CALCULATION_RULE_REGISTER.md` answers it. Enforcing a match would be
+inventing a regulatory rule, which CLAUDE.md forbids. The picker now
+*shows* each dataset's period so a human can apply the judgement; the
+judgement itself is left to the owner. **Open question, recorded not
+settled.**
+
+**Extending `ActualEmissionSnapshot`** with period / `cn_scope` /
+owning org. Correct in principle — a snapshot exists to make a
+determination reproducible — but it changes the determination JSON that
+the forgery validator checks, and that validator took eight iterations
+and three independent reviews to stabilise. It needs its own careful
+pass, not a drive-by while an external test is in flight.
+
+**Audit coverage for sharing-grant lifecycle and organization profile
+changes** (two MEDIUMs). Both need new SECURITY DEFINER trigger
+migrations. Specified by the sweep, not implemented here — they add
+schema and would join the already-unapplied migration backlog of §40
+and §45.6 rather than reaching production.
+
+**`uploadEvidenceFile`'s array read-modify-write** (MEDIUM, lost
+update). The right fix is an atomic append via RPC — again a new
+migration, same reasoning.
+
+### 48.4 A flake found, and a mistake disclosed
+
+A full `pnpm test` run failed two membership cases that then passed
+18/18 in isolation and across four consecutive re-runs. Cause: vitest
+runs test *files* in parallel, and nine integration files mutate
+organizations/memberships/audit events against one shared local
+Postgres; the two that failed exercise the last-active-OWNER trigger,
+which takes `FOR UPDATE` locks across every other active OWNER row.
+`fileParallelism: false` fixes it (~20s → ~73s, three consecutive green
+runs).
+
+**Disclosed rather than hidden**: commit `1eaaee9` was pushed while
+those two tests were red. I had chained `git commit` behind a `grep`
+that matched the failure output, so the chain proceeded. The failures
+were this pre-existing flake and not that change, but it should not have
+been committed without a clean run.
+
+### 48.5 Production evidence added this round
+
+Security response headers verified on the live deployment: CSP
+(`default-src 'self'`, `frame-ancestors 'none'`, no `unsafe-eval` in
+production), HSTS `max-age=63072000; includeSubDomains`,
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy: strict-origin-when-cross-origin`, and
+`X-Powered-By` correctly absent.
