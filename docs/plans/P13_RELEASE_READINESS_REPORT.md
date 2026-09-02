@@ -3721,3 +3721,239 @@ be. These are blocked workflows, not corrupted data.
 but because the primary regulated workflow has a reproduced CRITICAL
 break, no user can receive an email, and no automated gate has ever run
 against the artifact actually deployed.
+
+---
+
+## 54. RELEASE REPORT — 2026-09-02
+
+**Deployed commit: `6735b2c60f7d3e3f98419b6ab7b78e181ef46b15`** — production
+serves exactly this SHA, self-reported by `/api/health`. Nothing merged
+to `main`.
+
+# RELEASE BLOCKED
+
+---
+
+### 1. B1 — route binding: DECIDED and IMPLEMENTED
+
+**Decision:** `docs/regulatory/DETERMINATION_VALIDATOR_SEMANTICS_DECISION_MEMO.md` §A.
+The validator must **validate the resolved record against the line's
+declared inputs by re-deriving uniqueness**, not by string-comparing the
+route.
+
+Grounded in the existing model, not invented: **R6** ("no route is
+invented during ingestion or resolution"), **R10** (ambiguity →
+`UNRESOLVED`, never an arbitrary pick), and the resolver's own
+`usableExact` rule.
+
+**The evidence that settled it.** On the ACTIVE dataset: **6,487**
+(country, code) pairs have a single usable record that is route-specific
+— every aluminium row among them — and **zero** pairs have more than one.
+And v6's own attack fixture is one of the 6,487: Azerbaijan / 7207 12 90
+has route `(E)` 0.130 as its **only** usable record. **v6 misclassified a
+legitimate resolution as an attack**, and v7/v8 inherited it.
+
+**Implemented** as validator **v9** (`20260902090000`), applied to
+production. A declared route still binds (v6's protection kept verbatim);
+additionally the claimed record must be the unique usable candidate under
+the line's route filter — which is **stricter** than v6, since it rejects
+claims the resolver would have called `AMBIGUOUS`.
+
+### 2. B2 — UNLISTED: DECIDED and IMPLEMENTED
+
+**Decision:** memo §B. UNLISTED's absence of `regulatory_country_name` is
+**intentional and meaningful**. The checkable invariant is not a name
+match but: the declared origin is genuinely absent from the dataset
+(**new**), the matched record is the Other-Countries row, and the reason
+is `OTHER_COUNTRIES_FALLBACK`.
+
+**Implemented** in v9. Verified: genuinely-unlisted origin v8 `False` →
+v9 `True`; a **listed** country claiming UNLISTED is rejected — a check
+that did not previously exist anywhere.
+
+**EU-origin: OPEN, NOT DECIDED.** EU member states are absent from the
+dataset's geographies, so they map to UNLISTED and resolve through the
+same fallback — and CBAM does not apply to EU-origin goods at all. Fixing
+B2 **makes such determinations persistable again**, where the B2 defect
+was incidentally preventing them. Excluding them would need a hardcoded
+EU list — the invented regulatory scope CLAUDE.md forbids. **Owner
+decision required before real declarant use.**
+
+### 2b. v10 — an understatement forgery found while reviewing v9
+
+The post-v9 review flagged this as "v9 re-opens what v8 closed."
+**Testing v8 and v9 side by side on the same fixture showed both returned
+`True` — it is pre-existing, not a v9 regression.** The attribution was
+corrected before acting.
+
+The defect is real: R7 clause 2's precondition used
+`is not distinct from p_production_route_indicator`, so on a route-blank
+line it saw only route-*independent* own-country records. A country whose
+own usable value is route-specific was invisible, and the fallback was
+accepted over it.
+
+Live-reproduced: **Indonesia / 7206 90 00 — own 8.210 at route `(C)`,
+claimed as 3.750: a 54.3% under-report**, across **653** combinations.
+
+**Fixed** as v10 (`20260902140000`), applied to production and re-verified
+there: the forgery is rejected; the legitimate Albania fallback still
+accepted; v9's full matrix still holds.
+
+### 3. SMTP — NOT VERIFIED (blocking)
+
+An actual end-to-end delivery test was performed through the real
+production form. **It failed.** Resend's account-wide log contains
+**zero** sends from this product, ever; Auth throttles at ~2 attempts,
+the signature of the built-in sender. Custom SMTP is **not active**.
+
+Exact configuration is in `docs/runbooks/SUPABASE_AUTH_SMTP.md`, including
+the most likely cause of a prior silent failure: the Resend account has
+exactly **one verified domain** (`snowkap.co.in`) and rejects any sender
+outside it. **No secret appears in that runbook or in any commit.**
+
+Detection added where feasible: a missing `APP_URL` now degrades
+`/api/health` (and therefore fails Railway's healthcheck). Custom-SMTP
+presence is deliberately **not** probed — the only ways would be emitting
+real mail on a health check or embedding SMTP credentials in the app.
+
+### 4. Migrations — IN SYNC
+
+**repo 63 = ledger 63, zero missing.** All five previously-drifted or
+unapplied migrations plus v9 and v10 were inspected (none destructive,
+all re-runnable), dry-run, then applied. `…140000` (audit_events bounds)
+was genuinely unapplied and its bounds validated cleanly before applying
+(max payload 390 B vs 8192, zero non-object).
+
+Data preserved and re-verified after: 27 audit events, 1 shipment line,
+**12,540** ACTIVE regulatory rows, 21 tables with RLS.
+
+### 5. CI vs the deployed commit — PARTIALLY CLOSED
+
+Previously **no CI run had ever executed against the deployed commit**.
+Now `on: push: branches: ['**']` with a per-ref concurrency group.
+
+Running it immediately produced three red runs — none of them a test:
+`toomanyrequests: Rate exceeded` pulling Supabase images from
+`public.ecr.aws`. An image-pull retry did not clear it; the limit is
+sustained.
+
+So the gates were split. **`fast-gates` is now GREEN in CI on the
+deployed commit** — typecheck, unit/domain/architecture tests, production
+build, secret scan. **`build-and-test` (integration + E2E) remains RED**
+for that infrastructure reason. Nothing was made non-blocking and no
+check was relaxed; **no test was retried.**
+
+### 6. Test counts
+
+| Gate | Result |
+|---|---|
+| `pnpm typecheck` | clean |
+| `pnpm test` (local) | **1247 passed · 144 skipped · 0 failed** |
+| `pnpm test` in CI (`fast-gates`) | **passed** |
+| Production build | exit 0 |
+| Secret scan / NUL scan | clean / none |
+| E2E bypass compiled out | 0 files |
+| Service-role key in client bundle | 0 |
+
+**Degraded, stated plainly:** 144 skipped vs 14 in the last full run.
+Docker is unavailable in this environment, so the 12 integration/RLS
+files self-skip — **including the determination-hardening suite that
+covers v9/v10.** CI cannot run them either (§5). **The validator changes
+in this round have not been exercised by their own regression suite.**
+
+### 7. Regulatory verification
+
+`pnpm regulatory:verify` against the **production** database:
+**`RESULT: VALID`** — 12,540/12,540 reconciled, source checksum
+`900583…6f9f35` PASS, all coverage checks PASS. Re-run after v9 and v10.
+
+### 8. RLS / security evidence
+
+21/21 public tables RLS-enabled. Route enumeration (§50): all 20 product
+routes 307 → `/sign-in`, three API routes 401, `/design` 404, IDOR probes
+with **real production ids** all refused, no data leaked to any
+unauthenticated caller. Five security headers verified live. Validator
+forgery matrix re-verified against production after v10.
+
+### 9. Production health
+
+`/api/health` → `{"status":"ok"}` with `database`, `active_regulatory_dataset`,
+`app_url`, `product_schema` all `ok`. `/api/live` → `alive`. Deployed SHA
+equals HEAD.
+
+### 10. Remaining owner actions
+
+1. **Configure Supabase Auth custom SMTP** with a sender on
+   `snowkap.co.in`, and raise the Auth email rate limit
+   (`docs/runbooks/SUPABASE_AUTH_SMTP.md`).
+2. **Run the real-user auth check** — new address you control; confirm;
+   onboard; sign out; reset; sign back in. No Admin API, no disabling
+   confirmation.
+3. **Decide the EU-origin scope question** (§2). It is now live.
+4. **Unblock CI's container pulls** — authenticated ECR Public pulls, a
+   registry mirror, or a self-hosted runner — so the integration and E2E
+   suites gate the deployed commit.
+5. **Make Docker available** in the development environment, or accept
+   that validator changes ship without their regression suite.
+
+### 11. Deployed commit SHA
+
+`6735b2c60f7d3e3f98419b6ab7b78e181ef46b15`
+
+### 12. Unresolved regulatory / open questions
+
+1. **EU-origin scope** — may an EU-origin line be determinable at all,
+   and how should in-scope/out-of-scope enter as authoritative data?
+2. **ACTUAL dataset period** — may a dataset whose period differs from the
+   shipment's be used? No register entry answers this.
+3. **Stale figures in period totals** — exclude, or include and flag?
+   Either answer changes a reported number.
+4. **Annex II membership** — should it enter as a versioned dataset rather
+   than the hardcoded two-sector proxy in engine code?
+5. **Numeric ceiling** — is 40 significant digits correct, and should
+   declared quantities carry a digit cap?
+6. **Definitive-regime start year** — dataset row, or structural logic?
+7. **Correction of filed data** — may a filed shipment ever be unlocked?
+
+---
+
+### Why BLOCKED
+
+Not because CI is red on code — every code gate that can run is green,
+and two CRITICAL/HIGH regulatory defects were closed and verified in
+production this round.
+
+Blocked because:
+
+1. **No user can receive an email.** Registration and recovery are
+   impossible. Untested and unfixable from here.
+2. **The validator changes shipped without their regression suite.**
+   v9 and v10 were verified by direct live reproduction against real
+   Postgres with positive controls — good evidence, but *not* the suite
+   written to cover exactly this, which cannot run locally (no Docker) or
+   in CI (registry limit). The review caught a pre-existing test asserting
+   the opposite of v9 that I should have caught myself.
+3. **The EU-origin scope question is now live**, and it is an owner
+   decision, not a defect with an obvious fix.
+4. **Integration, RLS and E2E suites do not gate the deployed commit.**
+
+### Residual findings recorded, not fixed
+
+From the post-v9 review, verified by me where claimed against my own
+changes:
+
+- **Validator specificity gap** — v9/v10's uniqueness count keys on the
+  claimed record's own trade code, so a broader-level record the resolver
+  could never select is not excluded by it. **Structurally real;
+  measured as not exploitable for understatement on this dataset** (136
+  broader/narrower usable overlaps, **zero** where the broader
+  understates). Adding a v11 I cannot test would repeat failure (2)
+  above.
+- Declaration filing is reported unusable past ~197 member shipments
+  (unbounded `.in()`); `getDeclarationDetail` discards its query error;
+  `listActualDeterminedLines` unpaginated; period exports may attribute a
+  stale calculation to a line's current determination; evidence
+  VERIFIED-deletion lock covers rows but not storage objects;
+  `/reset-password` accepts any live session; `getShipmentDetail`,
+  `addLine`, `revokeInvitation` lack active-org checks; mobile drawer
+  does not restore focus on Escape; no skip-to-content link.
