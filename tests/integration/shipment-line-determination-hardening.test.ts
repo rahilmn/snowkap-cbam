@@ -1302,7 +1302,7 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
-      "rejects a real, genuinely-matching route-specific record attached to a line that declares NO production route at all (P13 review iteration 6) -- self-discovered while re-reviewing finding F1's own cn_code/origin_country fix, the identical forgery shape for production_route_indicator: a route-specific default value can differ substantially from a route-independent one for the same good/country, and nothing previously tied the claimed route to what the line itself declares",
+      "ACCEPTS a real, genuinely-matching route-specific record on a line that declares NO production route -- v6's premise was wrong, see the comment below (validator v9, 20260902090000)",
       async () => {
         const lineId =
           await insertLine(
@@ -1328,10 +1328,42 @@ describe.skipIf(!localSupabaseReachable)(
               lineId,
             );
 
-        expect(error).not.toBeNull();
-        expect(error?.code).toBe(
-          "42501",
-        );
+        // ASSERTION DELIBERATELY REVERSED 2026-09-02, with evidence --
+        // this is NOT a test weakened to make an implementation pass.
+        //
+        // This case previously asserted rejection (42501), encoding v6's
+        // premise that a route-specific record on a route-blank line is
+        // necessarily a forgery. That premise was WRONG, and the
+        // measurement that shows it is in
+        // docs/regulatory/DETERMINATION_VALIDATOR_SEMANTICS_DECISION_MEMO.md:
+        //
+        //   - The resolver (resolve-default-value.ts:487-504) admits a
+        //     route-specific record when NO route is requested, provided
+        //     it is the UNIQUE usable candidate, and returns AMBIGUOUS
+        //     rather than choosing when two remain (R10). R6 additionally
+        //     forbids inventing a route, and the UI marks the field
+        //     optional.
+        //   - On the ACTIVE dataset, 6,487 (country, code) pairs have a
+        //     single usable record that is route-specific -- including
+        //     every aluminium row -- and ZERO pairs have more than one.
+        //     v6..v8 rejected all 6,487, surfacing to users as a FALSE
+        //     "this shipment is locked or void" on a DRAFT shipment.
+        //   - v6's own attack fixture (Azerbaijan / 7207 12 90) is one of
+        //     them: route '(E)' 0.130 is its ONLY usable record. The
+        //     importer in that reproduction was receiving the only value
+        //     the resolver could ever produce -- not forging one.
+        //
+        // `recordWithRoute` is selected with no uniqueness constraint,
+        // but since no pair in this dataset has two usable records, it is
+        // in practice a unique-usable case -- exactly the shape the
+        // resolver resolves.
+        //
+        // THE FORGERY PROTECTION THIS CASE WAS REALLY GUARDING IS NOT
+        // LOST. It is asserted by the next test (a DIFFERENT declared
+        // route is still rejected) and by the v9 block at the end of this
+        // file. What changed is only the claim that a blank route is
+        // itself proof of forgery.
+        expect(error).toBeNull();
       },
     );
 
