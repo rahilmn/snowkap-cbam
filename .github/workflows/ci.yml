@@ -13,10 +13,32 @@ name: CI
 # remains a locally-run / manually-dispatched gate per
 # docs/architecture/ARCHITECTURE.md.
 
+# 2026-09-02. This used to be `push: branches: [main]` only. Railway
+# deploys production from `feature/full-product-build`, so NO CI run had
+# ever executed against the commit actually serving production --
+# `gh run list --branch feature/full-product-build` was empty, and every
+# gate had only ever run on one developer's machine. That is precisely
+# how a CRITICAL determination-validator defect (B1) reached production
+# with a green local suite.
+#
+# `branches: ['**']` rather than naming the deploy branch: the deploy
+# branch is a Railway dashboard setting this repository cannot see, so
+# naming it here would silently rot the moment it changed. Running on
+# every branch push is the only form that stays correct without knowing
+# which branch is deployed -- and it is strictly safer, not weaker.
+#
+# `concurrency` keeps the cost of that honest: a newer push to the same
+# ref cancels the older in-flight run, so this does not pile up. It does
+# NOT cancel across refs, so a push to the deploy branch can never be
+# cancelled by unrelated work.
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
