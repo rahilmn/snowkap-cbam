@@ -4414,3 +4414,89 @@ Auth service log named it in a single line.
 **SMTP: still FAIL — NOT VERIFIED.** Root cause identified and the fix is
 a single field, but no confirmation or reset email has yet been delivered
 or consumed. The real-user gate (§46) remains open.
+
+---
+
+## 61. SMTP DELIVERY VERIFIED (2026-09-02) — consumption still outstanding
+
+After the owner set the SMTP **Username** to the literal `resend`
+(§60), the path works.
+
+### 61.1 Evidence
+
+Signup probe against production, to `delivered@resend.dev` — a **real,
+deliverable** address (Resend's documented test sink), chosen so the
+whole path is observable without involving a person:
+
+```
+POST /auth/v1/signup            -> HTTP 200
+  confirmation_sent_at: 2026-09-02T12:26:57Z
+  user id a1f578c1-93ca-4b4e-ba34-8772f7915d49
+```
+
+Password-reset probe for the same account, after the 72s per-user
+interval:
+
+```
+POST /auth/v1/recover           -> HTTP 200
+  recovery_sent_at: 2026-09-02 12:28:58
+```
+
+**Resend send log — both messages DELIVERED:**
+
+| Time | To | Subject | Event |
+|---|---|---|---|
+| `12:29:01` | `delivered@resend.dev` | **Reset your password** | **delivered** |
+| `12:27:00` | `delivered@resend.dev` | **Confirm your email address** | **delivered** |
+
+Database corroboration (`auth.users`): the account exists,
+`confirmation_sent_at` and `recovery_sent_at` are both set, and
+`email_confirmed_at` is null — i.e. sent, not yet consumed.
+
+Contrast with every prior attempt: **zero** Resend entries, because GoTrue
+never got past `535 "Invalid username"`.
+
+### 61.2 Status: DELIVERY verified, CONSUMPTION not
+
+| Gate | State |
+|---|---|
+| Confirmation email **sent** | **PASS** |
+| Confirmation email **delivered** | **PASS** (Resend `event=delivered`) |
+| Reset email **sent** | **PASS** |
+| Reset email **delivered** | **PASS** (Resend `event=delivered`) |
+| Confirmation link **consumed** | **NOT VERIFIED** |
+| Reset link **consumed**, new password used to sign in | **NOT VERIFIED** |
+
+`delivered@resend.dev` is a sink — the message body cannot be read, so
+the links cannot be clicked from here. Consumption requires a real inbox.
+
+**SMTP is therefore NOT yet PASS**, per the standing rule that both
+emails must be delivered *and* consumed.
+
+### 61.3 A blocker for the owner's test, caught by the new check
+
+Production `/api/health` now reports:
+
+```
+"status":"degraded"   "app_url":"malformed"
+```
+
+`APP_URL` on Railway is still the **bare hostname**, so
+`getAppOrigin()` builds
+`snowkap-cbam-production.up.railway.app/auth/callback?next=/onboarding`
+— no scheme, not a valid URL. **The link inside a real confirmation
+email is currently unusable**, and the owner's test would fail at the
+click step even though delivery now works.
+
+The shape validation added in `37914de` is what surfaced this; the prior
+presence-only check reported `ok`.
+
+**Owner action:** set `APP_URL` to
+`https://snowkap-cbam-production.up.railway.app` (with scheme). That also
+clears the `degraded` health status, which Railway's healthcheck watches.
+
+### 61.4 Test artifact
+
+The probe created one account: `delivered@resend.dev`, unconfirmed, no
+organization or membership. Disclosed rather than left silent; it can be
+deleted at any time and holds no data.
