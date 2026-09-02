@@ -4254,3 +4254,74 @@ was not any single inference — it was continuing to reason from a probe I
 had never validated. The domain check that settled it costs one DNS
 lookup and should have been the *first* thing I did when a send failed,
 not the fourth.
+
+---
+
+## 59. Real-user SMTP test — owner attempt FAILED, recipient ruled out (2026-09-02)
+
+Configuration was **not** changed for this round (host `smtp.resend.com`,
+port `587`, username `resend`, sender `noreply@snowkap.co.in` — all left
+as the owner set them).
+
+### 59.1 What happened
+
+The owner attempted a real signup at
+`https://snowkap-cbam-production.up.railway.app/sign-up` with a
+brand-new address on a valid domain. The UI returned **"Something went
+wrong creating your account. Please try again."**
+
+### 59.2 Observed, not inferred
+
+| Channel | Result |
+|---|---|
+| `auth.users` | **3 rows — unchanged from baseline.** No user was created; GoTrue rolls back when the confirmation email fails. |
+| organizations / memberships | 2 / 2 — unchanged |
+| Resend send log | **No new entry.** Latest is still `11:51:49`, which is this session's own SMTP test. |
+| `/auth/v1/signup` direct (same endpoint the form uses, error unmasked) | **HTTP 500 `unexpected_failure` — "Error sending confirmation email"**, `error_id 01a06202-c6e2-74f3-a72d-dc4ea658f2e4` |
+
+### 59.3 The recipient explanation is now ELIMINATED
+
+§58 correctly withdrew earlier diagnoses because the `snowkaptest.dev`
+fixture was NXDOMAIN. That objection no longer applies:
+
+- The owner used a **real address on a valid domain**.
+- My unmasked probe used **`delivered@resend.dev`** — an address this
+  session had already **successfully delivered to** over the same SMTP
+  service (Resend log, `11:51:44`, `event=delivered`).
+
+Both fail identically. **The recipient is not the variable.**
+
+### 59.4 What is established
+
+- A **working credential exists**: the key in `.env` authenticates
+  against `smtp.resend.com:587` over STARTTLS, verified again at the time
+  of this failure.
+- The sender `noreply@snowkap.co.in` is on the only verified Resend
+  domain, and a message from it was delivered earlier.
+- **Nothing reaches Resend** from Supabase — no send, no bounce, no
+  rejection is recorded. The failure occurs before Resend sees anything.
+- No account is created on failure, so there is nothing to clean up and
+  no partial state.
+
+### 59.5 What is NOT established, and deliberately not guessed
+
+Why Supabase's own SMTP connection fails. Three candidate causes remain
+(stored credential differing from the working one, TLS negotiation, or
+network egress), and **this report does not choose between them**, in
+line with the standing instruction not to make further speculative SMTP
+diagnoses.
+
+**The next fact must come from the Supabase Auth log.** This session's
+MCP integration returns *"You do not have permission to perform this
+action"* for every project-level log read, so it cannot be retrieved
+here.
+
+**Required:** Supabase → **Logs → Auth**, search
+`01a06202-c6e2-74f3-a72d-dc4ea658f2e4`. That entry names the actual SMTP
+error.
+
+### 59.6 Status
+
+**SMTP: FAIL — NOT VERIFIED.** No confirmation email and no
+password-reset email has been delivered or consumed. The real-user gate
+(§46) remains open and cannot be completed until sending works.
