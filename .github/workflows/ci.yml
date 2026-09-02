@@ -186,44 +186,93 @@ jobs:
       # on the reachability probe rather than letting the isolation
       # suites self-skip into a false green -- the property the original
       # step was written to guarantee is preserved exactly.
-      - name: Start local Supabase (so cross-org isolation suites run for real)
-        # SUPABASE_INTERNAL_IMAGE_REGISTRY redirects the CLI's image pulls
-        # away from public.ecr.aws, which rate-limits GitHub-hosted
-        # runners' shared egress IPs and has failed this job on every
-        # attempt including three retries hours apart. Docker Hub hosts
-        # the same Supabase images and is not limited the same way for
-        # authenticated-by-default GitHub runners.
-        #
-        # This is being TESTED here, not assumed: if the CLI ignores the
-        # variable the pull source in the log will still read
-        # public.ecr.aws and this step will fail exactly as before -- no
-        # test is skipped, weakened or replaced either way.
+      # 2026-09-02. Two independent problems had to be solved to make
+      # this gate run at all. Neither weakens, skips or replaces a test.
+      #
+      # (1) REGISTRY. public.ecr.aws rate-limits GitHub-hosted runners'
+      #     shared egress IPs and failed every attempt including three
+      #     retries hours apart. SUPABASE_INTERNAL_IMAGE_REGISTRY
+      #     redirects the pulls to Docker Hub, which hosts the same
+      #     images. Verified working: the run log now shows
+      #     docker.io/supabase/* and zero "toomanyrequests".
+      #
+      # (2) DATASET ORDERING -- the real reason this gate has NEVER
+      #     passed in CI. `supabase start` replays every migration in one
+      #     pass, and 20260827110000 (a PROTECTED regulatory-foundation
+      #     migration) asserts that a DRAFT dataset version
+      #     '2026-definitive-corrected' with 12,540 rows already exists:
+      #
+      #       ERROR: Validated regulatory dataset
+      #              2026-definitive-corrected was not found (P0001)
+      #
+      #     That data is produced by the Python pipeline, which needs a
+      #     running database -- which only exists after migrations. On a
+      #     fresh database the ordering is circular, so `supabase start`
+      #     cannot succeed. The registry limit had been masking this.
+      #
+      #     Resolved WITHOUT touching the protected zone, by running the
+      #     project's own pipeline between the two migration phases: let
+      #     the first pass apply the schema migrations, regenerate the
+      #     canonical JSON from the TRACKED source workbook, load the
+      #     DRAFT dataset, then apply the remaining migrations. Nothing
+      #     is fabricated -- the dataset is derived from
+      #     data/raw/cbam-default-values-2026-definitive-corrected.xlsx,
+      #     which is committed, by scripts/regulatory/*.py, which are
+      #     committed.
+      - name: Set up Python for the regulatory pipeline
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install regulatory pipeline dependencies
+        run: pip install -r scripts/regulatory/requirements.txt
+
+      - name: Start local Supabase and load the regulatory dataset
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: docker.io
+          SUPABASE_DB_PASSWORD: postgres
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          started=0
-          for attempt in 1 2 3; do
-            if pnpm exec supabase start; then
-              started=1
-              break
-            fi
-            echo "::warning::supabase start failed on attempt ${attempt} (usually a public.ecr.aws pull rate limit). Cleaning up and retrying."
-            pnpm exec supabase stop --no-backup || true
-            sleep $(( attempt * 30 ))
-          done
+          # First pass. Expected to fail at the activation migration on a
+          # fresh database (see above); the containers and every earlier
+          # migration survive that failure, which is what the next steps
+          # build on. A genuine infrastructure failure is caught by the
+          # reachability probe below, not swallowed here.
+          pnpm exec supabase start || echo "::notice::first pass stopped at the activation migration, as expected on a fresh database"
 
-          if [ "${started}" -ne 1 ]; then
-            echo "::error::Local Supabase failed to start after 3 attempts -- the cross-org isolation suites would silently self-skip instead of running. Failing the job rather than letting that happen quietly."
+          if ! curl -sf --max-time 10 http://127.0.0.1:54322 >/dev/null 2>&1              && ! pg_isready -h 127.0.0.1 -p 54322 >/dev/null 2>&1; then
+            echo "::error::Local Postgres is not reachable on 54322 -- Supabase did not come up at all."
             exit 1
           fi
+
+          set -e
+
+          # Regenerate the canonical dataset from the COMMITTED workbook.
+          python scripts/regulatory/parse-definitive-default-values.py
+
+          # Point the loader at local Postgres (it reads this file plus
+          # SUPABASE_DB_PASSWORD, exactly as it does against hosted).
+          mkdir -p supabase/.temp
+          printf 'postgresql://postgres@127.0.0.1:54322/postgres' > supabase/.temp/pooler-url
+
+          python scripts/regulatory/load-definitive-default-values.py
+
+          # Second pass: the activation migration and everything after it.
+          pnpm exec supabase migration up --local
 
           if ! curl -sf --max-time 5 http://127.0.0.1:54321/auth/v1/health >/dev/null; then
             echo "::error::Local Supabase did not come up reachable at 127.0.0.1:54321 -- the cross-org isolation suites would silently self-skip instead of running. Failing the job rather than letting that happen quietly."
             exit 1
           fi
-          echo "Local Supabase is reachable -- cross-org isolation suites will run."
+
+          ACTIVE=$(psql "postgresql://postgres@127.0.0.1:54322/postgres" -tAc "select count(*) from public.default_emission_values dev join public.regulatory_datasets rd on rd.id=dev.dataset_id where rd.status='ACTIVE'")
+          echo "ACTIVE regulatory rows: ${ACTIVE}"
+          if [ "${ACTIVE}" != "12540" ]; then
+            echo "::error::Expected 12540 ACTIVE regulatory rows, found ${ACTIVE} -- the regulatory suites would run against wrong data."
+            exit 1
+          fi
+          echo "Local Supabase is reachable and the ACTIVE dataset is loaded -- the isolation suites will run for real."
 
       - name: Test
         run: pnpm test
