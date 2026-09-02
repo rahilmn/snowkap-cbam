@@ -1717,6 +1717,214 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "record_declaration_filed refuses INCOMPLETE when a member line's newest calculation was performed against a quantity that is not the line's (P14)",
+      async () => {
+        /**
+         * The forgery both the determination comparison and the
+         * reproducibility check pass by construction.
+         *
+         * calculation_results is member-insertable by design
+         * (calculation_results_insert_own_org_as_self), and its CHECK
+         * constrains the FORM of a decimal string, never its magnitude.
+         * So a member can insert a row for one of their own lines
+         * carrying the line's EXACT current determination and a smaller
+         * quantity, with an embedded figure that follows correctly from
+         * that smaller quantity.
+         *
+         * Nothing before this migration caught it:
+         *
+         *   - the determination comparison (20260829470000) passes,
+         *     because the determination genuinely IS the line's;
+         *   - reproduceCalculationResult passes, because it recomputes
+         *     from the ROW'S own frozen inputs and the row is
+         *     internally consistent -- a reproduction check can prove a
+         *     number follows from the inputs stored beside it, never
+         *     that those inputs were the line's;
+         *   - the engine is not re-run at filing time.
+         *
+         * The line declares 10 tonnes. The forged calculation claims 1.
+         * Filed, that is a tenfold understatement inside an immutable,
+         * legally meaningful snapshot with a clean audit trail behind
+         * it.
+         */
+        const shipmentId =
+          await seedShipment(
+            `DECL-ISO-FORGED-QUANTITY-${runId}`,
+            ["5"],
+            2021,
+          );
+
+        const declarationId =
+          await createDeclaration(
+            2021,
+            [shipmentId],
+            "READY",
+          );
+
+        const { data: lineRows, error: lineError } =
+          await serviceClient
+            .from("shipment_lines")
+            .select("id, net_mass_tonnes")
+            .eq("shipment_id", shipmentId);
+
+        if (lineError || !lineRows || lineRows.length !== 1) {
+          throw new Error(
+            `Failed to fetch the seeded line: ${lineError?.message}`,
+          );
+        }
+
+        const line =
+          lineRows[0] as { id: string; net_mass_tonnes: string };
+
+        // The premise, asserted rather than assumed.
+        expect(line.net_mass_tonnes).toBe(
+          "10",
+        );
+
+        // Inserted through the OWNER's own authenticated client, so the
+        // real RLS insert policy is genuinely exercised -- this is a
+        // write the product's own permissions allow, which is exactly
+        // what makes it worth gating at filing time.
+        const { error: forgeError } =
+          await clientOwnerA
+            .from("calculation_results")
+            .insert(
+              {
+                org_id: orgAId,
+                line_id: line.id,
+                shipment_id: shipmentId,
+                engine_version: "1.1.0",
+                // The forgery: one tonne, not ten.
+                quantity: "1",
+                quantity_unit: "TONNES",
+                determination: determinationFrom(
+                  recordA,
+                ),
+                steps: [],
+                // Internally consistent with the forged quantity, which
+                // is what defeats the reproduction check.
+                embedded_emissions_tco2e: "0.5",
+                calculated_by_user_id: ownerAId,
+              },
+            );
+
+        // It really is insertable. If this ever starts failing, the
+        // insert policy changed and this test's premise needs revisiting
+        // rather than the assertion being relaxed.
+        expect(forgeError).toBeNull();
+
+        const { data } =
+          await clientOwnerA.rpc(
+            "record_declaration_filed",
+            {
+              p_declaration_id: declarationId,
+              p_filed_reference: "REF-FORGED-QUANTITY",
+            },
+          );
+
+        expect(
+          (data as RpcResultRow[] | null)?.[0],
+        ).toEqual(
+          { result_status: "INCOMPLETE", result_declaration_id: null },
+        );
+
+        // A refused filing leaves no wreckage: nothing locked, nothing
+        // filed.
+        const { data: shipmentAfter } =
+          await serviceClient
+            .from("shipments")
+            .select("status")
+            .eq("id", shipmentId)
+            .single();
+
+        expect(shipmentAfter?.status).toBe(
+          "READY",
+        );
+
+        const { data: declarationAfter } =
+          await serviceClient
+            .from("declarations")
+            .select("status, filed_snapshot")
+            .eq("id", declarationId)
+            .single();
+
+        expect(declarationAfter?.status).toBe(
+          "READY",
+        );
+
+        expect(declarationAfter?.filed_snapshot).toBeNull();
+      },
+    );
+
+    it(
+      "record_declaration_filed refuses INCOMPLETE when the newest calculation claims the right number against the wrong quantity BASIS (P14)",
+      async () => {
+        // '10' tonnes and '10' MWh agree digit for digit and are not
+        // the same quantity. Comparing the number alone would accept a
+        // calculation performed against an energy basis on a mass line.
+        const shipmentId =
+          await seedShipment(
+            `DECL-ISO-FORGED-BASIS-${runId}`,
+            ["5"],
+            2017,
+          );
+
+        const declarationId =
+          await createDeclaration(
+            2017,
+            [shipmentId],
+            "READY",
+          );
+
+        const { data: lineRows } =
+          await serviceClient
+            .from("shipment_lines")
+            .select("id")
+            .eq("shipment_id", shipmentId);
+
+        const lineId =
+          (lineRows as { id: string }[] | null)?.[0]?.id;
+
+        const { error: forgeError } =
+          await clientOwnerA
+            .from("calculation_results")
+            .insert(
+              {
+                org_id: orgAId,
+                line_id: lineId,
+                shipment_id: shipmentId,
+                engine_version: "1.1.0",
+                quantity: "10",
+                quantity_unit: "MWH",
+                determination: determinationFrom(
+                  recordA,
+                ),
+                steps: [],
+                embedded_emissions_tco2e: "5",
+                calculated_by_user_id: ownerAId,
+              },
+            );
+
+        expect(forgeError).toBeNull();
+
+        const { data } =
+          await clientOwnerA.rpc(
+            "record_declaration_filed",
+            {
+              p_declaration_id: declarationId,
+              p_filed_reference: "REF-FORGED-BASIS",
+            },
+          );
+
+        expect(
+          (data as RpcResultRow[] | null)?.[0],
+        ).toEqual(
+          { result_status: "INCOMPLETE", result_declaration_id: null },
+        );
+      },
+    );
+
+    it(
       "record_declaration_filed refuses INCOMPLETE when a member line is redetermined -- a genuinely different determination -- without being recalculated afterward (P13 adversarial audit, Path A: 'Re-determine emissions' without a follow-up recalculation)",
       async () => {
         const shipmentId =

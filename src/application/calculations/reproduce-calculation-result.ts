@@ -240,8 +240,16 @@ function deepEqual(
  * P8's own contract ("reproduction proof (CI test + on-demand admin
  * check recomputing stored results from their snapshots with the
  * recorded engine_version, asserting byte-equality)"), the on-demand
- * half of that pair (a CI-side reproduction test covers the other
- * half).
+ * half of that pair.
+ *
+ * The CI half is tests/integration/calculation-reproduction.test.ts.
+ * Until 2026-09-03 this comment claimed that test existed when it did
+ * not: the only coverage was a fully mocked unit test, and
+ * tests/golden/foundation.test.ts was a seven-line stub asserting
+ * true === true. It now exists and runs against real local Postgres and
+ * the real regulatory dataset -- a line classified, determined,
+ * calculated and persisted for real, then reproduced -- alongside
+ * hand-authored engine goldens in tests/golden/.
  *
  * Verifies the fetched row's own org_id against the caller's orgId
  * before proceeding, collapsing "no such row" and "row belongs to a

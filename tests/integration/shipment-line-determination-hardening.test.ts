@@ -2753,6 +2753,307 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "ACCEPTS a genuinely-unlisted origin resolved through _Other Countries and Territorie with OTHER_COUNTRIES_FALLBACK (B2 positive arm)",
+      async () => {
+        /**
+         * The arm nobody had written.
+         *
+         * Every UNLISTED determination was rejected by v5 through v8 --
+         * the branch compared against a regulatory_country_name that
+         * UNLISTED does not carry by design, so R7 clause 1's entire
+         * persistence path was dead for four validator versions and
+         * nothing noticed, because only the NEGATIVE case
+         * (a LISTED country claiming UNLISTED) was ever tested. v9
+         * fixed it. A suite that only proves a gate closes cannot tell
+         * you the gate ever opens.
+         *
+         * The decision memo for the validator's semantics recorded this
+         * missing positive case as required. It is added here
+         * UNCONDITIONALLY, and deliberately NOT with an EU origin: the
+         * origin used is Kiribati, a genuine third country absent from
+         * this dataset's own country table. Using an EU member state
+         * would quietly pre-decide the open EU-origin scope question,
+         * which is the owner's to answer, not this test's.
+         */
+        const { count: kiribatiRows } =
+          await serviceClient
+            .from("countries")
+            .select("id", { count: "exact", head: true })
+            .eq("iso2", "KI");
+
+        // The fixture's own premise, asserted rather than assumed: if
+        // Kiribati were ever added to the dataset, this test would
+        // silently stop testing what it claims to.
+        expect(kiribatiRows).toBe(
+          0,
+        );
+
+        // The suite's shared Other-Countries fixture is picked without
+        // regard to code length, and shipment_lines constrains cn_code
+        // to exactly 8 or 10 digits. Fetch one that fits rather than
+        // relying on which row happened to come back first.
+        const { data: eightDigitRows, error: eightDigitError } =
+          await serviceClient
+            .from("default_emission_values")
+            .select(
+              "dataset_id, source_sheet, source_row, source_trade_code, total_value, total_status, direct_value, direct_status, indirect_value, indirect_status, emission_unit, production_route_id, countries!inner(name, iso2), regulatory_datasets!inner(version, status)",
+            )
+            .eq("total_status", "AVAILABLE")
+            .eq("countries.name", "_Other Countries and Territorie")
+            .eq("regulatory_datasets.status", "ACTIVE")
+            .is("production_route_id", null)
+            .limit(200);
+
+        if (eightDigitError || !eightDigitRows) {
+          throw new Error(
+            `Failed to fetch Other-Countries candidates: ${eightDigitError?.message}`,
+          );
+        }
+
+        const eightDigitRow =
+          (eightDigitRows as unknown as { source_trade_code: string }[]).find(
+            (candidate) =>
+              /^\d{8}$/.test(candidate.source_trade_code.replace(/\s+/g, "")),
+          );
+
+        if (!eightDigitRow) {
+          throw new Error(
+            "No CN8-shaped Other Countries and Territories record in the ACTIVE dataset -- fixture assumption broken.",
+          );
+        }
+
+        const unlistedRow =
+          eightDigitRow as unknown as {
+            dataset_id: string;
+            source_sheet: string;
+            source_row: number;
+            source_trade_code: string;
+            emission_unit: string;
+            direct_value: string;
+            direct_status: string;
+            indirect_value: string;
+            indirect_status: string;
+            total_value: string;
+            total_status: string;
+            countries: { name: string };
+            regulatory_datasets: { version: string };
+          };
+
+        const unlistedRecord: RealRecord =
+          {
+            dataset_id: unlistedRow.dataset_id,
+            dataset_version: unlistedRow.regulatory_datasets.version,
+            source_sheet: unlistedRow.source_sheet,
+            source_row: unlistedRow.source_row,
+            source_trade_code: unlistedRow.source_trade_code,
+            origin_country_name: unlistedRow.countries.name,
+            origin_country_iso2: "",
+            source_production_route_code: null,
+            emission_unit: unlistedRow.emission_unit,
+            direct_value: unlistedRow.direct_value,
+            direct_status: unlistedRow.direct_status,
+            indirect_value: unlistedRow.indirect_value,
+            indirect_status: unlistedRow.indirect_status,
+            total_value: unlistedRow.total_value,
+            total_status: unlistedRow.total_status,
+          };
+
+        const determination =
+          {
+            method: "DEFAULT",
+            resolution: {
+              dataset_id: unlistedRecord.dataset_id,
+              dataset_version: unlistedRecord.dataset_version,
+              resolved_at: "2026-09-03T00:00:00.000Z",
+              reason: "OTHER_COUNTRIES_FALLBACK",
+              // No regulatory_country_name: there is no dataset
+              // geography to name, which is the whole point of UNLISTED.
+              country_mapping: { status: "UNLISTED" },
+              record_identity: {
+                source_sheet: unlistedRecord.source_sheet,
+                source_row: unlistedRecord.source_row,
+                source_trade_code: unlistedRecord.source_trade_code,
+                origin_country_name: unlistedRecord.origin_country_name,
+                source_production_route_code:
+                  unlistedRecord.source_production_route_code,
+              },
+              values: {
+                direct: {
+                  value: unlistedRecord.direct_value,
+                  status: unlistedRecord.direct_status,
+                  raw_source_value: unlistedRecord.direct_value,
+                },
+                indirect: {
+                  value: unlistedRecord.indirect_value,
+                  status: unlistedRecord.indirect_status,
+                  raw_source_value: unlistedRecord.indirect_value,
+                },
+                total: {
+                  value: unlistedRecord.total_value,
+                  status: unlistedRecord.total_status,
+                  raw_source_value: unlistedRecord.total_value,
+                },
+              },
+              emission_unit: unlistedRecord.emission_unit,
+              trace: [
+                {
+                  step: "COUNTRY_UNLISTED",
+                  outcome: "Origin has no row in the dataset country table",
+                },
+                {
+                  step: "COUNTRY_FALLBACK",
+                  outcome: "Resolved via _Other Countries and Territorie",
+                },
+              ],
+            },
+          };
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .insert(
+              {
+                shipment_id: shipmentId,
+                org_id: importerOrgId,
+                line_number: Math.floor(Math.random() * 1_000_000),
+                cn_code:
+                  unlistedRecord.source_trade_code.replace(/\s+/g, ""),
+                cn_code_level: "CN8",
+                origin_country: "KI",
+                net_mass_tonnes: "10",
+                emission_determination: determination,
+              },
+            );
+
+        expect(error).toBeNull();
+      },
+    );
+
+    it(
+      "REJECTS an OTHER_COUNTRIES_FALLBACK claim when the origin has a usable value under a DIFFERENT production route (v10)",
+      async () => {
+        /**
+         * The v10 under-report class, pinned by a named test.
+         *
+         * v8 introduced the R7 clause 2 precondition -- a fallback is
+         * only legitimate when the origin has no usable value of its
+         * own -- but matched the origin's records on the EXACT declared
+         * route indicator. So declaring route (A) for a country whose
+         * only usable record sits under route (C) made the precondition
+         * find nothing, and the cheaper Other-Countries default was
+         * accepted. 653 (country, code, route) combinations understate
+         * this way, worst case -54.3%. v10 widened the precondition to
+         * ANY route.
+         *
+         * Indonesia / 7206 10 00 is a live example: 8.210 tCO2e/t under
+         * route (C), against the Other-Countries default.
+         */
+        const { data: routeRows, error: routeError } =
+          await serviceClient
+            .from("default_emission_values")
+            .select(
+              "source_trade_code, total_value, countries!inner(iso2, name), production_routes!inner(source_route_indicator), regulatory_datasets!inner(status)",
+            )
+            .eq("total_status", "AVAILABLE")
+            .eq("countries.iso2", "ID")
+            .eq("regulatory_datasets.status", "ACTIVE")
+            .limit(1);
+
+        if (routeError || !routeRows || routeRows.length === 0) {
+          throw new Error(
+            `No route-specific Indonesian record found in the ACTIVE dataset -- fixture assumption broken: ${routeError?.message}`,
+          );
+        }
+
+        const row =
+          routeRows[0] as unknown as {
+            source_trade_code: string;
+            production_routes: { source_route_indicator: string };
+          };
+
+        const realIndicator =
+          row.production_routes.source_route_indicator;
+
+        // A route the origin's own usable record does NOT belong to.
+        // Under v8/v9 this made the precondition blind.
+        const declaredIndicator =
+          realIndicator.includes("(A)") ? "(B)" : "(A)";
+
+        const forged =
+          otherCountriesFallbackDeterminationFrom(
+            otherTerritoriesRecord,
+            "Indonesia",
+          );
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .insert(
+              {
+                shipment_id: shipmentId,
+                org_id: importerOrgId,
+                line_number: Math.floor(Math.random() * 1_000_000),
+                cn_code: row.source_trade_code.replace(/\s+/g, ""),
+                cn_code_level: "CN8",
+                origin_country: "ID",
+                production_route_indicator: declaredIndicator,
+                net_mass_tonnes: "10",
+                emission_determination: forged,
+              },
+            );
+
+        expect(error).not.toBeNull();
+      },
+    );
+
+    it(
+      "keeps the two \"is this country listed?\" predicates from being able to disagree on the live dataset",
+      async () => {
+        /**
+         * The question "is this origin listed?" is asked in two places
+         * with two different predicates:
+         *
+         *   - the country mapper asks for iso2 AND country_type =
+         *     'COUNTRY' AND active = true;
+         *   - this validator's UNLISTED arm asks for iso2 alone.
+         *
+         * A row with an iso2 that is inactive, or typed as something
+         * other than COUNTRY, would make the application say UNLISTED
+         * and the database say LISTED -- and the user would see the
+         * validator's generic "locked or void" message for a
+         * determination that is in fact correct.
+         *
+         * Rather than change either predicate (both are load-bearing
+         * and each is right for its own job), this asserts the property
+         * that keeps them equivalent on the data that actually exists.
+         * If a future dataset breaks it, this fails and names the
+         * coupling instead of leaving it to be rediscovered from a
+         * confusing error message.
+         */
+        const { count: withIso2 } =
+          await serviceClient
+            .from("countries")
+            .select("id", { count: "exact", head: true })
+            .not("iso2", "is", null);
+
+        expect(withIso2).toBeGreaterThan(
+          0,
+        );
+
+        const { count: divergent } =
+          await serviceClient
+            .from("countries")
+            .select("id", { count: "exact", head: true })
+            .not("iso2", "is", null)
+            .or("active.is.false,country_type.neq.COUNTRY");
+
+        expect(divergent).toBe(
+          0,
+        );
+      },
+    );
+
+    it(
       "REJECTS a LISTED country claiming country_mapping UNLISTED -- a check that did not exist before v9 (B2)",
       async () => {
         const forged =

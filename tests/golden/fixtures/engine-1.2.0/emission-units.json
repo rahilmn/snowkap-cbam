@@ -1,0 +1,102 @@
+[
+  {
+    "name": "kgCO2e/t is refused, not silently treated as tCO2e/t",
+    "note": "The 1000x overstatement class, live-reproduced in the P13 adversarial audit. A genuinely standard industrial intensity unit passed the old denominator-only check and produced a figure a thousand times too large.",
+    "emission_unit": "kgCO2e/t",
+    "quantity_basis": "TONNES",
+    "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "tCO2e/kt is refused",
+    "note": "Same class, the other direction: a kilotonne denominator would understate by a thousand.",
+    "emission_unit": "tCO2e/kt",
+    "quantity_basis": "TONNES",
+    "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "MtCO2e/t is refused",
+    "note": "Megatonne numerator.",
+    "emission_unit": "MtCO2e/t",
+    "quantity_basis": "TONNES",
+    "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "an energy denominator is refused on a mass line",
+    "note": "tCO2e/MWh cannot be applied to a quantity in tonnes.",
+    "emission_unit": "tCO2e/MWh",
+    "quantity_basis": "TONNES",
+    "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "the underscore spelling of an energy denominator is refused on a mass line",
+    "emission_unit": "TCO2E_PER_MWH",
+    "quantity_basis": "TONNES",
+    "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "prose is refused",
+    "note": "\"tco2e per tonne\" is not one of the two separator conventions this codebase uses.",
+    "emission_unit": "tco2e per tonne",
+    "quantity_basis": "TONNES",
+    "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "a time-denominated denominator is refused",
+    "note": "tCO2e/TJ was a false positive of the pre-P13 substring check.",
+    "emission_unit": "tCO2e/TJ",
+    "quantity_basis": "TONNES",
+    "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "trailing whitespace does not change the meaning of a unit",
+    "note": "Producer-entered free text. \"tCO2e/t \" is the same unit.",
+    "emission_unit": "tCO2e/t ",
+    "quantity_basis": "TONNES",
+    "expected_status": "COMPUTED"
+  },
+  {
+    "name": "spaces around the slash do not change the meaning of a unit",
+    "emission_unit": " tCO2e / t ",
+    "quantity_basis": "TONNES",
+    "expected_status": "COMPUTED"
+  },
+  {
+    "name": "the regulatory dataset's own spelling computes",
+    "emission_unit": "TCO2E_PER_TONNE",
+    "quantity_basis": "TONNES",
+    "expected_status": "COMPUTED"
+  },
+  {
+    "name": "RECORDED DEFECT: tCO2e/t/yr currently computes as if it were per-tonne",
+    "note": "The denominator test /T(?![A-Z0-9]) admits any non-alphanumeric suffix, so a PER-YEAR intensity is accepted as a PER-TONNE one and the resulting figure is wrong by however many years the record covers. This fixture pins TODAY'S behaviour so it cannot change unnoticed; it is written down as a follow-up defect, and this expectation must be flipped to UNIT_UNSUPPORTED deliberately when it is fixed. Not silently expected to be correct.",
+    "emission_unit": "tCO2e/t/yr",
+    "quantity_basis": "TONNES",
+    "expected_status": "COMPUTED"
+  },
+  {
+    "name": "RECORDED DEFECT: tCO2e/t-year currently computes as if it were per-tonne",
+    "note": "Same defect, hyphenated spelling. See the fixture above.",
+    "emission_unit": "tCO2e/t-year",
+    "quantity_basis": "TONNES",
+    "expected_status": "COMPUTED"
+  },
+  {
+    "name": "OPEN OWNER QUESTION: tCO2/t computes, treating CO2 as CO2e",
+    "note": "A deliberate written decision in the engine, not an oversight -- but CO2 and CO2e are not the same quantity, and the difference is material for aluminium PFCs and fertiliser N2O. Pinned here so the decision is visible rather than buried, and recorded as an open question for the owner.",
+    "emission_unit": "tCO2/t",
+    "quantity_basis": "TONNES",
+    "expected_status": "COMPUTED"
+  },
+  {
+    "name": "an energy unit computes on an energy line",
+    "emission_unit": "tCO2e/MWh",
+    "quantity_basis": "MWH",
+    "expected_status": "COMPUTED"
+  },
+  {
+    "name": "a mass unit is refused on an energy line",
+    "emission_unit": "tCO2e/t",
+    "quantity_basis": "MWH",
+    "expected_status": "UNIT_UNSUPPORTED"
+  }
+]

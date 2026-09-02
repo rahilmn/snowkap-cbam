@@ -1,0 +1,244 @@
+[
+  {
+    "name": "RULE-EE-001: China cement, exact CN8 match, 2 tonnes",
+    "note": "1.390 tCO2e/t x 2 t. By hand: 1.390 x 2 = 2.780; toFixed() with no argument drops the trailing zero, so the byte-exact DecimalString is \"2.78\". This is the exact shape and value production's SNOWKAP IMP-TEST-001 carries.",
+    "input": {
+      "net_mass_tonnes": "2",
+      "quantity_mwh": null,
+      "good_sector": "CEMENT",
+      "emission_determination": {
+        "method": "DEFAULT",
+        "resolution": {
+          "emission_unit": "TCO2E_PER_TONNE",
+          "values": {
+            "total": { "status": "AVAILABLE", "value": "1.390" }
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.2.0",
+      "embedded_emissions_tco2e": "2.78",
+      "steps": [
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-001",
+          "formula": "line_embedded_emissions = quantity * resolution.values.total.value",
+          "inputs": {
+            "quantity": "2",
+            "specific_embedded_emissions": "1.390"
+          },
+          "value": "2.78"
+        }
+      ]
+    }
+  },
+  {
+    "name": "RULE-EE-001: unlisted origin resolved through the Other-Countries fallback, 10 tonnes",
+    "note": "0.280 tCO2e/t x 10 t. By hand: 0.280 x 10 = 2.800 -> \"2.8\". The 0.280 is the _Other Countries and Territorie row (source_row 4) for CN 2507 00 80 80, the same row production's P13 SHIP-PROD-R7-001 resolved through under R7 clause 1.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": "CEMENT",
+      "emission_determination": {
+        "method": "DEFAULT",
+        "resolution": {
+          "emission_unit": "TCO2E_PER_TONNE",
+          "values": {
+            "total": { "status": "AVAILABLE", "value": "0.280" }
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.2.0",
+      "embedded_emissions_tco2e": "2.8",
+      "steps": [
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-001",
+          "formula": "line_embedded_emissions = quantity * resolution.values.total.value",
+          "inputs": {
+            "quantity": "10",
+            "specific_embedded_emissions": "0.280"
+          },
+          "value": "2.8"
+        }
+      ]
+    }
+  },
+  {
+    "name": "RULE-EE-001: a fractional quantity keeps full precision, never a rounded figure",
+    "note": "1.390 x 0.333 = 0.462870 by hand -> \"0.46287\". RULE-EE-006 (rounding) is UNRESOLVED_ESCALATED, so the engine rounds NOWHERE: any appearance of a 2- or 3-decimal result here would mean rounding had been silently introduced.",
+    "input": {
+      "net_mass_tonnes": "0.333",
+      "quantity_mwh": null,
+      "good_sector": null,
+      "emission_determination": {
+        "method": "DEFAULT",
+        "resolution": {
+          "emission_unit": "TCO2E_PER_TONNE",
+          "values": {
+            "total": { "status": "AVAILABLE", "value": "1.390" }
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.2.0",
+      "embedded_emissions_tco2e": "0.46287",
+      "steps": [
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-001",
+          "formula": "line_embedded_emissions = quantity * resolution.values.total.value",
+          "inputs": {
+            "quantity": "0.333",
+            "specific_embedded_emissions": "1.390"
+          },
+          "value": "0.46287"
+        }
+      ]
+    }
+  },
+  {
+    "name": "RULE-EE-001: an UNAVAILABLE total is never turned into a number",
+    "note": "The single most important thing this engine must not do. UNAVAILABLE means the dataset holds no value; it does not mean zero.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": null,
+      "emission_determination": {
+        "method": "DEFAULT",
+        "resolution": {
+          "emission_unit": "TCO2E_PER_TONNE",
+          "values": {
+            "total": { "status": "UNAVAILABLE", "value": null }
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "VALUE_UNAVAILABLE",
+      "engine_version": "1.2.0"
+    }
+  },
+  {
+    "name": "RULE-EE-001: a REFERENCE_REQUIRED total is never turned into a number",
+    "note": "Same rule, different unavailable state.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": null,
+      "emission_determination": {
+        "method": "DEFAULT",
+        "resolution": {
+          "emission_unit": "TCO2E_PER_TONNE",
+          "values": {
+            "total": { "status": "REFERENCE_REQUIRED", "value": null }
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "VALUE_UNAVAILABLE",
+      "engine_version": "1.2.0"
+    }
+  },
+  {
+    "name": "RULE-EE-001: a NOT_APPLICABLE total is never turned into a number (synthetic)",
+    "note": "SYNTHETIC. The ACTIVE 2026-definitive-corrected dataset holds zero NOT_APPLICABLE totals, so this exercises the engine branch rather than a shape the data currently produces.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": null,
+      "emission_determination": {
+        "method": "DEFAULT",
+        "resolution": {
+          "emission_unit": "TCO2E_PER_TONNE",
+          "values": {
+            "total": { "status": "NOT_APPLICABLE", "value": null }
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "VALUE_UNAVAILABLE",
+      "engine_version": "1.2.0"
+    }
+  },
+  {
+    "name": "RULE-EE-001: an electricity-denominated value on an electricity line computes (synthetic)",
+    "note": "SYNTHETIC unit. The ACTIVE dataset is 12,540 of 12,540 TCO2E_PER_TONNE, so no row spells TCO2_PER_MWH today. By hand: 0.5 x 100 = 50 -> \"50\". Note the numerator is TCO2, not TCO2E -- accepted by deliberate decision, see the directory README.",
+    "input": {
+      "net_mass_tonnes": null,
+      "quantity_mwh": "100",
+      "good_sector": null,
+      "emission_determination": {
+        "method": "DEFAULT",
+        "resolution": {
+          "emission_unit": "TCO2_PER_MWH",
+          "values": {
+            "total": { "status": "AVAILABLE", "value": "0.5" }
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "COMPUTED",
+      "engine_version": "1.2.0",
+      "embedded_emissions_tco2e": "50",
+      "steps": [
+        {
+          "step": "LINE_EMBEDDED_EMISSIONS",
+          "rule_ref": "RULE-EE-001",
+          "formula": "line_embedded_emissions = quantity * resolution.values.total.value",
+          "inputs": {
+            "quantity": "100",
+            "specific_embedded_emissions": "0.5"
+          },
+          "value": "50"
+        }
+      ]
+    }
+  },
+  {
+    "name": "RULE-EE-001: a per-tonne value on an electricity line is refused",
+    "note": "The quantity basis is MWh; a tonne-denominated intensity cannot be applied to it. Refused, never coerced.",
+    "input": {
+      "net_mass_tonnes": null,
+      "quantity_mwh": "100",
+      "good_sector": null,
+      "emission_determination": {
+        "method": "DEFAULT",
+        "resolution": {
+          "emission_unit": "TCO2E_PER_TONNE",
+          "values": {
+            "total": { "status": "AVAILABLE", "value": "0.5" }
+          }
+        }
+      }
+    },
+    "expected": {
+      "status": "UNIT_UNSUPPORTED",
+      "engine_version": "1.2.0"
+    }
+  },
+  {
+    "name": "no determination at all yields no number",
+    "note": "INPUT_UNRESOLVED, not zero. A line nobody has determined has no emissions figure, which is not the same as an emissions figure of nothing.",
+    "input": {
+      "net_mass_tonnes": "10",
+      "quantity_mwh": null,
+      "good_sector": null,
+      "emission_determination": null
+    },
+    "expected": {
+      "status": "INPUT_UNRESOLVED",
+      "engine_version": "1.2.0"
+    }
+  }
+]
