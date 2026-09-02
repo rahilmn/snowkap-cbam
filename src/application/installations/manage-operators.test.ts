@@ -433,8 +433,20 @@ describe(
       "capability gate",
       () => {
         it(
-          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          "rejects an org holding NEITHER capability, before touching the database",
           async () => {
+            // 2026-09-03 (owner decision D2). This case previously
+            // passed IMPORTER_DECLARANT and expected a refusal, because
+            // removing was gated on PRODUCER_OPERATOR alone. An importer
+            // can now record an external operator's details, so it must
+            // be able to remove its OWN record too -- gating removal on
+            // the producer capability would have locked an importer out
+            // of a row it had just created.
+            //
+            // The assertion is retargeted, not weakened: an org holding
+            // no relevant capability is still refused before any read,
+            // and RLS still scopes every removal to the caller's own
+            // organization regardless.
             const supabase =
               {
                 from: () => {
@@ -447,12 +459,30 @@ describe(
             const result =
               await removeOperator(
                 supabase,
-                memberContext(["IMPORTER_DECLARANT"]),
+                memberContext([]),
                 "operator-1" as never,
               );
 
             expect(result).toEqual(
               { status: "REJECTED", reason: "CAPABILITY_NOT_HELD" },
+            );
+          },
+        );
+
+        it(
+          "allows an importer / declarant org to remove its own importer-entered record (D2)",
+          async () => {
+            const result =
+              await removeOperator(
+                mockSupabase(
+                  {},
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
+                "operator-1" as never,
+              );
+
+            expect(result.status).not.toBe(
+              "REJECTED",
             );
           },
         );

@@ -50,7 +50,7 @@ test.describe(
     );
 
     test(
-      "all nine importer nav items are present in the primary sidebar (desktop)",
+      "all ten importer nav items are present in the primary sidebar (desktop)",
       async ({
         page,
         isMobile,
@@ -71,13 +71,14 @@ test.describe(
           ),
         ).toBeVisible();
 
-        // All nine importer nav items are present (docs/plans/MASTER_PLAN.md §7).
+        // All ten importer nav items are present (docs/plans/MASTER_PLAN.md §7;
+        // the tenth arrived with owner decision D2).
         // Items with a real route (components/shell/sidebar.tsx's
         // IMPORTER_NAV `href`) render as a <Link> (role "link");
         // not-yet-built items with no href render as a disabled
         // placeholder <button> (role "button") -- matching each item to
         // its actual rendered role here, rather than asserting "button"
-        // for all nine, is what makes this test describe reality.
+        // for all of them, is what makes this test describe reality.
         for (
           const { label, role } of [
             { label: "Dashboard", role: "link" as const },
@@ -85,7 +86,12 @@ test.describe(
             { label: "Emissions", role: "link" as const },
             { label: "Calculations", role: "button" as const },
             { label: "Suppliers", role: "link" as const },
-            { label: "Installations", role: "button" as const },
+            // 2026-09-03 (owner decision D2): "Installations" was a
+            // disabled placeholder because an importer genuinely had
+            // nowhere to record the operators behind its imports. It
+            // now has two real destinations, and they are links.
+            { label: "External operators", role: "link" as const },
+            { label: "External emissions", role: "link" as const },
             { label: "Audit", role: "link" as const },
             { label: "Reports", role: "link" as const },
             { label: "Declarations", role: "link" as const },

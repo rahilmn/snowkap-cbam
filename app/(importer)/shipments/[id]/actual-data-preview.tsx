@@ -108,16 +108,36 @@ export function ActualDataPreview(
         </dt>
 
         <dd className="text-[var(--text-primary)]">
+          {/*
+            * 2026-09-03 (owner decision D2). Two different questions,
+            * and conflating them was the risk D2 had to avoid.
+            *
+            * `provenance` is whose data this is relative to the viewer
+            * -- shared with me, or my own. `record_provenance` is who
+            * stands behind the numbers -- the operator that runs the
+            * installation, or an importer transcribing what an external
+            * operator supplied. An importer's own transcription is
+            * "your organization's own data" on the first axis and very
+            * much not operator-attested on the second.
+            */}
           {option.provenance === "SHARED"
             ? `Shared by ${option.grantor_organization_name}`
-            : "Your organization's own data"}
+            : option.record_provenance === "IMPORTER_ENTERED"
+              ? "External operator data, entered by your organization"
+              : "Your organization's own data"}
         </dd>
       </dl>
 
-      <div>
+      <div className="flex flex-wrap gap-1.5">
         <Badge tone="success">
           Verified
         </Badge>
+
+        {option.record_provenance === "IMPORTER_ENTERED" ? (
+          <Badge tone="neutral">
+            Entered by importer
+          </Badge>
+        ) : null}
       </div>
     </div>
   );

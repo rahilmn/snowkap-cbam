@@ -36,12 +36,25 @@ const memberContext =
     capabilities: ["PRODUCER_OPERATOR"],
   } as never;
 
+// 2026-09-03 (owner decision D2). These two used to hold
+// IMPORTER_DECLARANT, back when "no capability" and "not a producer"
+// were the same thing here.
+//
+// They are not any more. An importer records emissions data for the
+// external operators it has entered itself -- that is the workflow D2
+// enables -- so an importer context is now a POSITIVE case, covered
+// separately below. "No capability" therefore has to mean exactly that:
+// an organization holding neither.
+//
+// The assertions these feed are retargeted, not relaxed. Every service
+// still refuses before touching the database, and still proves the
+// caller's org owns the installation before writing.
 const memberNoCapabilityContext =
   {
     org_id: "org-1",
     user_id: "member-1",
     role: "MEMBER",
-    capabilities: ["IMPORTER_DECLARANT"],
+    capabilities: [],
   } as never;
 
 const adminNoCapabilityContext =
@@ -49,6 +62,14 @@ const adminNoCapabilityContext =
     org_id: "org-1",
     user_id: "admin-1",
     role: "ADMIN",
+    capabilities: [],
+  } as never;
+
+const memberImporterContext =
+  {
+    org_id: "org-1",
+    user_id: "member-1",
+    role: "MEMBER",
     capabilities: ["IMPORTER_DECLARANT"],
   } as never;
 
@@ -512,7 +533,50 @@ describe(
       "capability gate",
       () => {
         it(
-          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          "lets an importer / declarant org record emissions data for an installation it entered itself (D2)",
+          async () => {
+            /**
+             * 2026-09-03 -- owner decision D2, and the case that made
+             * it necessary.
+             *
+             * Before D2 this returned CAPABILITY_NOT_HELD. An importer
+             * whose supplier was not on Snowkap could not record that
+             * supplier's emissions information at all, which made the
+             * whole actual-emissions path conditional on a third
+             * country operator deciding to sign up.
+             *
+             * Widening the gate does NOT widen reach: this service
+             * still proves the caller's active org owns the
+             * installation before writing, RLS still scopes the write
+             * to that org, and the database's own provenance trigger
+             * (20260903120000) means an importer's installations can
+             * only ever be IMPORTER_ENTERED. The importer gains the
+             * ability to record data against installations it recorded,
+             * and nothing else.
+             */
+            const result =
+              await recordEmissionData(
+                makeMockSupabase(
+                  {},
+                ),
+                memberImporterContext,
+                validInput,
+              );
+
+            // The precise claim: the CAPABILITY gate no longer stops an
+            // importer. With an empty mock the ownership check refuses
+            // for its own reason, which is exactly right and is the
+            // wall that keeps this widening from widening reach.
+            expect(
+              result.status === "REJECTED" ? result.reason : null,
+            ).not.toBe(
+              "CAPABILITY_NOT_HELD",
+            );
+          },
+        );
+
+        it(
+          "rejects an org holding NEITHER capability with CAPABILITY_NOT_HELD, before touching the database",
           async () => {
             const recorder: Recorder =
               { fromCalls: [], ops: [] };
@@ -661,7 +725,7 @@ describe(
       "capability gate",
       () => {
         it(
-          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          "rejects an org holding NEITHER capability with CAPABILITY_NOT_HELD, before touching the database",
           async () => {
             const recorder: Recorder =
               { fromCalls: [], ops: [] };
@@ -800,7 +864,7 @@ describe(
     );
 
     it(
-      "rejects CAPABILITY_NOT_HELD for an ADMIN whose org lacks PRODUCER_OPERATOR, without touching the database",
+      "rejects CAPABILITY_NOT_HELD for an ADMIN whose org holds neither capability, without touching the database",
       async () => {
         const recorder: Recorder =
           { fromCalls: [], ops: [] };
@@ -958,7 +1022,7 @@ describe(
     );
 
     it(
-      "rejects CAPABILITY_NOT_HELD for an ADMIN whose org lacks PRODUCER_OPERATOR, without touching the database",
+      "rejects CAPABILITY_NOT_HELD for an ADMIN whose org holds neither capability, without touching the database",
       async () => {
         const recorder: Recorder =
           { fromCalls: [], ops: [] };
@@ -1239,7 +1303,7 @@ describe(
       "capability gate",
       () => {
         it(
-          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          "rejects an org holding NEITHER capability with CAPABILITY_NOT_HELD, before touching the database",
           async () => {
             const recorder: Recorder =
               { fromCalls: [], ops: [] };
@@ -1339,7 +1403,7 @@ describe(
       "capability gate",
       () => {
         it(
-          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          "rejects an org holding NEITHER capability with CAPABILITY_NOT_HELD, before touching the database",
           async () => {
             const recorder: Recorder =
               { fromCalls: [], ops: [] };

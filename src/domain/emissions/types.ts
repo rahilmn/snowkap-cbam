@@ -7,6 +7,10 @@ import type {
 } from "../shared/ids";
 
 import type {
+  InstallationRecordProvenance,
+} from "../installations/types";
+
+import type {
   IsoTimestamp,
 } from "../shared/reporting-period";
 
@@ -125,6 +129,32 @@ export interface ActualEmissionSnapshot {
   // when the consuming line belongs to the same org that owns the
   // installation.
   sharing_grant_id: SharingGrantId | null;
+
+  /**
+   * 2026-09-03 (owner decision D2). WHERE these numbers came from,
+   * frozen alongside them.
+   *
+   * OPERATOR_PROVIDED: the operator that runs the installation entered
+   * this data themselves. IMPORTER_ENTERED: an importer transcribed
+   * emissions information supplied by an external operator who does not
+   * use Snowkap. Those are materially different claims about the same
+   * figures, and a declarant relying on either has to be able to tell
+   * which one they hold.
+   *
+   * Frozen rather than looked up, for the same reason every other field
+   * here is: the installation's provenance is immutable today, but a
+   * calculation's explanation must not depend on a live read that could
+   * fail, be revoked, or be answered differently later.
+   *
+   * Validated in the database against the installation's own provenance
+   * (migration 20260903120000) -- without that it would be a decorative
+   * field a raw PostgREST write could set to anything.
+   *
+   * OPTIONAL because determinations frozen before D2 existed carry no
+   * such key. Absent means "frozen before this field existed", never
+   * "unknown provenance": every write since D2 sets it.
+   */
+  record_provenance?: InstallationRecordProvenance;
 }
 
 export type EmissionDetermination =

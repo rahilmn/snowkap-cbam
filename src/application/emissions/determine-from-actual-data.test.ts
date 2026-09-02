@@ -130,6 +130,21 @@ function makeMockSupabase(
       tables[table];
 
     if (!entry) {
+      // 2026-09-03 (owner decision D2). A determination now freezes the
+      // installation's provenance into its snapshot, so every path
+      // reads `installations`. Defaulted to a normal OPERATOR_PROVIDED
+      // row because that is the world every pre-existing fixture in
+      // this file describes -- an installation that exists behind a
+      // readable emission_data row. A test that needs the opposite
+      // passes `installations` explicitly, and one does: the
+      // data-integrity case below.
+      if (table === "installations") {
+        return {
+          data: { provenance: "OPERATOR_PROVIDED" },
+          error: null,
+        };
+      }
+
       return { data: null, error: null };
     }
 
@@ -263,6 +278,11 @@ describe(
             },
             evidence_file_ids: ["evidence-1"],
             sharing_grant_id: null,
+            // 2026-09-03 (owner decision D2): the snapshot now says
+            // where its numbers came from, frozen alongside them rather
+            // than left to a live lookup that could be answered
+            // differently later.
+            record_provenance: "OPERATOR_PROVIDED",
           },
         );
       },

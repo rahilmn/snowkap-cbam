@@ -213,6 +213,12 @@ function actualDeterminationFrom(
       verification: { status: record.verification_status, verifier_user_id: record.verifier_user_id },
       evidence_file_ids: record.evidence_file_ids,
       sharing_grant_id: sharingGrantId,
+      // 2026-09-03 (owner decision D2). The snapshot claims a
+      // provenance, and the validator checks that claim against the
+      // installation's own -- otherwise the field would be decorative
+      // and a raw PostgREST write could set it to anything. This
+      // suite's installations are seeded OPERATOR_PROVIDED.
+      record_provenance: "OPERATOR_PROVIDED",
       emission_unit: record.emission_unit,
       values: { direct_specific: record.direct_specific, indirect_specific: record.indirect_specific },
     },

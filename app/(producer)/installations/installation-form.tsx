@@ -37,11 +37,25 @@ export interface OperatorOption {
   name: string;
 }
 
+/**
+ * 2026-09-03 (owner decision D2). The submit action is injectable.
+ *
+ * This form is reused verbatim by the importer's external-operator
+ * registry, which records the SAME shape of record with a different
+ * provenance -- IMPORTER_ENTERED rather than OPERATOR_PROVIDED.
+ * Duplicating the form to change one call would have created exactly
+ * the second parallel model D2 said not to build, and the two copies
+ * would have drifted the first time a field was added.
+ *
+ * Defaulted so every existing producer-side call site is unchanged.
+ */
 export function InstallationForm(
   {
     operators,
+    action = createInstallationAction,
   }: {
     operators: OperatorOption[];
+    action?: typeof createInstallationAction;
   },
 ) {
   const [
@@ -50,7 +64,7 @@ export function InstallationForm(
     pending,
   ] =
     useActionState(
-      createInstallationAction,
+      action,
       initialInstallationsScreenActionState,
     );
 

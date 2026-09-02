@@ -56,7 +56,14 @@ export const IMPORTER_NAV: NavItem[] = [
   { label: "Emissions", icon: BarChart3, href: "/emissions" },
   { label: "Calculations", icon: Calculator },
   { label: "Suppliers", icon: Truck, href: "/suppliers" },
-  { label: "Installations", icon: Factory },
+  // 2026-09-03 (owner decision D2). "Installations" was a disabled
+  // placeholder with the tooltip "Installations is not available yet",
+  // because an importer genuinely had nowhere to record the operators
+  // and installations behind its imports. It does now, and the label
+  // says what the screen actually is: these are EXTERNAL operators --
+  // ones that do not use Snowkap -- not the importer's own.
+  { label: "External operators", icon: Factory, href: "/external-operators" },
+  { label: "External emissions", icon: ClipboardCheck, href: "/external-emissions" },
   { label: "Audit", icon: ScrollText, href: "/audit" },
   { label: "Reports", icon: FileStack, href: "/reports" },
   { label: "Declarations", icon: FileCheck2, href: "/declarations" },

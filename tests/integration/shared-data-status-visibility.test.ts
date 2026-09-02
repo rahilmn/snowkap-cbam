@@ -812,13 +812,22 @@ describe.skipIf(!localSupabaseReachable)(
         // their own throwaway operator + installation, then names the
         // real producerOrgId as grantee on a grant they issue -- no
         // action from producerOrgId required or possible to prevent it.
+        //
+        // 2026-09-03 (owner decision D2): the stranger org holds
+        // IMPORTER_DECLARANT, so its own records are IMPORTER_ENTERED --
+        // the database now refuses an importer claiming
+        // OPERATOR_PROVIDED (app.enforce_record_provenance_capability),
+        // and this fixture was quietly describing a state that cannot
+        // exist. Switched to the provenance this org can genuinely
+        // write, which also makes the test stronger: it now proves the
+        // WRITE SURFACE D2 OPENED does not create a leak either.
         const { data: strangerOperator, error: strangerOperatorError } =
           await clientStrangerOwner
             .from("operators")
             .insert(
               {
                 org_id: strangerOrgId,
-                provenance: "OPERATOR_PROVIDED",
+                provenance: "IMPORTER_ENTERED",
                 name: `Sham Grant Operator ${runId}`,
                 country: "DE",
               },
@@ -839,7 +848,7 @@ describe.skipIf(!localSupabaseReachable)(
               {
                 operator_id: strangerOperator.id,
                 org_id: strangerOrgId,
-                provenance: "OPERATOR_PROVIDED",
+                provenance: "IMPORTER_ENTERED",
                 name: `Sham Grant Installation ${runId}`,
                 country: "DE",
               },

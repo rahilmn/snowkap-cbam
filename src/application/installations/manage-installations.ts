@@ -18,9 +18,13 @@ import type {
 } from "../../domain/shared/ids";
 
 import {
-  hasCapability,
   type OrgContext,
 } from "../organizations/org-context";
+
+import {
+  capabilityAllowsProvenance,
+  mayManageOwnInstallationRecords,
+} from "./provenance-capability";
 
 import {
   recordAuditEvent,
@@ -194,7 +198,14 @@ export async function createInstallation(
   context: OrgContext,
   input: InstallationInput,
 ): Promise<ManageInstallationResult> {
-  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+  // 2026-09-03 (owner decision D2). The capability required follows
+  // from the PROVENANCE being claimed, not from a fixed role -- see
+  // provenance-capability.ts. An importer recording an external
+  // operator's details uses IMPORTER_ENTERED; a producer recording its
+  // own uses OPERATOR_PROVIDED. The database enforces the same rule
+  // (migration 20260903120000); this is here so the message can say
+  // which one the caller could legitimately have used.
+  if (!capabilityAllowsProvenance(context, input.provenance)) {
     return {
       status: "REJECTED",
       reason: "CAPABILITY_NOT_HELD",
@@ -333,7 +344,11 @@ export async function removeInstallation(
   context: OrgContext,
   installationId: InstallationId,
 ): Promise<RemoveInstallationResult> {
-  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+  // 2026-09-03 (D2): either kind of organization may act on its OWN
+  // records. RLS already scopes this to the caller's org; requiring
+  // PRODUCER_OPERATOR here would lock an importer out of the records it
+  // just created.
+  if (!mayManageOwnInstallationRecords(context)) {
     return {
       status: "REJECTED",
       reason: "CAPABILITY_NOT_HELD",

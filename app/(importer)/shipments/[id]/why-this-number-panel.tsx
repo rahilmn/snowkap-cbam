@@ -533,6 +533,29 @@ export function WhyThisNumberPanel(
                 ? "via a shared installation"
                 : "from your organization's own data"}
             </p>
+
+            {/*
+              * 2026-09-03 (owner decision D2). Read from the FROZEN
+              * snapshot, so it describes the number being explained
+              * rather than the installation's state today.
+              *
+              * Absent on determinations frozen before D2 existed, which
+              * is why nothing is rendered in that case -- saying
+              * "operator provided" for a record whose provenance was
+              * never captured would be a guess presented as a fact.
+              */}
+            {actualSnapshot.record_provenance === "IMPORTER_ENTERED" ? (
+              <p className="text-[11px] text-[var(--text-tertiary)]">
+                Source: external operator data, entered by your
+                organization. Snowkap did not receive these figures from
+                the operator directly and does not attest to them.
+              </p>
+            ) : actualSnapshot.record_provenance === "OPERATOR_PROVIDED" ? (
+              <p className="text-[11px] text-[var(--text-tertiary)]">
+                Source: entered by the organization that operates the
+                installation.
+              </p>
+            ) : null}
           </div>
         ) : (
           <p className="text-xs text-[var(--text-tertiary)]">

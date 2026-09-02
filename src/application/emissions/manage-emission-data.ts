@@ -34,9 +34,12 @@ import type {
 
 import {
   hasAdminAccess,
-  hasCapability,
   type OrgContext,
 } from "../organizations/org-context";
+
+import {
+  mayManageOwnInstallationRecords,
+} from "../installations/provenance-capability";
 
 import {
   recordAuditEvent,
@@ -168,7 +171,25 @@ export async function recordEmissionData(
   context: OrgContext,
   input: RecordEmissionDataInput,
 ): Promise<RecordEmissionDataResult> {
-  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+// 2026-09-03 (owner decision D2). Was PRODUCER_OPERATOR outright,
+  // which made emissions data unrecordable for an importer's own
+  // externally-supplied installations -- the workflow D2 exists to
+  // enable.
+  //
+  // Widened to "either kind of organization, acting on its OWN
+  // records". That is not a widening of REACH: every service in this
+  // file already proves the caller's active org owns the installation
+  // before it writes (verifyInstallationOwnership), RLS scopes every
+  // write to that org, and the provenance trigger (20260903120000)
+  // means an importer's own installations can only ever be
+  // IMPORTER_ENTERED. So an importer gains the ability to record data
+  // against installations it recorded, and nothing else.
+  //
+  // Deliberately unchanged: the verification lifecycle, the
+  // evidence-completeness gate, and every condition on using a record
+  // as an ACTUAL determination. IMPORTER_ENTERED + unverified must not
+  // behave like OPERATOR_PROVIDED + verified, and it does not.
+    if (!mayManageOwnInstallationRecords(context)) {
     return {
       status: "REJECTED",
       reason: "CAPABILITY_NOT_HELD",
@@ -555,7 +576,7 @@ export async function submitForVerification(
   context: OrgContext,
   emissionDataId: EmissionDataId,
 ): Promise<EmissionDataActionResult> {
-  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+  if (!mayManageOwnInstallationRecords(context)) {
     return {
       status: "REJECTED",
       reason: "CAPABILITY_NOT_HELD",
@@ -606,7 +627,7 @@ export async function verifyEmissionData(
     };
   }
 
-  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+  if (!mayManageOwnInstallationRecords(context)) {
     return {
       status: "REJECTED",
       reason: "CAPABILITY_NOT_HELD",
@@ -645,7 +666,7 @@ export async function rejectEmissionData(
     };
   }
 
-  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+  if (!mayManageOwnInstallationRecords(context)) {
     return {
       status: "REJECTED",
       reason: "CAPABILITY_NOT_HELD",
@@ -672,7 +693,7 @@ export async function discardEmissionData(
   context: OrgContext,
   emissionDataId: EmissionDataId,
 ): Promise<EmissionDataActionResult> {
-  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+  if (!mayManageOwnInstallationRecords(context)) {
     return {
       status: "REJECTED",
       reason: "CAPABILITY_NOT_HELD",
@@ -722,7 +743,7 @@ export async function activateEmissionData(
   context: OrgContext,
   emissionDataId: EmissionDataId,
 ): Promise<EmissionDataActionResult> {
-  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+  if (!mayManageOwnInstallationRecords(context)) {
     return {
       status: "REJECTED",
       reason: "CAPABILITY_NOT_HELD",

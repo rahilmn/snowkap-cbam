@@ -32,6 +32,10 @@ import type {
   CandidateActualDetermination,
 } from "../../domain/emissions/actual-determination-is-unchanged";
 
+import type {
+  InstallationRecordProvenance,
+} from "../../domain/installations/types";
+
 import {
   EMISSION_DATA_COLUMNS,
   toEmissionData,
@@ -76,6 +80,20 @@ export interface AvailableActualEmissionDataOption {
   // function's own doc comment for how a lookup failure is distinguished
   // from a genuinely-unresolvable name.
   grantor_organization_name: string | null;
+
+  /**
+   * 2026-09-03 (owner decision D2). Whether these figures were entered
+   * by the operator that runs the installation, or transcribed by an
+   * importer from an external operator who does not use Snowkap.
+   *
+   * `provenance` above answers "whose data is this, relative to me" --
+   * OWN or SHARED. This answers the different and more important
+   * question of who stands behind the numbers. An importer choosing
+   * between two datasets has to be able to tell them apart, and
+   * "Verified actual emissions" must never be shown for something the
+   * importer typed in themselves and has not verified.
+   */
+  record_provenance: InstallationRecordProvenance;
 }
 
 /**
@@ -110,6 +128,7 @@ interface InstallationLookupRow {
   id: string;
   name: string;
   country: string;
+  provenance: string;
 }
 
 interface SharingGrantLookupRow {
@@ -338,7 +357,7 @@ export async function listAvailableActualEmissionData(
     await supabase
       .from("installations")
       .select(
-        "id, name, country",
+        "id, name, country, provenance",
       )
       .in("id", installationIds);
 
@@ -476,6 +495,8 @@ export async function listAvailableActualEmissionData(
         installation_id: record.installation_id,
         installation_name: installation.name,
         installation_country: installation.country as CountryCode,
+        record_provenance:
+          installation.provenance as InstallationRecordProvenance,
         direct_specific: record.direct_specific,
         indirect_specific: record.indirect_specific,
         emission_unit: record.emission_unit,

@@ -60,8 +60,8 @@ test.describe(
           primaryNav,
         ).toBeVisible();
 
-        // All nine importer nav items (docs/plans/MASTER_PLAN.md §7),
-        // matching shell.spec.ts's own "all nine importer nav items"
+        // All ten importer nav items (docs/plans/MASTER_PLAN.md §7),
+        // matching shell.spec.ts's own "all ten importer nav items"
         // test -- but each item's real accessible role, per
         // components/shell/sidebar.tsx: items with an href render as a
         // <Link> (role "link"); items without one render as a disabled
@@ -81,7 +81,12 @@ test.describe(
             { label: "Emissions", role: "link" },
             { label: "Calculations", role: "button" },
             { label: "Suppliers", role: "link" },
-            { label: "Installations", role: "button" },
+            // 2026-09-03 (owner decision D2): "Installations" was a
+            // disabled placeholder because an importer genuinely had
+            // nowhere to record the operators behind its imports. It
+            // now has two real destinations, and they are links.
+            { label: "External operators", role: "link" },
+            { label: "External emissions", role: "link" },
             { label: "Audit", role: "link" },
             { label: "Reports", role: "link" },
             { label: "Declarations", role: "link" },

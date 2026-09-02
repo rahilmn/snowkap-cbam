@@ -28,6 +28,10 @@ import {
   removeInstallation,
 } from "../../../src/application/installations/manage-installations";
 
+import type {
+  InstallationRecordProvenance,
+} from "../../../src/domain/installations/types";
+
 import {
   createInMemoryRateLimiter,
   type RateLimitConfig,
@@ -161,15 +165,44 @@ const createOperatorSchema =
       z.string().optional(),
   });
 
-// This screen is producer-side self-registration only (a producer org
-// registering its own operator/installation) -- provenance is always
-// OPERATOR_PROVIDED here. The importer-side "add a local record for an
-// off-platform producer" flow (docs/plans/MASTER_PLAN.md §27.17) is
-// separate, later UI reusing the same application services with
-// provenance: "IMPORTER_ENTERED".
-export async function createOperatorAction(
-  _previousState: InstallationsScreenActionState,
+// 2026-09-03 (owner decision D2): the importer-side flow this comment
+// anticipated ("separate, later UI reusing the same application services
+// with provenance: IMPORTER_ENTERED") now exists, at
+// /external-operators. It reuses these same actions rather than copying
+// them -- see performCreateOperator below.
+function capabilityMessageFor(
+  provenance: InstallationRecordProvenance,
+): string {
+  return provenance === "OPERATOR_PROVIDED"
+    ? "Your organization is not set up as a CBAM producer/operator."
+    : "Your organization is not set up as a CBAM importer/declarant.";
+}
+
+/**
+ * 2026-09-03 (owner decision D2). One implementation, two provenances.
+ *
+ * A producer registering its own operator and an importer recording an
+ * external operator's details create the SAME record with the SAME
+ * validation, rate limiting and ownership rules -- they differ only in
+ * what the record CLAIMS about where it came from, and in which screen
+ * to revalidate afterwards.
+ *
+ * Parameterised rather than copied. Two copies of a 60-line action
+ * would have drifted the first time a field or a check was added, and
+ * "extend the architecture rather than creating a second parallel
+ * model" is the decision's own instruction.
+ *
+ * The provenance is fixed by the CALLER (each exported action below
+ * passes a literal), never read from the form: it is an authorization
+ * claim, and a client-supplied one would be worthless. The application
+ * re-checks it against the org's capabilities
+ * (capabilityAllowsProvenance) and the database enforces the same rule
+ * (app.enforce_record_provenance_capability, 20260903120000).
+ */
+async function performCreateOperator(
   formData: FormData,
+  provenance: InstallationRecordProvenance,
+  revalidateTarget: string,
 ): Promise<InstallationsScreenActionState> {
   const rateLimitResult =
     createOperatorLimiter.check(
@@ -213,7 +246,7 @@ export async function createOperatorAction(
       setup.supabase,
       setup.orgSummary.context,
       {
-        provenance: "OPERATOR_PROVIDED",
+        provenance,
         name: parsed.data.name,
         country: parsed.data.country.trim().toUpperCase(),
         contactEmail: parsed.data.contactEmail?.trim() || null,
@@ -227,13 +260,13 @@ export async function createOperatorAction(
         result.reason === "INVALID_COUNTRY"
           ? "Country must be a 2-letter ISO code (e.g. DE, CN)."
           : result.reason === "CAPABILITY_NOT_HELD"
-            ? "Your organization is not set up as a CBAM producer/operator."
+            ? capabilityMessageFor(provenance)
             : "Something went wrong. Please try again.",
     };
   }
 
   revalidatePath(
-    "/installations",
+    revalidateTarget,
   );
 
   return {
@@ -328,9 +361,11 @@ const createInstallationSchema =
       z.string().optional(),
   });
 
-export async function createInstallationAction(
-  _previousState: InstallationsScreenActionState,
+// Same shape and reasoning as performCreateOperator above.
+async function performCreateInstallation(
   formData: FormData,
+  provenance: InstallationRecordProvenance,
+  revalidateTarget: string,
 ): Promise<InstallationsScreenActionState> {
   const rateLimitResult =
     createInstallationLimiter.check(
@@ -378,7 +413,7 @@ export async function createInstallationAction(
       setup.orgSummary.context,
       {
         operatorId: parsed.data.operatorId as never,
-        provenance: "OPERATOR_PROVIDED",
+        provenance,
         name: parsed.data.name,
         country: parsed.data.country.trim().toUpperCase(),
         unLocode: parsed.data.unLocode?.trim().toUpperCase() || null,
@@ -394,7 +429,7 @@ export async function createInstallationAction(
         : result.reason === "OPERATOR_NOT_FOUND"
         ? "Choose a valid operator."
         : result.reason === "CAPABILITY_NOT_HELD"
-        ? "Your organization is not set up as a CBAM producer/operator."
+        ? capabilityMessageFor(provenance)
         : "Something went wrong. Please try again.";
 
     return {
@@ -479,4 +514,65 @@ export async function removeInstallationAction(
   return {
     status: "idle",
   };
+}
+
+/**
+ * Producer self-registration: this organization's own operator.
+ */
+export async function createOperatorAction(
+  _previousState: InstallationsScreenActionState,
+  formData: FormData,
+): Promise<InstallationsScreenActionState> {
+  return performCreateOperator(
+    formData,
+    "OPERATOR_PROVIDED",
+    "/installations",
+  );
+}
+
+/**
+ * Producer self-registration: this organization's own installation.
+ */
+export async function createInstallationAction(
+  _previousState: InstallationsScreenActionState,
+  formData: FormData,
+): Promise<InstallationsScreenActionState> {
+  return performCreateInstallation(
+    formData,
+    "OPERATOR_PROVIDED",
+    "/installations",
+  );
+}
+
+/**
+ * 2026-09-03 (owner decision D2). An importer recording an EXTERNAL
+ * operator -- one that does not use Snowkap.
+ *
+ * IMPORTER_ENTERED does not mean invented or self-certified. It means
+ * transcribed from information the operator supplied off-platform, and
+ * every surface that renders it says so.
+ */
+export async function createExternalOperatorAction(
+  _previousState: InstallationsScreenActionState,
+  formData: FormData,
+): Promise<InstallationsScreenActionState> {
+  return performCreateOperator(
+    formData,
+    "IMPORTER_ENTERED",
+    "/external-operators",
+  );
+}
+
+/**
+ * The installation half of the same flow.
+ */
+export async function createExternalInstallationAction(
+  _previousState: InstallationsScreenActionState,
+  formData: FormData,
+): Promise<InstallationsScreenActionState> {
+  return performCreateInstallation(
+    formData,
+    "IMPORTER_ENTERED",
+    "/external-operators",
+  );
 }

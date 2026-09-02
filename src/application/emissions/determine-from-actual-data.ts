@@ -33,6 +33,10 @@ import type {
 } from "../../domain/shipments/types";
 
 import type {
+  InstallationRecordProvenance,
+} from "../../domain/installations/types";
+
+import type {
   EmissionDataId,
   OrganizationId,
   ShipmentLineId,
@@ -199,6 +203,48 @@ async function fetchLineForDetermination(
 interface AuthorizedEmissionData {
   record: EmissionData;
   sharingGrantId: SharingGrantId | null;
+
+  // 2026-09-03 (owner decision D2). The installation's own provenance,
+  // read here so the snapshot can freeze WHERE these numbers came from
+  // rather than leaving it to a live lookup later. Null only when the
+  // installation row could not be read at all, which the caller treats
+  // as a data-integrity failure: emission_data.installation_id is a
+  // foreign key with ON DELETE RESTRICT, so an unreadable installation
+  // behind a readable emission_data row is a contradiction, not a
+  // normal state.
+  installationProvenance: InstallationRecordProvenance | null;
+}
+
+interface InstallationProvenanceRow {
+  provenance: string;
+}
+
+/**
+ * The installation's provenance for a record already proven readable.
+ *
+ * Separate query rather than a join: emission_data is fetched through
+ * two different authorization paths (own-org and shared-via-grant) and
+ * this must behave identically on both. RLS on installations already
+ * admits exactly the same two cases (installations_select_own_org,
+ * widened by 20260829260000 for shared installations), so this can
+ * never see an installation the caller was not already entitled to.
+ */
+async function fetchInstallationProvenance(
+  supabase: SupabaseClient,
+  installationId: string,
+): Promise<InstallationRecordProvenance | null> {
+  const { data, error } =
+    await supabase
+      .from("installations")
+      .select("provenance")
+      .eq("id", installationId)
+      .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return (data as InstallationProvenanceRow).provenance as InstallationRecordProvenance;
 }
 
 /**
@@ -299,6 +345,11 @@ async function fetchAuthorizedEmissionData(
       data: {
         record,
         sharingGrantId: null,
+        installationProvenance:
+          await fetchInstallationProvenance(
+            supabase,
+            record.installation_id,
+          ),
       },
     };
   }
@@ -361,6 +412,11 @@ async function fetchAuthorizedEmissionData(
     data: {
       record,
       sharingGrantId: grant.id as SharingGrantId,
+      installationProvenance:
+        await fetchInstallationProvenance(
+          supabase,
+          record.installation_id,
+        ),
     },
   };
 }
@@ -419,7 +475,7 @@ async function performDetermination(
     return fetchedEmissionData;
   }
 
-  const { record, sharingGrantId } =
+  const { record, sharingGrantId, installationProvenance } =
     fetchedEmissionData.data;
 
   // P13 review, finding S16, live-reproduced: nothing previously
@@ -457,6 +513,24 @@ async function performDetermination(
   // ResolveLineEmissionsResult already uses for every other expected
   // outcome here).
   if (!record.verifier_user_id) {
+    return {
+      status: "REJECTED",
+      reason: "DATA_INTEGRITY_ERROR",
+    };
+  }
+
+  // 2026-09-03 (owner decision D2). A snapshot must be able to say
+  // where its numbers came from -- operator-attested, or transcribed by
+  // an importer from an external operator. Those are different claims,
+  // and a declarant relying on either has to know which one they hold.
+  //
+  // An unreadable installation behind a readable emission_data row is a
+  // contradiction: the foreign key is ON DELETE RESTRICT and RLS admits
+  // the installation on exactly the same two paths as the record. Rather
+  // than freeze a snapshot with no provenance, or guess one, this is a
+  // data-integrity failure -- the same posture the missing verifier
+  // above already takes.
+  if (installationProvenance === null) {
     return {
       status: "REJECTED",
       reason: "DATA_INTEGRITY_ERROR",
@@ -526,6 +600,7 @@ async function performDetermination(
 
       evidence_file_ids: record.evidence_file_ids,
       sharing_grant_id: sharingGrantId,
+      record_provenance: installationProvenance,
     };
 
   const determination: EmissionDetermination =

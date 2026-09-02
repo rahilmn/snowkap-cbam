@@ -34,6 +34,7 @@ const OPTION: AvailableActualEmissionDataOption =
     reporting_period: { kind: "ANNUAL", year: 2026 } as never,
     provenance: "SHARED",
     grantor_organization_name: "Producer Ltd",
+    record_provenance: "OPERATOR_PROVIDED",
   };
 
 const CANDIDATE: CandidateActualDetermination =
