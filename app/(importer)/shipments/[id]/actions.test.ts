@@ -834,7 +834,7 @@ describe(
             {
               status: "UNRESOLVED",
               resolution: { reason, trace },
-              countryMapping: { status: "MAPPED", regulatory_country_name: "Germany" },
+              countryMapping: { status: "MAPPED", regulatory_country_name: "China" },
             },
           );
 

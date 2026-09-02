@@ -18,19 +18,30 @@ function row(
   return {
     shipment_reference: "REF-001",
     line_number: 1,
-    cn_code: "72081000",
+    // 2026-09-03 (P14, fixture hygiene): reason "MATCHED" is not a
+    // member of ResolutionReason and only compiled because of an
+    // `as never` cast, which is precisely how an impossible shape
+    // survives a type system. Replaced with the real China / CN8
+    // 2523 21 00 row this dataset genuinely holds.
+    cn_code: "25232100",
     cn_code_level: "CN8",
-    origin_country: "DE" as never,
+    origin_country: "CN" as never,
     production_route: null,
     quantity: "10" as never,
     quantity_unit: "TONNES",
     determination_method: "DEFAULT",
-    dataset_version: "2026.1",
+    dataset_version: "2026-definitive-corrected",
     methodology: null,
-    resolution_reason: "MATCHED" as never,
+    resolution_reason: "EXACT_CN8_MATCH",
     engine_version: "1.1.0",
     embedded_emissions_tco2e: "20" as never,
     calculated_at: "2026-02-01T00:00:00.000Z" as never,
+    country_mapping_status: "MAPPED",
+    emission_data_id: null,
+    emission_data_version: null,
+    installation_name: null,
+    sharing_grant_id: null,
+    calculation_currency: "CURRENT",
     ...overrides,
   };
 }
@@ -48,7 +59,12 @@ describe(
         ).toBe(
           "Shipment reference,Line,CN/TARIC code,Code level,Origin country,Production route," +
             "Quantity,Quantity unit,Determination method,Dataset version,Methodology," +
-            "Resolution reason,Engine version,Embedded emissions (tCO2e),Calculated at",
+            "Resolution reason,Engine version,Embedded emissions (tCO2e),Calculated at," +
+            // 2026-09-03 (P14): appended after the existing columns, so
+            // the prefix every previously-exported file carries is
+            // byte-identical.
+            "Country mapping status,Emission data id,Emission data version," +
+            "Installation name (current if visible),Sharing grant id,Calculation currency",
         );
       },
     );
@@ -79,7 +95,7 @@ describe(
         expect(
           lines[1],
         ).toBe(
-          "REF-001,1,72081000,CN8,DE,,10,TONNES,DEFAULT,2026.1,,MATCHED,1.1.0,20,2026-02-01T00:00:00.000Z",
+          "REF-001,1,25232100,CN8,CN,,10,TONNES,DEFAULT,2026-definitive-corrected,,EXACT_CN8_MATCH,1.1.0,20,2026-02-01T00:00:00.000Z,MAPPED,,,,,CURRENT",
         );
       },
     );
@@ -99,6 +115,12 @@ describe(
                   engine_version: null,
                   embedded_emissions_tco2e: null,
                   calculated_at: null,
+                  country_mapping_status: null,
+                  emission_data_id: null,
+                  emission_data_version: null,
+                  installation_name: null,
+                  sharing_grant_id: null,
+                  calculation_currency: "NOT_CALCULATED",
                 },
               ),
             ],
@@ -113,7 +135,7 @@ describe(
         expect(
           csv.split("\r\n")[1],
         ).toBe(
-          "REF-001,1,72081000,CN8,DE,,10,TONNES,NOT_DETERMINED,,,,,,",
+          "REF-001,1,25232100,CN8,CN,,10,TONNES,NOT_DETERMINED,,,,,,,,,,,,NOT_CALCULATED",
         );
       },
     );

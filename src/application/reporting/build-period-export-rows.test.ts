@@ -34,29 +34,34 @@ function shipmentRow(
   };
 }
 
+// 2026-09-03 (P14, fixture hygiene). See build-period-summary.test.ts's
+// own note: reason "MATCHED" is not a member of ResolutionReason, and
+// "Germany" cannot resolve through a dataset holding no German rows.
+// Replaced with a real row -- China, CN8 2523 21 00, sheet "China",
+// row 7, 1.250 / 0.140 / 1.390, EXACT_CN8_MATCH.
 const defaultDetermination =
   {
     method: "DEFAULT",
     resolution: {
       dataset_id: "dataset-1",
-      dataset_version: "2026.1",
+      dataset_version: "2026-definitive-corrected",
       resolved_at: "2026-01-01T00:00:00.000Z",
-      reason: "MATCHED",
-      country_mapping: { status: "MAPPED", regulatory_country_name: "Germany" },
+      reason: "EXACT_CN8_MATCH",
+      country_mapping: { status: "MAPPED", regulatory_country_name: "China" },
       record_identity: {
-        source_sheet: "Sheet1",
-        source_row: 1,
-        source_trade_code: "72081000",
-        origin_country_name: "Germany",
+        source_sheet: "China",
+        source_row: 7,
+        source_trade_code: "2523 21 00",
+        origin_country_name: "China",
         source_production_route_code: null,
       },
       values: {
-        direct: { status: "AVAILABLE", value: "1.9" },
-        indirect: { status: "AVAILABLE", value: "0.1" },
-        total: { status: "AVAILABLE", value: "2.0" },
+        direct: { status: "AVAILABLE", value: "1.250" },
+        indirect: { status: "AVAILABLE", value: "0.140" },
+        total: { status: "AVAILABLE", value: "1.390" },
       },
       emission_unit: "TCO2E_PER_TONNE",
-      trace: [],
+      trace: [{ step: "EXACT_CN8_MATCH", outcome: "RESOLVED" }],
     },
   };
 
@@ -85,10 +90,14 @@ function lineRow(
     shipment_id: "ship-1",
     org_id: "org-1",
     line_number: 1,
-    cn_code: "72081000",
+    // Matches defaultDetermination's own real record. A line declaring
+    // one classification while carrying a determination resolved for
+    // another is a shape the v10 validator rejects outright, so a
+    // fixture must not pair them.
+    cn_code: "25232100",
     cn_code_level: "CN8",
     goods_description: null,
-    origin_country: "DE",
+    origin_country: "CN",
     net_mass_tonnes: "10",
     quantity_mwh: null,
     production_route_name: null,
@@ -148,7 +157,7 @@ describe(
                 shipment_lines: { data: [lineRow({ emission_determination: defaultDetermination })], error: null },
                 latest_calculation_results: {
                   data: [
-                    { id: "calc-1", line_id: "line-1", engine_version: "1.1.0", embedded_emissions_tco2e: "20", steps: [], calculated_at: "2026-02-01T00:00:00Z" },
+                    { id: "calc-1", line_id: "line-1", engine_version: "1.1.0", embedded_emissions_tco2e: "20", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
                   ],
                   error: null,
                 },
@@ -163,19 +172,25 @@ describe(
             {
               shipment_reference: "REF-001",
               line_number: 1,
-              cn_code: "72081000",
+              cn_code: "25232100",
               cn_code_level: "CN8",
-              origin_country: "DE",
+              origin_country: "CN",
               production_route: null,
               quantity: "10",
               quantity_unit: "TONNES",
               determination_method: "DEFAULT",
-              dataset_version: "2026.1",
+              dataset_version: "2026-definitive-corrected",
               methodology: null,
-              resolution_reason: "MATCHED",
+              resolution_reason: "EXACT_CN8_MATCH",
               engine_version: "1.1.0",
               embedded_emissions_tco2e: "20",
               calculated_at: "2026-02-01T00:00:00Z",
+              country_mapping_status: "MAPPED",
+              emission_data_id: null,
+              emission_data_version: null,
+              installation_name: null,
+              sharing_grant_id: null,
+              calculation_currency: "CURRENT",
             },
           ],
         );

@@ -153,18 +153,36 @@ export default async function ReportsPage(
         </div>
 
         {period && exportRows.length > 0 ? (
-          <div className="flex items-center gap-2">
-            <ExportPeriodCsvButton
-              rows={exportRows}
-              filename={`period-report-${formatReportingPeriod(period)}.csv`}
-            />
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="flex items-center gap-2">
+              <ExportPeriodCsvButton
+                rows={exportRows}
+                filename={`period-report-${formatReportingPeriod(period)}.csv`}
+              />
 
-            <a
-              href={`/api/reports/export${exportQuery}`}
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-4 text-sm font-medium text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--surface-sunken)]"
-            >
-              Export XLSX
-            </a>
+              <a
+                href={`/api/reports/export${exportQuery}`}
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-4 text-sm font-medium text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--surface-sunken)]"
+              >
+                Export XLSX
+              </a>
+            </div>
+
+            {/*
+              * 2026-09-03 (P14). The XLSX has a Notes sheet to carry
+              * this; the CSV has no notes surface at all, so the
+              * sentence lives beside the buttons where it applies to
+              * both. Without it, a spreadsheet named for a reporting
+              * period reads as the period's filed figure -- which it is
+              * not, and the difference is not cosmetic: this includes
+              * DRAFT shipments that no declaration has ever frozen.
+              */}
+            <p className="max-w-md text-right text-xs text-[var(--text-tertiary)]">
+              A live re-read of the period, not a filed declaration. It
+              includes DRAFT and READY shipments, and installation names
+              reflect current visibility. The authoritative filed figure
+              is the declaration&apos;s own snapshot.
+            </p>
           </div>
         ) : null}
       </div>

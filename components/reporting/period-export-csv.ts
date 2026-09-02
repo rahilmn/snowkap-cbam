@@ -18,6 +18,18 @@ const CSV_HEADER = [
   "Engine version",
   "Embedded emissions (tCO2e)",
   "Calculated at",
+  // 2026-09-03 (P14): appended, never interleaved, so the existing
+  // byte-stable prefix of every previously-exported file stays stable.
+  // See PeriodExportRow for what each one means -- in particular that
+  // "Country mapping status" is a verbatim copy of a frozen enum and
+  // NOT a scope indicator, and that the installation name is a live
+  // lookup that can change between exports.
+  "Country mapping status",
+  "Emission data id",
+  "Emission data version",
+  "Installation name (current if visible)",
+  "Sharing grant id",
+  "Calculation currency",
 ];
 
 // Same CSV-formula-injection guard as components/audit/audit-event-csv.ts's
@@ -105,6 +117,12 @@ export function buildPeriodExportCsv(
             cell(row.engine_version),
             cell(row.embedded_emissions_tco2e),
             cell(row.calculated_at),
+            cell(row.country_mapping_status),
+            cell(row.emission_data_id),
+            cell(row.emission_data_version),
+            cell(row.installation_name),
+            cell(row.sharing_grant_id),
+            row.calculation_currency,
           ]
         ),
       ),

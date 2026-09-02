@@ -8,6 +8,10 @@ import type {
 } from "../../domain/shared/decimal";
 
 import {
+  checkCalculationCurrency,
+} from "../../domain/emissions/check-calculation-currency";
+
+import {
   toDecimal,
   toDecimalString,
 } from "../../domain/shared/decimal";
@@ -56,7 +60,19 @@ export type IncompleteLineReason =
   | "NO_DETERMINATION"
   // Determined (DEFAULT or ACTUAL), but no calculation_results row
   // exists for it yet.
-  | "NOT_CALCULATED";
+  | "NOT_CALCULATED"
+  // 2026-09-03 (P14). A calculation_results row exists, but it was
+  // computed against a DIFFERENT emission_determination than the line
+  // carries now -- redetermined without being recalculated.
+  //
+  // Counted as incomplete rather than calculated, and its figure kept
+  // out of every total, because the filing gate already refuses exactly
+  // this state (record_declaration_filed folds it into INCOMPLETE, and
+  // buildCompletenessReport blocks READY on it). A period report that
+  // published the stale figure was publishing a number the product
+  // itself would not let anyone file -- with no indication that is what
+  // it was.
+  | "CALCULATION_STALE";
 
 export interface IncompletePeriodLine {
   shipment_id: ShipmentId;
@@ -184,9 +200,46 @@ function toBreakdownEntries(
     );
 }
 
+/**
+ * 2026-09-03 (P14). Is this line's stored calculation actually a
+ * calculation OF this line, as it stands now?
+ *
+ * checkCalculationCurrency existed and was used on the shipment detail
+ * screen, but nothing under src/application/reporting/** ever called it.
+ * So a line redetermined after being calculated -- the exact workflow
+ * the "Stale -- newer data available" badge prompts an importer into --
+ * contributed its superseded figure to the period KPI, to every
+ * breakdown, and to both export formats.
+ *
+ * The number that produced is not merely out of date. It is a number
+ * the product refuses to let anyone file: record_declaration_filed
+ * treats this state as INCOMPLETE and buildCompletenessReport blocks
+ * READY on it. A report and a declaration disagreeing about the same
+ * period, silently, is worse than either being wrong on its own.
+ */
+function calculationIsCurrent(
+  entry: PeriodShipmentLine,
+): boolean {
+  if (entry.calculation === null) {
+    return false;
+  }
+
+  return checkCalculationCurrency(
+    entry.calculation.determination,
+    entry.line.emission_determination,
+  ) === "CURRENT";
+}
+
 function incompleteReasonFor(
   entry: PeriodShipmentLine,
 ): IncompleteLineReason {
+  if (
+    entry.calculation !== null &&
+    entry.line.emission_determination !== null
+  ) {
+    return "CALCULATION_STALE";
+  }
+
   return entry.line.emission_determination === null
     ? "NO_DETERMINATION"
     : "NOT_CALCULATED";
@@ -242,9 +295,12 @@ export async function buildPeriodSummary(
     null;
 
   for (const entry of lines) {
+    // A stale calculation contributes NOTHING -- not its old figure,
+    // not a zero. Treated exactly like a line that was never
+    // calculated, which is how the filing gate already treats it.
     const amount =
-      entry.calculation
-        ? toDecimal(entry.calculation.embedded_emissions_tco2e)
+      calculationIsCurrent(entry)
+        ? toDecimal(entry.calculation!.embedded_emissions_tco2e)
         : null;
 
     if (amount) {

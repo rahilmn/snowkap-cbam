@@ -16,15 +16,15 @@ import type {
 const baseResolution: RegulatoryResolutionSnapshot =
   {
     dataset_id: "ds-1",
-    dataset_version: "2026.1",
+    dataset_version: "2026-definitive-corrected",
     resolved_at: "2026-01-01T00:00:00Z" as never,
     reason: "EXACT_TARIC_MATCH",
-    country_mapping: { status: "MAPPED", regulatory_country_name: "Germany" },
+    country_mapping: { status: "MAPPED", regulatory_country_name: "China" },
     record_identity: {
-      source_sheet: "Sheet1",
+      source_sheet: "China",
       source_row: 12,
       source_trade_code: "72081000",
-      origin_country_name: "Germany",
+      origin_country_name: "China",
       source_production_route_code: null,
     },
     values: {

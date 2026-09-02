@@ -224,6 +224,17 @@ export async function GET(
       { header: "Embedded emissions (tCO2e, exact)", key: "embedded_emissions_tco2e", width: 28 },
       { header: "Embedded emissions (tCO2e, approx, for charting)", key: "embedded_emissions_approx", width: 32 },
       { header: "Calculated at", key: "calculated_at", width: 22 },
+      // 2026-09-03 (P14): appended after the existing columns, never
+      // interleaved. See the Notes sheet for what each means -- in
+      // particular that "Country mapping status" is a verbatim copy of
+      // a frozen enum and NOT a scope indicator, and that the
+      // installation name is a live lookup, not provenance.
+      { header: "Country mapping status", key: "country_mapping_status", width: 22 },
+      { header: "Emission data id", key: "emission_data_id", width: 38 },
+      { header: "Emission data version", key: "emission_data_version", width: 20 },
+      { header: "Installation name (current if visible)", key: "installation_name", width: 32 },
+      { header: "Sharing grant id", key: "sharing_grant_id", width: 38 },
+      { header: "Calculation currency", key: "calculation_currency", width: 20 },
     ];
 
   sheet.getRow(1).font =
@@ -257,6 +268,12 @@ export async function GET(
               ? Number(row.embedded_emissions_tco2e)
               : null,
           calculated_at: row.calculated_at,
+          country_mapping_status: row.country_mapping_status,
+          emission_data_id: row.emission_data_id,
+          emission_data_version: row.emission_data_version,
+          installation_name: row.installation_name,
+          sharing_grant_id: row.sharing_grant_id,
+          calculation_currency: row.calculation_currency,
         },
       );
 
@@ -287,6 +304,12 @@ export async function GET(
       { note: "The OOXML spreadsheet format (.xlsx) has no arbitrary-precision numeric cell type, so a genuine numeric cell can only ever hold an IEEE-754 double. The \"(approx, for charting)\" columns are ordinary numeric cells provided so figures can still be summed or charted in Excel -- they are not the authoritative figure." },
       { note: "This period report is Snowkap's own preparation summary, for the declarant's own use -- not a reproduction of the official CBAM registry submission form, and not a declaration-ready rounded total. The authorised declarant files through the official channel themselves (docs/plans/MASTER_PLAN.md §22)." },
       { note: "The CSV export of this same period (period-export-csv.ts) carries every figure as plain full-precision text and has no numeric-cell precision ceiling at all -- it is this report's other full-precision export." },
+      { note: "SCOPE: this is a live re-read of the period, not a filed declaration. It includes DRAFT and READY shipments, and installation names reflect current visibility and can change between exports. The authoritative filed figure is the declaration's own filed snapshot." },
+      { note: "Calculation currency: CURRENT means the figure is the calculation of the determination this line carries now. STALE means the line was re-determined after it was calculated, so the stored figure describes a determination the line no longer carries -- a state the filing gate refuses, and one whose figure is excluded from this period's totals. NOT_CALCULATED means no calculation exists for the line." },
+      { note: "Country mapping status is copied verbatim from the frozen regulatory resolution snapshot and is populated only for DEFAULT determinations (blank for actual-data and undetermined lines). It records how the declared origin was matched against the dataset's own country table: MAPPED means the origin has a row there, UNLISTED means it does not and the Other Countries and Territories row was used. It does NOT distinguish an EU member state from a genuinely unlisted third country or from a non-country code, and it is not a scope indicator." },
+      { note: "Emission data id, Emission data version and Sharing grant id identify the producer's record an actual-emissions figure was frozen from, and the sharing grant it was read through. They are frozen provenance and do not change." },
+      { note: "Installation name is a LIVE lookup of what this organisation can currently see, not frozen provenance. It is blank when the installation is no longer visible (the sharing grant was revoked or expired) and can change between two exports of the same period after a revoke or a rename." },
+      { note: "The provenance columns describe the determination the CALCULATION was performed against, not the line's current determination. Where a line has been edited or re-determined since it was calculated, Calculation currency says so." },
     ],
   );
 

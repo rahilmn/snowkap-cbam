@@ -36,6 +36,14 @@ import type {
 } from "../../domain/calculations/types";
 
 import {
+  checkCalculationCurrency,
+} from "../../domain/emissions/check-calculation-currency";
+
+import type {
+  EmissionDetermination,
+} from "../../domain/emissions/types";
+
+import {
   listPeriodShipmentLines,
   type PeriodShipmentLine,
 } from "./list-period-shipment-lines";
@@ -93,6 +101,59 @@ export interface PeriodExportRow {
   engine_version: EngineVersion | null;
   embedded_emissions_tco2e: DecimalString | null;
   calculated_at: IsoTimestamp | null;
+
+  // --- 2026-09-03 (P14): provenance, appended ------------------------
+  //
+  // Appended after calculated_at, never interleaved: route.test.ts
+  // resolves columns by header, and both formats' existing byte-stable
+  // prefixes stay byte-stable.
+  //
+  // Every one of these describes the calculation that produced
+  // embedded_emissions_tco2e, EXCEPT installation_name, which is
+  // labelled as the live lookup it is.
+
+  /**
+   * The frozen country-mapping enum, copied verbatim from the
+   * resolution snapshot: "MAPPED" or "UNLISTED".
+   *
+   * Null for an ACTUAL determination (the actual path never reads
+   * origin) and for an undetermined line. Documented in the XLSX Notes
+   * sheet and the release report as: copied verbatim from the frozen
+   * regulatory resolution snapshot; populated only for DEFAULT
+   * determinations; it does NOT distinguish an EU member state from a
+   * genuinely unlisted third country or from a non-country code, and it
+   * is not a scope indicator.
+   */
+  country_mapping_status: string | null;
+
+  /** The producer's emission_data record an ACTUAL figure came from. */
+  emission_data_id: string | null;
+  emission_data_version: number | null;
+
+  /**
+   * A LIVE lookup of current, grant-dependent visibility -- not
+   * provenance. Null when the installation is no longer visible to this
+   * organization (the grant was revoked or expired), and it can change
+   * between two exports of the same period after a revoke or a rename.
+   * The declaration's own filed_snapshot remains the archived record.
+   */
+  installation_name: string | null;
+
+  /** The sharing grant an ACTUAL figure was read through, if any. */
+  sharing_grant_id: string | null;
+
+  /**
+   * Whether the figure in this row is the CURRENT calculation of this
+   * line: "CURRENT", "STALE" (calculated against a determination the
+   * line no longer carries -- a state the filing gate refuses), or
+   * "NOT_CALCULATED".
+   */
+  calculation_currency: "CURRENT" | "STALE" | "NOT_CALCULATED";
+}
+
+interface InstallationNameRow {
+  id: string;
+  name: string;
 }
 
 /**
@@ -114,11 +175,53 @@ function quantityOf(
     : { quantity: line.quantity_mwh as DecimalString, quantity_unit: "MWH" };
 }
 
+/**
+ * 2026-09-03 (P14). Which determination do the provenance columns
+ * describe?
+ *
+ * The one the CALCULATION was performed against, whenever there is a
+ * calculation. The row's whole subject is embedded_emissions_tco2e, and
+ * describing that figure with facts taken from the line's CURRENT
+ * determination produces a row that contradicts itself: edit a line's
+ * quantity and the determination is nulled while the calculation
+ * survives, so today's export prints "Determination method =
+ * NOT_DETERMINED" beside a real tCO2e figure that was very much
+ * determined.
+ *
+ * With no calculation there is nothing to describe but the line's
+ * current state, which is the honest answer to "what is this line
+ * right now".
+ */
+function describedDetermination(
+  entry: PeriodShipmentLine,
+): EmissionDetermination | null {
+  return entry.calculation !== null
+    ? entry.calculation.determination
+    : entry.line.emission_determination;
+}
+
+function currencyOf(
+  entry: PeriodShipmentLine,
+): PeriodExportRow["calculation_currency"] {
+  if (entry.calculation === null) {
+    return "NOT_CALCULATED";
+  }
+
+  return checkCalculationCurrency(
+    entry.calculation.determination,
+    entry.line.emission_determination,
+  );
+}
+
 function toExportRow(
   entry: PeriodShipmentLine,
+  installationNameById: ReadonlyMap<string, string>,
 ): PeriodExportRow {
   const determination =
-    entry.line.emission_determination;
+    describedDetermination(entry);
+
+  const snapshot =
+    determination?.method === "ACTUAL" ? determination.snapshot : null;
 
   return {
     shipment_reference: entry.shipment_reference,
@@ -140,7 +243,83 @@ function toExportRow(
     engine_version: entry.calculation?.engine_version ?? null,
     embedded_emissions_tco2e: entry.calculation?.embedded_emissions_tco2e ?? null,
     calculated_at: entry.calculation?.calculated_at ?? null,
+
+    country_mapping_status:
+      determination?.method === "DEFAULT"
+        ? determination.resolution.country_mapping.status
+        : null,
+
+    emission_data_id: snapshot?.emission_data_id ?? null,
+    emission_data_version: snapshot?.emission_data_version ?? null,
+
+    installation_name:
+      snapshot === null
+        ? null
+        : installationNameById.get(snapshot.installation_id) ?? null,
+
+    sharing_grant_id: snapshot?.sharing_grant_id ?? null,
+
+    calculation_currency: currencyOf(entry),
   };
+}
+
+/**
+ * Current, RLS-scoped names for the installations behind this period's
+ * ACTUAL determinations.
+ *
+ * Batched once for the whole export rather than per row. Read under the
+ * caller's own RLS, so an installation whose sharing grant has been
+ * revoked simply does not come back and its column is blank -- which is
+ * the truth: the name is not provenance, it is what this organization
+ * can see today.
+ *
+ * A query failure degrades the NAMES only. Every other column in the
+ * export is frozen provenance and must not be withheld because a
+ * cosmetic lookup failed.
+ */
+async function fetchInstallationNames(
+  supabase: SupabaseClient,
+  lines: readonly PeriodShipmentLine[],
+): Promise<Map<string, string>> {
+  const installationIds =
+    Array.from(
+      new Set(
+        lines
+          .map(
+            (entry) => describedDetermination(entry),
+          )
+          .filter(
+            (determination): determination is EmissionDetermination =>
+              determination?.method === "ACTUAL",
+          )
+          .map(
+            (determination) =>
+              determination.method === "ACTUAL"
+                ? determination.snapshot.installation_id as string
+                : "",
+          ),
+      ),
+    );
+
+  if (installationIds.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } =
+    await supabase
+      .from("installations")
+      .select("id, name")
+      .in("id", installationIds);
+
+  if (error || !data) {
+    return new Map();
+  }
+
+  return new Map(
+    (data as InstallationNameRow[]).map(
+      (row) => [row.id, row.name],
+    ),
+  );
 }
 
 /**
@@ -169,9 +348,19 @@ export async function buildPeriodExportRows(
       period,
     );
 
+  const installationNameById =
+    await fetchInstallationNames(
+      supabase,
+      lines,
+    );
+
   return lines
     .map(
-      toExportRow,
+      (entry) =>
+        toExportRow(
+          entry,
+          installationNameById,
+        ),
     )
     .sort(
       (a, b) => {
