@@ -4325,3 +4325,92 @@ error.
 **SMTP: FAIL — NOT VERIFIED.** No confirmation email and no
 password-reset email has been delivered or consumed. The real-user gate
 (§46) remains open and cannot be completed until sending works.
+
+---
+
+## 60. SMTP ROOT CAUSE FOUND — `535 "Invalid username"` (2026-09-02)
+
+The Supabase **Auth** service log names the failure directly. No
+inference was required, and none was used.
+
+### 60.1 The log
+
+```
+17:35:47  500  POST /signup    535 "Invalid username"
+17:34:50  500  POST /signup    535 "Invalid username"
+17:33:31  500  POST /signup    535 "Invalid username"
+17:28:32  500  POST /recover   535 "Invalid username"
+17:25:32  500  POST /recover   535 "Invalid username"
+17:18:04  500  POST /recover   535 "Invalid username"
+```
+
+SMTP `535` is an **authentication rejection**. GoTrue is being refused by
+Resend at AUTH, which is why nothing ever appeared in Resend's send log:
+the session never got past login, so no message was ever submitted.
+
+### 60.2 Reproduced, to identify which field
+
+Against `smtp.resend.com:587` with the working API key (AUTH only, no
+mail sent):
+
+| Username | Result |
+|---|---|
+| `resend` | **AUTH OK** |
+| `noreply@snowkap.co.in` (the sender address) | **`535 Invalid username`** |
+| `apikey` | `535 Invalid username` |
+
+Resend requires the username to be the **literal string `resend`**. Any
+other value — most commonly the sender address, pasted into the username
+field — produces exactly the error in the log.
+
+### 60.3 The fix
+
+**Supabase → Project Settings → Authentication → SMTP Settings →
+Username = `resend`** (lowercase, literal; not an email address).
+
+Everything else is already correct and should not be changed:
+host `smtp.resend.com`, port `587`, sender `noreply@snowkap.co.in`,
+password = the Resend API key.
+
+### 60.4 Corrections this log forces
+
+**The port was never the cause.** §57 concluded 465-vs-587 was the root
+cause. The log shows `535 "Invalid username"` at **17:18 (port 465)** and
+still at **17:33–17:35 (port 587)**, across three `reloading api with new
+configuration` events. The port change was **unnecessary**. 587 remains a
+correct setting for GoTrue's STARTTLS handshake and should be kept, but
+it fixed nothing. §57's root-cause claim is **withdrawn**.
+
+**The original §51 inference is confirmed.** The log records
+`env GOTRUE_RATE_LIMIT_EMAIL_SENT changed, updating Email limiter from
+2/1h to 30` — independently confirming the project had been on the
+built-in sender's 2/hour cap, which is what §51 deduced from the 429
+signature.
+
+**The 200s before the 500s are explained.** Four `POST /recover` returned
+`200 request completed` at 17:17:36–41: those were this session's probes
+for *non-existent* addresses, where GoTrue sends nothing and never
+reaches SMTP. The 500s begin at 17:18:02, the first probe against an
+*existing* user. The observations are fully consistent.
+
+### 60.5 Score on my own SMTP diagnoses
+
+Four attempts before the log settled it:
+
+| # | Claim | Verdict |
+|---|---|---|
+| 1 | Custom SMTP not configured (429 at ~2 attempts) | **Correct** |
+| 2 | Sender domain wrong (`snowkap.com`) | Wrong — generalised from my own control send |
+| 3 | Port wrong (465 vs 587) | Wrong — 535 persisted across the change |
+| 4 | Recipient NXDOMAIN invalidates the fixture | Correct *as a caveat*, but did not explain the failure |
+
+The root cause was in the one field I never saw: the SMTP **username**
+was below the fold in the configuration screenshot, and I reasoned about
+the fields I could see instead of asking for the one I could not. The
+Auth service log named it in a single line.
+
+### 60.6 Status
+
+**SMTP: still FAIL — NOT VERIFIED.** Root cause identified and the fix is
+a single field, but no confirmation or reset email has yet been delivered
+or consumed. The real-user gate (§46) remains open.
