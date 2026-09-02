@@ -21,6 +21,41 @@ the staging/production path remains deferred until a staging Supabase
 project exists (§41: "Staging Supabase project (region/tier)" is still
 an open owner decision, as is "PITR tier").
 
+## What the logical dump is NOT (read this before relying on it)
+
+Added 2026-09-03 (P14), because the drill below is easy to read as
+"backups are covered" and it is not what it proves.
+
+The `pg_dump` in this document covers the `public` and `app` schemas.
+That is a **schema and product-data artifact**, and it is genuinely
+useful for what it covers. It is **not a standalone recovery path**,
+because two things a working deployment needs are outside it:
+
+- **`auth.users` is not in it.** Ten foreign keys point at that table.
+  Restoring `public` alone into an empty project produces a database
+  whose every `created_by_user_id`, `actor_user_id`, `verifier_user_id`
+  and membership row references users that do not exist. Nobody can sign
+  in, and nothing attributes to anyone.
+- **Storage objects are not in it.** Evidence files live in the
+  `evidence` bucket, not in Postgres. `evidence_files` rows would
+  restore pointing at objects that are gone -- and evidence
+  completeness is a live, re-derived gate, so every affected emission
+  data record would become Incomplete and every determination frozen
+  from it would stop being re-savable.
+
+So this dump restores the SHAPE of the system and its product rows. Full
+recovery of a hosted project depends on Supabase's own backup or PITR,
+which is a paid-tier decision the owner has not yet recorded, and on
+whatever covers the Storage bucket.
+
+**A backup that has never been restored is not evidence.** The drill
+below has been run against local Postgres and is real. No restore has
+ever been performed against a hosted project. Until one has -- into a
+throwaway project, with `pnpm regulatory:verify` VALID against it and
+row counts compared for `organizations`, `emission_data`,
+`calculation_results`, `declarations` and `audit_events` -- production
+recovery is a design, not a capability, and the release report says so.
+
 ## Two separate recovery domains — do not conflate them
 
 This codebase has **two independent recoverability properties**, with

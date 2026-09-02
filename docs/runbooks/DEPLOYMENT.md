@@ -485,6 +485,79 @@ this section. The three failures below were a genuine, real host-disk
 blocker, not a Dockerfile defect, and are kept here as the record of
 that — not as a currently-open item.
 
+## Promoting a migration to production (the gated procedure)
+
+Added 2026-09-03 (P14). This procedure existed only as an assumption
+until now, and one of the migrations it governs is a live example of why
+it needs writing down: `20260902150000` re-creates
+`sharing_counterparty_org_names()`, a function **already called by
+deployed code**, so `db push` alone changes what production discloses
+before any application change ships. "The migration is inert until the
+code lands" is not true in general and must never be assumed.
+
+Order matters. Do these in sequence, not in parallel, and stop at the
+first surprise.
+
+1. **Confirm the ledger.** `supabase migration list --linked`. Paste the
+   output into the release record. The repo count and the remote count
+   must match before anything is pushed. A previously-recorded count is
+   not evidence; re-read it.
+
+2. **Prove the migration on the isolated branch first.** Every migration
+   in this release ships with its own negative suite, run against local
+   Postgres where the migration actually applies. CI green on the exact
+   SHA is the only pre-push proof available, because there is no
+   staging project.
+
+3. **Rehearse the rollback before touching anything.** See
+   [`ROLLBACK.md`](./ROLLBACK.md). Do this BEFORE any Auth template
+   change: a templates-first rollback leaves delivered links pointing at
+   a route that no longer exists.
+
+4. **Dry run, then push.** `supabase db push --dry-run`, read what it
+   intends to do, then `supabase db push`. Inside one contiguous window,
+   with someone watching.
+
+5. **Probe what you pushed, read-only.** For every function the
+   migration touched, compare `pg_proc.prosrc`, `prosecdef` and
+   `proconfig` against the repo file. A partial push is otherwise
+   undetectable. For anything that changes disclosure, run the probe as
+   a member of an entitled org AND as a member of an unrelated one,
+   inside `begin; ... rollback;`.
+
+6. **Only then deploy the application.** Fast-forward the deploy branch
+   once, producing exactly one deploy. Record the previous SHA as the
+   rollback target before doing it.
+
+7. **Smoke it.** `node scripts/smoke/production-smoke.mjs --url <origin>
+   --sha <deployed commit> --dataset-version <expected>
+   --row-count <expected>`. Strictly read-only. The expectations are
+   arguments rather than constants on purpose -- a regulatory
+   expectation hardcoded in a script nobody re-reads goes stale the
+   first time it legitimately changes.
+
+## Rebuilding on a fresh database
+
+The migration set is **not self-sufficient**. Running
+`supabase migration up` from empty does not produce a working database,
+because four migrations depend on regulatory tables that the offline
+Python pipeline loads, not the migrations themselves. This recipe lived
+only inside `.github/workflows/ci.yml` until 2026-09-03; a recipe that
+exists only in CI is a recipe nobody can follow during an incident.
+
+1. Start the database and apply migrations up to, but not including, the
+   ones that require regulatory data. CI does this by deferring 61
+   migrations out of the directory, applying the rest, and moving them
+   back.
+2. Run the regulatory pipeline (`scripts/regulatory/`) to load
+   `countries`, `cbam_goods`, `production_routes`,
+   `regulatory_datasets` and `default_emission_values`.
+3. `supabase migration up` for the deferred remainder.
+4. Re-apply `seed.sql`. The deferred-migration dance drops base-table
+   grants that the seed restores; skipping this leaves a database that
+   passes migrations and fails every query.
+5. `pnpm regulatory:verify` must report `RESULT: VALID`.
+
 ## Related documents
 
 - `docs/plans/MASTER_PLAN.md` §29 (Railway), §31 (CI/CD), §32
