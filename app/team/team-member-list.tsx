@@ -11,6 +11,10 @@ import {
 } from "lucide-react";
 
 import {
+  ConfirmSubmitButton,
+} from "../../components/ui/confirm-submit-button";
+
+import {
   Button,
 } from "../../components/ui/button";
 
@@ -277,19 +281,27 @@ function TeamMemberListItem(
                 value={member.membershipId}
               />
 
-              <Button
-                type="submit"
+              <ConfirmSubmitButton
                 variant="destructive"
                 size="sm"
-                loading={removePending}
+                pending={removePending}
                 aria-label={`Remove ${member.email}`}
                 title="Remove: permanently deletes this membership, cannot be undone"
+                confirm={
+                  {
+                    title: `Remove ${member.email} from this organization?`,
+                    description:
+                      "This permanently deletes their membership and cannot be undone. To suspend their access while keeping their history, use Deactivate instead.",
+                    confirmLabel: "Remove member",
+                    variant: "destructive",
+                  }
+                }
               >
                 <UserMinus
                   className="size-4"
                   aria-hidden="true"
                 />
-              </Button>
+              </ConfirmSubmitButton>
             </form>
           </div>
         ) : (

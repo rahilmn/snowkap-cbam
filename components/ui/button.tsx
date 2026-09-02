@@ -5,6 +5,7 @@ import {
 
 import type {
   ButtonHTMLAttributes,
+  Ref,
 } from "react";
 
 import {
@@ -71,6 +72,15 @@ export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   loading?: boolean;
+
+  /**
+   * 2026-09-03 (P14). React 19 passes ref as an ordinary prop, but
+   * ButtonHTMLAttributes does not declare it, so it has to be named
+   * here. ConfirmSubmitButton needs it: it submits the form THROUGH this
+   * button (form.requestSubmit(button)) so a form with more than one
+   * submitter still sees which one was used.
+   */
+  ref?: Ref<HTMLButtonElement>;
 }
 
 export function Button(

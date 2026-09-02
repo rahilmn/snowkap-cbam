@@ -9,6 +9,10 @@ import {
 } from "lucide-react";
 
 import {
+  ConfirmSubmitButton,
+} from "../../../components/ui/confirm-submit-button";
+
+import {
   Button,
 } from "../../../components/ui/button";
 
@@ -95,19 +99,27 @@ function SupplierListItem(
             value={supplier.id}
           />
 
-          <Button
-            type="submit"
+          <ConfirmSubmitButton
             variant="ghost"
             size="sm"
-            loading={pending}
+            pending={pending}
             aria-label={`Remove ${supplier.name}`}
             title={`Remove ${supplier.name}`}
+            confirm={
+              {
+                title: `Remove ${supplier.name}?`,
+                description:
+                  "This supplier is removed from your registry. This cannot be undone.",
+                confirmLabel: "Remove supplier",
+                variant: "destructive",
+              }
+            }
           >
             <Trash2
               className="size-4"
               aria-hidden="true"
             />
-          </Button>
+          </ConfirmSubmitButton>
         </form>
       </div>
 

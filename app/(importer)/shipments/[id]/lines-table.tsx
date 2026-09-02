@@ -12,6 +12,10 @@ import {
 } from "lucide-react";
 
 import {
+  ConfirmSubmitButton,
+} from "../../../../components/ui/confirm-submit-button";
+
+import {
   Button,
 } from "../../../../components/ui/button";
 
@@ -310,19 +314,27 @@ function LineRow(
                 value={shipmentId}
               />
 
-              <Button
-                type="submit"
+              <ConfirmSubmitButton
                 variant="ghost"
                 size="sm"
-                loading={pending}
+                pending={pending}
                 aria-label={`Remove line ${line.line_number}`}
                 title={`Remove line ${line.line_number}`}
+                confirm={
+                  {
+                    title: `Remove line ${line.line_number} (${line.cn_code})?`,
+                    description:
+                      "The line and its emission determination are removed from this shipment. This cannot be undone.",
+                    confirmLabel: "Remove line",
+                    variant: "destructive",
+                  }
+                }
               >
                 <Trash2
                   className="size-4"
                   aria-hidden="true"
                 />
-              </Button>
+              </ConfirmSubmitButton>
             </form>
 
             {state.status === "error" ? (

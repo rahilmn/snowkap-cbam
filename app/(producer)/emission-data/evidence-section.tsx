@@ -11,6 +11,10 @@ import {
 } from "next/navigation";
 
 import {
+  ConfirmSubmitButton,
+} from "../../../components/ui/confirm-submit-button";
+
+import {
   Button,
   buttonVariants,
 } from "../../../components/ui/button";
@@ -325,14 +329,22 @@ function EvidenceFileRow(
           value={file.id}
         />
 
-        <Button
-          type="submit"
+        <ConfirmSubmitButton
           size="sm"
           variant="destructive"
-          loading={pending}
+          pending={pending}
+          confirm={
+            {
+              title: `Remove ${file.originalFilename}?`,
+              description:
+                "The file is deleted from storage. If this record is then left with no evidence it becomes incomplete, and cannot be verified or activated until evidence is attached again.",
+              confirmLabel: "Remove file",
+              variant: "destructive",
+            }
+          }
         >
           Remove
-        </Button>
+        </ConfirmSubmitButton>
       </form>
 
       {state.status === "error" ? (

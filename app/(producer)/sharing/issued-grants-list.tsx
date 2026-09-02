@@ -9,6 +9,10 @@ import {
 } from "lucide-react";
 
 import {
+  ConfirmSubmitButton,
+} from "../../../components/ui/confirm-submit-button";
+
+import {
   Button,
 } from "../../../components/ui/button";
 
@@ -127,19 +131,34 @@ function IssuedGrantListItem(
               value={grant.id}
             />
 
-            <Button
-              type="submit"
+            <ConfirmSubmitButton
               variant="ghost"
               size="sm"
-              loading={pending}
+              pending={pending}
               aria-label={`Revoke access for ${grant.installationName}`}
               title={`Revoke access for ${grant.installationName}`}
+              confirm={
+                {
+                  title: `Revoke access for ${grant.installationName}?`,
+
+                  // The copy branches on status because canRevoke covers
+                  // both INVITED and ACTIVE, and "they lose access" is
+                  // simply untrue of a grant nobody ever accepted.
+                  description:
+                    grant.status === "INVITED"
+                      ? "The invitation stops working immediately. Nobody has read this installation's data through it yet. To share again you would issue a new grant."
+                      : "The grantee can no longer read this installation's verified emissions data. Determinations they have already made from it are frozen copies and stay valid -- only future reads stop. This cannot be undone; to share again you would issue a new grant.",
+                  confirmLabel: "Revoke access",
+                  cancelLabel: "Keep sharing",
+                  variant: "destructive",
+                }
+              }
             >
               <X
                 className="size-4"
                 aria-hidden="true"
               />
-            </Button>
+            </ConfirmSubmitButton>
           </form>
         ) : null}
       </div>

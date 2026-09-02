@@ -9,6 +9,10 @@ import {
 } from "lucide-react";
 
 import {
+  ConfirmSubmitButton,
+} from "../../../components/ui/confirm-submit-button";
+
+import {
   Button,
 } from "../../../components/ui/button";
 
@@ -110,19 +114,33 @@ function InstallationListItem(
             value={installation.id}
           />
 
-          <Button
-            type="submit"
+          <ConfirmSubmitButton
             variant="ghost"
             size="sm"
-            loading={pending}
+            pending={pending}
             aria-label={`Remove ${installation.name}`}
             title={`Remove ${installation.name}`}
+            confirm={
+              {
+                title: `Remove ${installation.name}?`,
+
+                // Deliberately not "everything it owns goes with it":
+                // the foreign keys are ON DELETE RESTRICT, so removal is
+                // REFUSED while emission data or sharing grants still
+                // reference it. Promising a cascade that cannot happen
+                // would be a worse dialog than none at all.
+                description:
+                  "This cannot be undone. If emission data or sharing grants still reference this installation, the removal will be refused and nothing will change.",
+                confirmLabel: "Remove installation",
+                variant: "destructive",
+              }
+            }
           >
             <Trash2
               className="size-4"
               aria-hidden="true"
             />
-          </Button>
+          </ConfirmSubmitButton>
         </form>
       </div>
 

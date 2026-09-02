@@ -9,6 +9,10 @@ import {
 } from "../../../../components/ui/badge";
 
 import {
+  ConfirmSubmitButton,
+} from "../../../../components/ui/confirm-submit-button";
+
+import {
   Button,
 } from "../../../../components/ui/button";
 
@@ -206,16 +210,43 @@ export function EmissionsCell(
               value={shipmentId}
             />
 
-            <Button
-              type="submit"
-              variant="ghost"
-              size="sm"
-              loading={pending}
-            >
-              {defaultResolutionButtonLabel(
-                determination,
-              )}
-            </Button>
+            {determination?.method === "ACTUAL" ? (
+              // Only this direction is confirmed. Resolving or
+              // re-resolving a default value is a repeatable, reversible
+              // step; REPLACING verified actual data with a default is a
+              // change of regulatory basis, and the audit trail records
+              // it as a redetermination with what it replaced.
+              <ConfirmSubmitButton
+                variant="ghost"
+                size="sm"
+                pending={pending}
+                confirm={
+                  {
+                    title: "Replace actual data with a default value?",
+                    description:
+                      "This line's verified actual-data determination is replaced by the regulatory default value for its CN code and origin. Its current calculation becomes stale until you recalculate, and the change is recorded in the audit trail together with the determination it replaced.",
+                    confirmLabel: "Replace with default value",
+                    cancelLabel: "Keep actual data",
+                    variant: "destructive",
+                  }
+                }
+              >
+                {defaultResolutionButtonLabel(
+                  determination,
+                )}
+              </ConfirmSubmitButton>
+            ) : (
+              <Button
+                type="submit"
+                variant="ghost"
+                size="sm"
+                loading={pending}
+              >
+                {defaultResolutionButtonLabel(
+                  determination,
+                )}
+              </Button>
+            )}
           </form>
         ) : null}
       </div>

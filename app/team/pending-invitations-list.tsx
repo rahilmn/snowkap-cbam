@@ -9,6 +9,10 @@ import {
 } from "lucide-react";
 
 import {
+  ConfirmSubmitButton,
+} from "../../components/ui/confirm-submit-button";
+
+import {
   Button,
 } from "../../components/ui/button";
 
@@ -135,19 +139,27 @@ function PendingInvitationItem(
             value={invitation.invitationId}
           />
 
-          <Button
-            type="submit"
+          <ConfirmSubmitButton
             variant="ghost"
             size="sm"
-            loading={pending}
+            pending={pending}
             aria-label={`Revoke invitation for ${invitation.email}`}
             title={`Revoke invitation for ${invitation.email}`}
+            confirm={
+              {
+                title: `Revoke the invitation for ${invitation.email}?`,
+                description:
+                  "Their invitation link stops working immediately. You can invite this address again afterwards.",
+                confirmLabel: "Revoke invitation",
+                variant: "destructive",
+              }
+            }
           >
             <X
               className="size-4"
               aria-hidden="true"
             />
-          </Button>
+          </ConfirmSubmitButton>
         </form>
       </div>
 

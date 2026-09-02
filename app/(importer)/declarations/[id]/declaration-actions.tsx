@@ -10,6 +10,10 @@ import {
 } from "../../../../components/ui/badge";
 
 import {
+  ConfirmSubmitButton,
+} from "../../../../components/ui/confirm-submit-button";
+
+import {
   Button,
 } from "../../../../components/ui/button";
 
@@ -174,14 +178,27 @@ function MarkReadyForm(
     >
       <input type="hidden" name="declarationId" value={declarationId} />
 
-      <Button
-        type="submit"
+      <ConfirmSubmitButton
         variant="primary"
         size="sm"
-        loading={pending}
+        pending={pending}
+        confirm={
+          {
+            title: "Mark this declaration ready?",
+
+            // Ready freezes the set of member shipments, and there is no
+            // route back to draft from this screen -- the period's own
+            // PERIOD_HAS_READY_DECLARATION rule then prevents starting
+            // another draft for it.
+            description:
+              "This freezes the set of shipments in this declaration and is the step before recording it as filed. A ready declaration cannot be returned to draft from this screen.",
+            confirmLabel: "Mark ready",
+            cancelLabel: "Keep as draft",
+          }
+        }
       >
         Mark ready
-      </Button>
+      </ConfirmSubmitButton>
 
       {state.status === "error" ? (
         <div className="flex max-w-80 flex-col gap-1.5 text-right">
