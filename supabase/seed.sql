@@ -101,6 +101,23 @@ end
 $$;
 
 -- Safe with any number of tables, including none.
+-- 2026-09-04 (P14, AUTH-1). The session store, re-asserted for the same
+-- reason as the three above: public.app_sessions holds the provider
+-- credentials for every signed-in browser, and the blanket grant three
+-- dozen lines up hands it to anon and authenticated. A client that can
+-- read this table can impersonate every signed-in user, so this revoke
+-- is not one a fresh environment may quietly go without.
+--
+-- Guarded on the table existing, so this file still runs against a
+-- database built from an earlier subset of the migrations.
+do $$
+begin
+    if to_regclass('public.app_sessions') is not null then
+        execute 'revoke all on public.app_sessions from anon, authenticated';
+    end if;
+end
+$$;
+
 revoke truncate on all tables in schema public from anon, authenticated;
 
 alter default privileges in schema public
