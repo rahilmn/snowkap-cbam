@@ -619,6 +619,251 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "P14/F11 v2: the downgrade gate is not bypassed by moving status in the same statement",
+      async () => {
+        /**
+         * The hole the first version of this gate had, found by the P14
+         * adversarial security re-check and reproduced live before the
+         * fix was written.
+         *
+         * 20260903140000 keyed on `new.status = 'ACTIVE'` as well as
+         * `old.status`, so a single UPDATE that moved BOTH columns
+         * walked straight past it -- and the whole
+         * VERIFIED -> strip evidence -> VERIFIED chain that migration's
+         * header named was reproducible again.
+         */
+        const emissionDataId =
+          await insertDraftEmissionData(
+            {
+              status: "ACTIVE",
+              verification_status: "VERIFIED",
+              verifier_user_id: producerAdminId,
+              evidence_file_ids: [crypto.randomUUID()],
+            },
+          );
+
+        const { error } =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update(
+              {
+                status: "DRAFT",
+                verification_status: "VERIFICATION_PENDING",
+              },
+            )
+            .eq("id", emissionDataId);
+
+        expect(error).not.toBeNull();
+
+        expect(error?.message).toContain(
+          "cannot be un-verified",
+        );
+      },
+    );
+
+    it(
+      "P14/F11 v2: an ACTIVE record cannot be walked back to DRAFT, which is what defeated the two-statement bypass",
+      async () => {
+        // The one-statement variant is caught by the un-verify rule
+        // above. The TWO-statement variant is not: park the record at
+        // DRAFT first and every gate keyed on old.status = 'ACTIVE'
+        // stops applying to it. There is no ACTIVE -> DRAFT transition
+        // in the domain at all, so forbidding it costs nothing.
+        const emissionDataId =
+          await insertDraftEmissionData(
+            {
+              status: "ACTIVE",
+              verification_status: "VERIFIED",
+              verifier_user_id: producerAdminId,
+            },
+          );
+
+        const { error } =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update(
+              { status: "DRAFT" },
+            )
+            .eq("id", emissionDataId);
+
+        expect(error).not.toBeNull();
+
+        expect(error?.message).toContain(
+          "cannot return to DRAFT",
+        );
+      },
+    );
+
+    it(
+      "P14/F11 v2: evidence cannot be REMOVED from an ACTIVE, VERIFIED record -- no downgrade required to reach this",
+      async () => {
+        /**
+         * Worse and simpler than the downgrade chain, and missed
+         * entirely by the first version of this gate.
+         *
+         * 20260829560000 made the evidence_files ROWS immutable behind a
+         * VERIFIED record, and removeEvidenceFile refuses in the
+         * application. Neither touches emission_data's own
+         * evidence_file_ids ARRAY, and the fact-immutability trigger
+         * deliberately omits it so files can still be ADDED. So the
+         * array could simply be emptied, in one statement, leaving the
+         * record ACTIVE + VERIFIED with no evidence at all.
+         *
+         * The importer is the one harmed: the v10 validator compares
+         * their frozen evidence set byte-for-byte against this array.
+         */
+        const evidenceId =
+          crypto.randomUUID();
+
+        const emissionDataId =
+          await insertDraftEmissionData(
+            {
+              status: "ACTIVE",
+              verification_status: "VERIFIED",
+              verifier_user_id: producerAdminId,
+              evidence_file_ids: [evidenceId],
+            },
+          );
+
+        const { error } =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update(
+              { evidence_file_ids: [] },
+            )
+            .eq("id", emissionDataId);
+
+        expect(error).not.toBeNull();
+
+        expect(error?.message).toContain(
+          "evidence cannot be removed",
+        );
+
+        const { data: after } =
+          await serviceClient
+            .from("emission_data")
+            .select("evidence_file_ids")
+            .eq("id", emissionDataId)
+            .single();
+
+        expect(
+          (after as { evidence_file_ids: string[] }).evidence_file_ids,
+        ).toEqual(
+          [evidenceId],
+        );
+      },
+    );
+
+    it(
+      "P14/F11 v2: the new guard does not block ADDING evidence to an ACTIVE, VERIFIED record",
+      async () => {
+        /**
+         * The direction that must stay open. actual-determination-is-
+         * unchanged.ts reasons explicitly that a grown evidence set is
+         * why a redetermination has to be allowed to proceed -- a guard
+         * that blocked additions would freeze importers out of the only
+         * repair available to them.
+         *
+         * Exercised through the SERVICE ROLE deliberately. RLS bypasses
+         * for it; triggers do not. So this isolates the question this
+         * test is actually about -- does the new trigger refuse an
+         * addition? -- from a separate, correct wall that would
+         * otherwise mask the answer:
+         * emission_data_update_own_org's WITH CHECK independently
+         * requires every id in evidence_file_ids to reference a real
+         * evidence_files row for this record, so an ordinary caller
+         * cannot invent one. That policy is what makes ADDITION safe;
+         * the trigger is what makes REMOVAL impossible. Emptying the
+         * array satisfied that policy vacuously, which is exactly the
+         * hole the trigger closes.
+         */
+        const original =
+          crypto.randomUUID();
+
+        const emissionDataId =
+          await insertDraftEmissionData(
+            {
+              status: "ACTIVE",
+              verification_status: "VERIFIED",
+              verifier_user_id: producerAdminId,
+              evidence_file_ids: [original],
+            },
+          );
+
+        const { error } =
+          await serviceClient
+            .from("emission_data")
+            .update(
+              { evidence_file_ids: [original, crypto.randomUUID()] },
+            )
+            .eq("id", emissionDataId);
+
+        expect(error).toBeNull();
+      },
+    );
+
+    it(
+      "P14/F11 v2: an ordinary caller still cannot invent an evidence id that references no file",
+      async () => {
+        // The other half of the pair above, and the reason additions can
+        // be left open at all.
+        const original =
+          crypto.randomUUID();
+
+        const emissionDataId =
+          await insertDraftEmissionData(
+            {
+              status: "ACTIVE",
+              verification_status: "VERIFIED",
+              verifier_user_id: producerAdminId,
+              evidence_file_ids: [original],
+            },
+          );
+
+        const { error } =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update(
+              { evidence_file_ids: [original, crypto.randomUUID()] },
+            )
+            .eq("id", emissionDataId);
+
+        expect(error).not.toBeNull();
+      },
+    );
+
+    it(
+      "P14/F11 v2: swapping one evidence id for another is caught, even though the count is unchanged",
+      async () => {
+        // Set containment, not length. A same-count swap replaces the
+        // very documents a frozen determination cites.
+        const emissionDataId =
+          await insertDraftEmissionData(
+            {
+              status: "ACTIVE",
+              verification_status: "VERIFIED",
+              verifier_user_id: producerAdminId,
+              evidence_file_ids: [crypto.randomUUID()],
+            },
+          );
+
+        const { error } =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update(
+              { evidence_file_ids: [crypto.randomUUID()] },
+            )
+            .eq("id", emissionDataId);
+
+        expect(error).not.toBeNull();
+
+        expect(error?.message).toContain(
+          "evidence cannot be removed",
+        );
+      },
+    );
+
+    it(
       "P14/F11: the gate is narrow -- a DRAFT record's verification can still move freely",
       async () => {
         // A gate that never opens is indistinguishable from a broken
