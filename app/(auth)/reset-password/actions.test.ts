@@ -26,18 +26,63 @@ const updateUserMock =
 const signOutMock =
   vi.fn();
 
+// 2026-09-04 (P14, AUTH-1). getClaims() is how the action asks GoTrue
+// -- not the cookie -- how this session was established. See
+// app/auth/session-assurance.ts.
+const getClaimsMock =
+  vi.fn();
+
 const getServerSupabaseClientMock =
   vi.fn(
     () => (
       {
         auth: {
           getUser: getUserMock,
+          getClaims: getClaimsMock,
           updateUser: updateUserMock,
           signOut: signOutMock,
         },
       }
     ),
   );
+
+/**
+ * The claim shape a real recovery or invitation link produces
+ * (measured against GoTrue v2.195.0 -- both emit method "otp").
+ */
+function emailLinkClaims() {
+  return {
+    data: {
+      claims: {
+        amr: [
+          {
+            method: "otp",
+            timestamp: 1788465889,
+          },
+        ],
+      },
+    },
+  };
+}
+
+/**
+ * The claim shape an ordinary password sign-in produces -- which is
+ * exactly what a stolen session cookie carries.
+ */
+function passwordSignInClaims() {
+  return {
+    data: {
+      claims: {
+        amr: [
+          {
+            method: "password",
+            timestamp: 1788465889,
+          },
+        ],
+      },
+    },
+  };
+}
 
 vi.mock(
   "../../../src/infrastructure/supabase/server-client",
@@ -204,6 +249,119 @@ describe(
       },
     );
 
+    // --- AUTH-1: a session is not permission to set a password ---
+
+    it(
+      "REFUSES a session established by signing in with a password -- the shape a stolen cookie has -- and never calls updateUser",
+      async () => {
+        // The confirmed AUTH-1 takeover, at the exact boundary that let
+        // it happen: an attacker holding a fresh stolen session, who
+        // does not know the current password, reaching this action.
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getUserMock.mockResolvedValueOnce(
+          { data: { user: { id: "victim" } } },
+        );
+
+        getClaimsMock.mockResolvedValueOnce(
+          passwordSignInClaims(),
+        );
+
+        const result =
+          await updatePasswordAction(
+            { status: "idle" },
+            formData(
+              { password: "AttackerPick1", confirmPassword: "AttackerPick1" },
+            ),
+          );
+
+        expect(result.status).toBe(
+          "error",
+        );
+
+        expect(result.message).toContain(
+          "needs a fresh link",
+        );
+
+        expect(updateUserMock).not.toHaveBeenCalled();
+
+        expect(signOutMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "fails closed when the claims cannot be read at all",
+      async () => {
+        for (
+          const claimsResult of [
+            { data: null },
+            { data: { claims: {} } },
+            { data: { claims: { amr: [] } } },
+          ]
+        ) {
+          checkMock.mockReturnValueOnce(
+            { allowed: true, retryAfterMs: 0 },
+          );
+
+          getUserMock.mockResolvedValueOnce(
+            { data: { user: { id: "user-1" } } },
+          );
+
+          getClaimsMock.mockResolvedValueOnce(
+            claimsResult,
+          );
+
+          const result =
+            await updatePasswordAction(
+              { status: "idle" },
+              formData(
+                { password: "Sup3rSecret", confirmPassword: "Sup3rSecret" },
+              ),
+            );
+
+          expect(result.status).toBe(
+            "error",
+          );
+        }
+
+        expect(updateUserMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      "still accepts a genuine recovery/invitation session, so the flow this screen exists for keeps working",
+      async () => {
+        checkMock.mockReturnValueOnce(
+          { allowed: true, retryAfterMs: 0 },
+        );
+
+        getUserMock.mockResolvedValueOnce(
+          { data: { user: { id: "user-1" } } },
+        );
+
+        getClaimsMock.mockResolvedValueOnce(
+          emailLinkClaims(),
+        );
+
+        updateUserMock.mockResolvedValueOnce(
+          { error: { message: "boom" } },
+        );
+
+        await updatePasswordAction(
+          { status: "idle" },
+          formData(
+            { password: "Sup3rSecret", confirmPassword: "Sup3rSecret" },
+          ),
+        );
+
+        // Reaching updateUser at all is the assertion: the gate let a
+        // link-established session through.
+        expect(updateUserMock).toHaveBeenCalledTimes(1);
+      },
+    );
+
     it(
       "reports a generic error on a genuine updateUser failure",
       async () => {
@@ -213,6 +371,10 @@ describe(
 
         getUserMock.mockResolvedValueOnce(
           { data: { user: { id: "user-1" } } },
+        );
+
+        getClaimsMock.mockResolvedValueOnce(
+          emailLinkClaims(),
         );
 
         updateUserMock.mockResolvedValueOnce(
@@ -242,6 +404,10 @@ describe(
 
         getUserMock.mockResolvedValueOnce(
           { data: { user: { id: "user-1" } } },
+        );
+
+        getClaimsMock.mockResolvedValueOnce(
+          emailLinkClaims(),
         );
 
         updateUserMock.mockResolvedValueOnce(
@@ -328,6 +494,10 @@ describe(
 
       getUserMock.mockResolvedValue(
         { data: { user: { id: "u-1" } } },
+      );
+
+      getClaimsMock.mockResolvedValue(
+        emailLinkClaims(),
       );
 
       updateUserMock.mockResolvedValue(

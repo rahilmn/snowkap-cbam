@@ -6,9 +6,19 @@ import {
   CardTitle,
 } from "../../../components/ui/card";
 
+import Link from "next/link";
+
 import {
   isSafeRedirectPath,
 } from "../../auth/callback/is-safe-redirect-path";
+
+import {
+  sessionWasEstablishedByEmailLink,
+} from "../../auth/session-assurance";
+
+import {
+  getServerSupabaseClient,
+} from "../../../src/infrastructure/supabase/server-client";
 
 import {
   ResetPasswordForm,
@@ -45,6 +55,69 @@ export default async function ResetPasswordPage(
 
   const isFirstPassword =
     next === "/accept-invitation";
+
+  // 2026-09-04 (P14, AUTH-1). The action is the boundary -- see
+  // actions.ts -- but a screen that offers a password form to someone
+  // it is going to refuse is its own small defect: it invites the
+  // legitimate user to type a new password twice and then tells them
+  // no. Ask the same question here and say so up front instead.
+  const supabase =
+    await getServerSupabaseClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const {
+    data: claimsData,
+  } = await supabase.auth.getClaims();
+
+  const establishedByEmailLink =
+    sessionWasEstablishedByEmailLink(
+      claimsData?.claims,
+    );
+
+  if (user && !establishedByEmailLink) {
+    return (
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle className="text-base">
+            This screen needs an emailed link
+          </CardTitle>
+
+          <CardDescription>
+            You are already signed in, and setting a password here is
+            only for people who cannot supply their current one --
+            password recovery, or accepting an invitation.
+          </CardDescription>
+        </CardHeader>
+
+        <CardContent className="flex flex-col gap-3 text-sm text-[var(--text-secondary)]">
+          <p>
+            To change a password you already know, use{" "}
+            <Link
+              href="/account/password"
+              className="font-medium text-[var(--color-brand-700)] underline underline-offset-2"
+            >
+              Change password
+            </Link>
+            , which asks for your current password first.
+          </p>
+
+          <p>
+            If you have forgotten it, request a{" "}
+            <Link
+              href="/forgot-password"
+              className="font-medium text-[var(--color-brand-700)] underline underline-offset-2"
+            >
+              password-reset email
+            </Link>{" "}
+            and follow the link in it.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="w-full max-w-sm">

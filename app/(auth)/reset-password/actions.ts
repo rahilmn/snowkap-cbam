@@ -21,6 +21,10 @@ import {
   isSafeRedirectPath,
 } from "../../auth/callback/is-safe-redirect-path";
 
+import {
+  sessionWasEstablishedByEmailLink,
+} from "../../auth/session-assurance";
+
 import type {
   AuthActionState,
 } from "../action-state";
@@ -161,6 +165,50 @@ export async function updatePasswordAction(
       status: "error",
       message:
         "This link is invalid or has expired. Request a new password reset link.",
+    };
+  }
+
+  // 2026-09-04 (P14, AUTH-1). Holding a session is NOT permission to
+  // set a password here.
+  //
+  // This screen exists for the two flows where the user cannot supply a
+  // current password: recovery (they have forgotten it) and an
+  // invitation's first-password leg (they never had one). Both are
+  // reached by clicking a link sent to the account's own mailbox, and
+  // that link is the credential.
+  //
+  // Until now the only gate was "is there a session?", which made this
+  // action reachable with ANY session -- including one an attacker
+  // stole. That was the confirmed AUTH-1 takeover: a fresh stolen
+  // cookie, no knowledge of the current password, and this endpoint
+  // rewrites it. The hosted `secure_password_change` setting does not
+  // close it either; measured against a real GoTrue, that setting
+  // refuses an AGED session and lets a FRESH one through, and a cookie
+  // lifted from a live browser is by definition fresh.
+  //
+  // getClaims() is what makes this a real boundary rather than a
+  // client-side assertion: for the symmetric keys this project uses it
+  // validates the token against the auth server before returning
+  // claims, so `amr` is GoTrue's own signed statement about how the
+  // session was established, not something the caller can assert.
+  //
+  // Someone who knows their password and wants to change it uses
+  // /account/password, which requires them to prove it.
+  const {
+    data: claimsData,
+  } = await supabase.auth.getClaims();
+
+  if (
+    !sessionWasEstablishedByEmailLink(
+      claimsData?.claims,
+    )
+  ) {
+    return {
+      status: "error",
+      message:
+        "Setting a password here needs a fresh link from a password-reset " +
+        "or invitation email. Request one from the sign-in screen. To " +
+        "change a password you already know, use Change password instead.",
     };
   }
 
