@@ -168,6 +168,57 @@ real production mistake, not a pedantic distinction:
   requirement for "a destructive database change" exist specifically to
   keep destructive migrations rare and gated, which is what keeps this
   assumption usually true.
+
+> **THIS RELEASE IS NOT ADDITIVE. Read this before rolling back past it.**
+> *(added 2026-09-03, P14 remediation — confirmed by inspection, not
+> predicted.)*
+>
+> `20260903190000` revokes INSERT, UPDATE and DELETE on
+> `public.calculation_results` from `anon` and `authenticated`, and
+> routes every write through a `service_role`-only RPC. That is a
+> **privilege revocation**, which the list above does not name as a
+> destructive category — it is neither a dropped column nor a tightened
+> constraint — and it is exactly as breaking as both.
+>
+> `95c95bb`, the currently recorded rollback target, writes calculation
+> results with the **caller-scoped** client:
+>
+> ```
+> // src/application/calculations/calculate-line.ts @ 95c95bb
+> const { error: insertError } =
+>   await supabase
+>     .from("calculation_results")
+>     .insert({ org_id: orgId, line_id: lineId, ... });
+> ```
+>
+> That statement runs as `authenticated`. After this release's
+> migrations, it is refused. **Rolling the application back to
+> `95c95bb` without also reverting the revoke leaves every "Calculate"
+> action permanently broken** — not degraded, not slower: refused, on
+> every line, for every organisation, with no path forward except
+> rolling forward again.
+>
+> The same applies to the P14 remediation's own tightenings: the
+> `emission_data` INSERT gate (`20260903200000`) and the filing
+> membership rule (`20260903220000`) both refuse writes that older
+> application code considers valid.
+>
+> **So add a fourth category to the two below: a REVOKED PRIVILEGE or a
+> NEW GATE is destructive for rollback purposes**, even though nothing
+> was dropped or renamed. The test is not "did the schema lose
+> something" but "can the old code still perform the writes it makes".
+>
+> **What to do instead.** Roll the application back AND revert the
+> revoke in the same window, or do not roll back past this release at
+> all — roll forward. Before any rollback that crosses a migration
+> boundary, check the migrations applied since the target for
+> `revoke`, `create trigger` and `create policy`, not only for `drop`
+> and `alter ... type`.
+>
+> This is recorded rather than fixed: choosing between "revert the
+> revoke" and "roll forward" is an operational decision for the moment
+> it happens, and pre-committing to reverting a security boundary in a
+> runbook would be worse than naming the trade-off here.
 - **If a migration since the target commit was destructive** (dropped
   or renamed a column/table the old code reads or writes, tightened a
   constraint the old code's writes would now violate), rolling back

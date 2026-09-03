@@ -355,9 +355,24 @@ test.describe(
                 producerPage.getByText(`evidence-${runId}.pdf`),
               ).toBeVisible({ timeout: 20_000 });
 
+              // 2026-09-03 (P14 remediation). Same 20s budget as the
+              // assertion above, and for the same reason.
+              //
+              // This flaked once during the P14 certification run:
+              // "expect(locator).toBeHidden() failed -- unexpected value
+              // visible", cleared on retry. The pair was asymmetric --
+              // the upload's own assertion was given 20s because it
+              // waits on a real round trip to Supabase Storage, and this
+              // one, which waits on the SAME round trip to finish
+              // re-rendering the list, was left on the 10s default. The
+              // empty-state text and the newly uploaded filename are
+              // both briefly on screen while that re-render settles.
+              //
+              // Not a weakened assertion: it must still become hidden.
+              // It is a budget matched to the operation it follows.
               await expect(
                 producerPage.getByText("No evidence attached."),
-              ).toBeHidden();
+              ).toBeHidden({ timeout: 20_000 });
             },
           );
 
