@@ -2870,12 +2870,12 @@ twice in writing.
 ### 1. Final SHA
 
 The **tip of `phase14/release-hardening`** — that is what the
-independent review should be run against. The last functional change is
-`75979f4761f69ad8f193e5fad4d58a6faeca807f`; this report is the commit
-after it, so the tip's own hash cannot be printed here without being
-wrong the moment it is written.
+independent review should be run against. No SHA is written here: a
+report cannot name the hash of the commit that contains it, and a
+partial one goes stale the moment anything follows, which it already did
+once in this file.
 
-Eleven commits from the reviewed candidate
+Twelve commits from the reviewed candidate
 `cad99adb7c4f2a170bc7e35dd3eab4dd51c96df3`; 34 files, +5025/−202;
 79 migrations, five of them new.
 
