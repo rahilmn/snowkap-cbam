@@ -3993,3 +3993,180 @@ consecutive self-assessments, two of which were wrong. The next review
 must be by someone else, and it should resume at filing/READY population
 integrity — sections 2 through 5 of the review brief have never been
 independently attacked at any SHA in this series.
+
+---
+
+## 29. P14 implementation complete (2026-09-04)
+
+The autonomous completion pass. §28 closed session fixation and was
+followed by an independent-style review that found the READY boundary
+still bypassable; this section closes that, and everything else this
+repository can close.
+
+### The blocker this pass found and closed
+
+```
+Before:
+  20260904090000 stopped a READY shipment's lines being edited, guarding
+  on s.status = 'READY' -- and left the status writable by any member.
+  A guard conditioned on the value the attacker controls is not a guard.
+
+  Live, real REST API, a plain MEMBER's own JWT, against a declaration
+  an ADMIN approved over 2 lines = 4110 tCO2e:
+
+    MEMBER deletes a line while READY  -> 0 rows   (that guard held)
+    MEMBER sets the shipment to DRAFT  -> succeeded
+    MEMBER deletes the line            -> 1 row
+    MEMBER sets it READY again         -> succeeded
+    ADMIN  record_declaration_filed    -> OK
+
+    filed_snapshot: line_count 1, embedded_emissions_tco2e 2740
+
+  Also reachable through the product's own UI: transitionShipmentStatus
+  gated only LOCK on admin, never REOPEN.
+
+After (same script, unchanged otherwise):
+    MEMBER sets the shipment to DRAFT  -> [] (refused)
+    MEMBER deletes the line            -> 0 rows
+    MEMBER sets it READY again         -> [] (refused)
+    lines present: 2
+    ADMIN files -> OK, total 4110 = approved 4110
+```
+
+### Fixed twice, deliberately
+
+One is a condition, the other is a fact, and the review that found this
+found it precisely because the first fix had only a condition.
+
+**Layer 1 — READY is administrative territory.** The `shipments` UPDATE
+policy now requires ADMIN/OWNER to change a shipment that is *currently*
+READY; `transitionShipmentStatus` gates REOPEN alongside LOCK so the
+user meets the same rule as a clear refusal rather than an opaque
+zero-rows.
+
+**Layer 2 — filing verifies the population.** `declarations.approved_line_ids`
+records what was approved, **computed by the database** from the member
+shipments at approval and never accepted from a caller — a caller who
+supplies one gets the truth stored instead. `record_declaration_filed`
+compares it against what is there now, both directions, and returns
+`POPULATION_CHANGED_SINCE_READY`.
+
+**Layer 3 — the check cannot be raced.** The population check sits near
+the top of the function and the snapshot is aggregated near the bottom,
+with only the declaration locked. The member shipments are now locked
+first, in id order.
+
+Cleared on reopen and recomputed on the next approval, deliberately: the
+first version of the freeze rule froze it across that transition and
+made reopening impossible, which the tests caught before it shipped.
+
+### Evidence, measured
+
+| | |
+|---|---|
+| unchanged population | filing OK, total 4110 = approved 4110 |
+| line removed after approval (layer 1 bypassed) | `POPULATION_CHANGED_SINCE_READY`, status stays READY, no snapshot, nothing locked |
+| line added after approval | `POPULATION_CHANGED_SINCE_READY` |
+| MEMBER reopen | refused; shipment still READY |
+| ADMIN reopen | allowed, edit allowed, re-approve allowed — the legitimate workflow is intact |
+| caller supplies a forged `approved_line_ids` | the database's own value is stored instead |
+| write aimed at `approved_line_ids` while approved | value unchanged; the filing check still sees the real set |
+
+### Both layers proven load-bearing
+
+Not assumed — broken deliberately:
+
+```
+policy reverted only            -> 3 reopen cases fail
+freeze trigger disabled only    -> all 7 population cases fail
+both restored                   -> 20 pass
+```
+
+### The other P14 items, re-verified at this SHA
+
+| item | status |
+|---|---|
+| C calculation trusted write | **PROVEN** — as a real MEMBER: INSERT, UPDATE, DELETE and a direct call to the trusted RPC all `42501`; only the RPC's own figure is stored |
+| D engine-version filing gate | PROVEN — suite green |
+| E direct-token exposure | PROVEN — opaque cookie only; `403 bad_jwt` / `401 no_authorization` at Supabase Auth |
+| F session fixation | PROVEN — identifier rotates, planted value authenticates as nobody |
+| G privilege / RLS / seed | PROVEN — invariants hold after seed's blanket grants; comparator MATCHES |
+| H restore posture | PROVEN for what the comparator covers; runbook now names the three controls a restore must not reopen, and that session rows do not travel |
+| I EU-origin fail-closed | PROVEN — `ORIGIN_SCOPE_UNRESOLVED` on both determination paths |
+| J D1 approximation | PROVEN — the sector proxy is documented as a proxy, explicitly not the CN-code list |
+| K verifier independence | PROVEN — suite refuses a VERIFY by the record's creator and allows a different ADMIN |
+| L frozen dataset provenance | PROVEN — determination, period and provenance are copied into the row and validated against the record |
+| M CI / test integrity | PROVEN locally; **CI itself unexecuted — it runs on push, and pushing is out of scope** |
+| N build artifact | PROVEN — 0 env files, 0 bypass, 0 JWTs in browser JS, session secret absent from `static` and `standalone` |
+| O secret / config documentation | PROVEN — `APP_SESSION_SECRET` documented as required in every environment |
+
+### Gates
+
+```
+typecheck:              PASS
+unit/integration:       152 files, 1779 tests, 1779 passed, 0 failed, 0 skipped
+E2E:                    65 passed, 0 failed, 0 flaky, 9 skipped
+build:                  PASS -- artifact assertion OK
+posture comparator:     RESULT: POSTURE MATCHES
+comparator negative:    PASS -> 3 independent breaks each FAIL naming the row -> PASS
+fresh DB + seed:        87 applied, 2 skipped (pipeline-dependent), 0 failed
+secret scan:            PASS (self-test both directions)
+regulatory validator:   RESULT: VALID, 12540/12540 (LOCAL)
+```
+
+Skips: 9, the same set as §25–§28 with none added. **8** are the
+deliberate desktop-only journeys on `mobile-chromium`; the **9th, on
+chromium, is functional** — the Storage-backed actual-data journey,
+**ENVIRONMENT BLOCKED** on this host and not counted as passed. CI does
+enable Storage, asserts it answers, asserts the evidence bucket exists,
+and fails the job otherwise — so that journey runs there, and the spec
+probes Storage live rather than trusting a flag.
+
+### Environment gates — unverified, not passed
+
+- **CI has not run.** It triggers on push; pushing is out of scope here.
+  The workflow's `APP_SESSION_SECRET` step has therefore never executed.
+- **The Storage journey did not execute** on this host.
+- **`regulatory:verify` ran against local**, not production. The
+  protected zone is untouched at this SHA (`git status` over the
+  resolver, adapter, foundation migrations and pipeline is empty), so
+  the gate verifies the dataset rather than a change to it.
+- **Hosted Auth settings unread** — Site URL, rate limits, CAPTCHA,
+  `secure_password_change`. `HOSTED CONFIGURATION UNVERIFIED`.
+- **A hosted restore has never been performed.** The local drill and the
+  comparator are what exist; recovery is not claimed as proven.
+
+### Owner decisions still open
+
+D1's sector proxy versus an exact Annex II dataset; `tCO2/t` as CO2e;
+whether a dataset period must equal the shipment's; whether an EU-origin
+line should ever be determinable. Each is recorded, none is silently
+resolved.
+
+### Accepted risk
+
+The trusted calculation RPC does not verify the emissions value — the
+engine is TypeScript and a plpgsql second copy would be worse than none.
+Security rests on unreachability, which held under every path tried. And
+a stolen opaque session cookie authenticates to this application as the
+user until revoked or expired, which is what a session cookie is.
+
+### Status
+
+**P14 IMPLEMENTATION COMPLETE**
+
+**READY FOR FINAL INDEPENDENT CERTIFICATION**
+
+Not release approval. Two things the next reviewer should know rather
+than rediscover.
+
+First, the pattern: §26 said AUTH-1 was closed and it was not; §27's
+remediation introduced session fixation; §28's fix left the READY
+boundary bypassable. Three consecutive self-assessments, each wrong in
+the same way — a guard verified against the attack it was written for,
+not against the attack one step to the left. This section is a fourth
+self-assessment and inherits that prior.
+
+Second, where to look: sections 2–5 of the review brief have now been
+attacked at this SHA, but by the session that wrote the fixes. Filing
+integrity is the surface that has failed twice. Start there.
