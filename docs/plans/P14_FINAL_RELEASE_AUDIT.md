@@ -425,3 +425,639 @@ between those two is exactly the list above.
 Nothing here should be read as an approval. The independent adversarial
 review and the owner's own UAT remain separate checkpoints, and this
 document was written by the agent that did the implementation.
+
+---
+
+## 18. Release certification pass (2026-09-03)
+
+Appended, not merged into the sections above. §§1–17 are the historical
+record of the implementation pass and are left exactly as they were
+written, including the places where this section corrects them. Where a
+correction matters it is stated here explicitly rather than by silently
+editing the earlier text — see **N.1**, which withdraws a claim §15 made.
+
+This pass ran no feature work. It carried the existing candidate through
+the release gates, fixed the one release-process defect the audit had
+found and left as documentation only, and corrected three security
+defects that a re-check reproduced live — one of them a hole in a gate
+written earlier the same day, in this same audit's name.
+
+### A. Exact release SHA
+
+| | |
+|---|---|
+| Release candidate | **`1b4a6c7356e96976404c8a310a82b4c294d04bed`** (`1b4a6c7`) |
+| Branch | `phase14/release-hardening` |
+| Base | `95c95bb3db07eeb90eac481c6a8e16a702cf88b1` — the deploy branch head |
+| Commits on the branch | 22 |
+| Diff vs base | 188 files changed, 21,475 insertions, 811 deletions |
+| Working tree | clean |
+| Pushed | **no** — the branch does not exist on `origin` (see **B**) |
+| `main` | `909233d` — untouched, never merged |
+| `feature/full-product-build` | `95c95bb` — untouched |
+
+Four commits were added during this certification pass, on top of the
+`5c760ff` audit:
+
+- `0824ab0` `build(e2e)` — the rate-limit-bypass build gets its own
+  directory (**E2E artifact hazard, closed — see D.3**)
+- `e31d3cc` `fix(security)` — the evidence gate added earlier the same
+  day had a hole and guarded the wrong half
+- `4ebfe73` `fix(security)` — `organizations.capabilities` made
+  append-only in the database
+- `1b4a6c7` `fix(security)` — TRUNCATE revoked from `anon` and
+  `authenticated`
+
+Note on SHAs: `1b4a6c7` is the release candidate as *code*. The commit
+that adds this section is a docs-only commit on top of it; when CI
+eventually runs, it must run on the branch head at that time, and the
+tree it tests is identical to `1b4a6c7` apart from this file.
+
+### B. Deployment state
+
+**Established from evidence:**
+
+| Fact | Value | Source |
+|---|---|---|
+| Production URL | `snowkap-cbam-production.up.railway.app` | — |
+| Production SHA | `95c95bb3db07eeb90eac481c6a8e16a702cf88b1` | `/api/health`, read 2026-09-03 |
+| Production health | `status: ok`; `database`, `active_regulatory_dataset`, `app_url`, `product_schema` all ok | same |
+| `/api/live` | 200 | HTTP |
+| Railway build config | `railway.json`: Dockerfile builder, `node server.js`, healthcheck `/api/health` (30 s), restart ON_FAILURE ×3 | repo file |
+| GitHub deployment records | 63, all created by `railway-app[bot]` | GitHub Deployments API |
+| Environments seen | `resilient-elegance / production` (62) and `chic-expression / production` (1) | same |
+| `chic-expression` | deployed `main`'s head once, 2026-08-28, then recorded nothing for the 62 subsequent pushes to the deploy branch | same |
+| Every deployment SHA | inside `main` or `feature/full-product-build` history; none outside | computed against both refs |
+
+What that evidence *does* establish: the two Railway services are
+branch-filtered. A service does not deploy every push to every branch —
+`chic-expression` ignored 62 consecutive pushes to the branch the other
+service was deploying.
+
+**What it does not establish, and this is the gate:** what happens when a
+branch that has never existed on the remote is pushed. The two other
+remote branches (`feature/phase-1-foundation`, `master`) carry no
+deployment record, but both were last pushed *before* the earliest
+deployment record (2026-08-28 23:43 UTC), so their absence proves
+nothing about branch filtering.
+
+**Missing access, stated exactly.** The branch→service mapping lives in
+Railway's own service settings. It is not in the repository:
+`railway.json` contains build and deploy settings and **no branch or
+auto-deploy field**. The Railway CLI is not installed on this host, and
+no `RAILWAY_TOKEN` exists in the environment or in `.env`. The
+configuration is therefore unread, and the brief's instruction — never
+infer topology from naming conventions — leaves exactly one honest
+answer: it is unknown whether pushing `phase14/release-hardening` would
+trigger a production deploy.
+
+**No push was made.** Pushing could deploy 22 unreviewed commits and 9
+unapplied migrations' worth of application code straight to a production
+system serving two real organisations, a FILED declaration and a pending
+invitee. The brief forbids exactly that, and this pass declines to take
+the risk on inference.
+
+**Precise owner action (unblocks D, E, and everything downstream of
+them):** in the Railway dashboard, for the service backing
+`snowkap-cbam-production.up.railway.app`, read and record (a) the
+connected repository, (b) the deploy branch, (c) whether auto-deploy is
+enabled, (d) whether a preview/staging environment exists, and (e) the
+build-retention setting. Then either confirm that a push to
+`phase14/release-hardening` cannot deploy, or pause auto-deploy for the
+duration of the CI run.
+
+### C. Migration state
+
+`supabase migration list --linked` against production, 2026-09-03:
+
+- **63 applied on both sides**, in the same order, with matching versions
+- **9 pending** — local only, `remote` empty
+- **0 drift** — no remote-only entry, no version mismatch
+
+Pending, in apply order:
+
+| Version | What it does |
+|---|---|
+| `20260902150000` | sharing counterparty names survive a terminal grant (WP-B) |
+| `20260903100000` | `accept_sharing_grant_invitation` requires IMPORTER_DECLARANT (F10) |
+| `20260903110000` | filing refuses a calculation whose quantity ≠ the line's |
+| `20260903120000` | D2 importer-entered provenance |
+| `20260903130000` | audit catalogue gains the invitation events (F5) |
+| `20260903140000` | emission-data verification downgrade gate |
+| `20260903150000` | **corrects `…140000`** — closes its bypass and guards the evidence array |
+| `20260903160000` | `organizations.capabilities` append-only |
+| `20260903170000` | revoke TRUNCATE from `anon`/`authenticated` |
+
+Two ordering facts that matter for promotion:
+
+1. `…150000` is a `create or replace` of the function `…140000`
+   installs. Applying both in sequence yields the corrected body.
+   `…140000` was **never applied to production**, but it was applied
+   locally and is already committed, so it is corrected forward rather
+   than edited in place.
+2. `…170000` deliberately omits `alter default privileges for role
+   supabase_admin`, which raises "permission denied to change default
+   privileges" for the migration role. The omission and its consequence
+   are documented inside the migration, not silently dropped.
+
+All nine are applied and verified on local Postgres. **None has been
+promoted to production** — promotion is an owner-gated step and the
+sequencing rule in the plan (§13.F) has not been executed.
+
+### D. CI evidence
+
+#### D.1 CI on the exact candidate SHA — **NOT RUN**
+
+CI is GitHub Actions, triggered on push (`branches: ['**']`). Running it
+on `1b4a6c7` requires pushing the branch, which is blocked on **B**.
+There is no substitute: a tag push does not match `branches`, and the
+brief forbids substituting an older SHA, the deploy branch, a local
+equivalent or a recreated state. Recorded as not run, not as passed.
+
+#### D.2 Local gate, run on the candidate tree
+
+Every gate that does not need CI was executed on this exact tree.
+
+| Gate | Result |
+|---|---|
+| `pnpm typecheck` | exit 0 |
+| `pnpm test` | **1616 passed, 0 failed, 0 skipped, 0 todo**, 138 files, 106 s |
+| `pnpm build` | exit 0; `postbuild` artifact assertion OK |
+| `pnpm test:e2e` | **39 passed, 9 skipped, 0 failed, 0 flaky**, exit 0 |
+| `pnpm regulatory:verify` (production) | **`RESULT: VALID`**, 12,540/12,540 |
+
+The test run was executed with `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY` exported to the local values, which is what
+makes the skip count zero: without them the protected regulatory
+adapter's real-database suites silently skip. The count is taken from
+the machine-readable reporter output, not from the terminal summary —
+`numPendingTests: 0`, `numTodoTests: 0`.
+
+The nine E2E skips, listed rather than summarised:
+
+- eight `[mobile-chromium]` desktop-only journeys —
+  `actual-data-determination`, `cross-org-sharing-journey`,
+  `importer-auth-smoke`, `importer-journey`, `producer-auth-smoke`,
+  `producer-journey`, `shell.spec.ts:52` (desktop nav), and
+  `team-invitation-journey`
+- one `[chromium]` skip: **`actual-data-determination.spec.ts`**, gated
+  on `!storageAvailable`. This is the Storage blocker, not a mobile
+  layout skip — see **E**.
+
+#### D.3 The E2E build-artifact hazard — **fixed and proven**
+
+The defect: `pnpm test:e2e` rebuilt the application with
+`NEXT_PUBLIC_E2E_RATE_LIMIT_BYPASS_BUILD=true` into `.next` — the same
+directory the Dockerfile copies into the production image — leaving a
+production-deployable artifact with rate limiting disabled. Nothing
+downstream would have caught it: the artifact builds, boots and serves
+normally.
+
+The invariant now enforced: **a test run must not leave a
+production-deployable artifact containing the E2E rate-limit bypass.**
+
+- `scripts/build/dist-dir.mjs` is the single source of the rule —
+  `.next-e2e` for a bypass build, `.next` otherwise. `next.config.ts`,
+  the standalone-asset copier and `playwright.config.ts` all read it
+  from there.
+- It keys on the **input** variable `NEXT_PUBLIC_E2E_RATE_LIMIT_BYPASS_BUILD`,
+  which is what Playwright actually sets. An earlier attempt at this fix
+  keyed on the derived output key `E2E_RATE_LIMIT_BYPASS_BUILD`, which
+  no process ever exports — a silent no-op that would have shipped the
+  bypass while appearing to fix it. It was caught by review and is
+  recorded here because the failure mode is exactly the kind this gate
+  exists to prevent.
+- `scripts/build/assert-clean-production-artifact.mjs` is the
+  fail-closed half. It checks the **constant** `.next`, not the resolved
+  directory, so a misconfiguration that pointed a bypass build back at
+  `.next` makes the assertion fire rather than follow it somewhere
+  harmless. Three independent checks: the inlined build-time key present
+  and not `"true"`; `required-server-files.json` carrying it as empty;
+  and no file in the tree mentioning either bypass variable.
+- It runs in `postbuild` (every local build) and again in the
+  **Dockerfile** with `--require-artifact` before the `COPY`. Since
+  `railway.json` sets the builder to `DOCKERFILE`, the production image
+  itself cannot be built from a bypassing — or missing — artifact.
+
+Proof, executed on this tree:
+
+```
+clean pnpm build      ->  .next tree sha256 c00eaa67da5efe...0e4fec81
+                          required-server-files E2E_RATE_LIMIT_BYPASS_BUILD = ""
+full pnpm test:e2e    ->  39 passed / 9 skipped / 0 failed
+after E2E             ->  .next tree sha256 c00eaa67da5efe...0e4fec81   (identical)
+                          assert-clean-production-artifact: OK
+                          .next-e2e required-server-files ...BUILD = "true"
+```
+
+The `.next` tree is **byte-identical** before and after a full E2E run,
+and the bypass lives in `.next-e2e`, which proves the test still
+genuinely exercises it. The test was not weakened; it simply no longer
+writes where the deploy artifact lives.
+
+### E. Hosted Storage E2E evidence — **NOT RUN (environment blocker)**
+
+The single most important missing functional proof, per the brief:
+installation → emission data → evidence upload → verification →
+activation → sharing → importer acceptance → actual determination →
+calculation → provenance → reproducibility.
+
+- **Locally impossible.** `supabase/config.toml` ships
+  `[storage] enabled = false`, and the local Storage container is
+  unhealthy on this host: `GET /storage/v1/bucket` → **503**. The
+  journey therefore skips, and it skips *loudly* — the spec calls
+  `test.skip(!storageAvailable, …)` with the reason spelled out.
+- **The authorised environment already exists in CI and was not
+  weakened.** `.github/workflows/ci.yml` rewrites `[storage]` to
+  `enabled = true`, asserts the edit applied, and hard-fails the job if
+  `GET /storage/v1/bucket` is not healthy. The spec itself *throws*
+  rather than skipping when `process.env.CI` is set. So under CI this
+  test cannot silently pass on the disabled branch.
+- **Therefore this gate is blocked behind D, which is blocked behind
+  B.** It is not a missing capability in the product or the test suite;
+  it is one push away, and the push is the thing that cannot be taken
+  safely.
+
+No evidence is fabricated for this gate. It has never executed anywhere.
+
+### F. Restore evidence — **partial; the hosted drill was NOT performed**
+
+#### F.1 What was done
+
+A restore drill was executed on the current migration set into a
+**disposable local target**. No customer data was moved. It was
+schema-scope only, and it produced a genuinely useful negative result.
+
+#### F.2 What it proved — the logical dump is not a recovery path
+
+| Check | Result |
+|---|---|
+| Tables | match |
+| RLS enabled | match |
+| Functions | match |
+| Triggers | match |
+| **RLS INSERT policies** | **5 of 56 lost** |
+| Restore errors | **15 × "schema auth does not exist"** |
+
+The `auth` schema is not in the dump, and `auth.users` carries ten
+foreign keys from product tables. Five INSERT policies referencing it
+failed to restore. A naive validation — tables present, RLS on,
+functions present — **passes on this broken database**. That is the
+finding: the runbook's own success criteria would have certified a
+restore that silently lost five write-authorisation policies.
+
+`BACKUP_RESTORE.md` now states plainly that the logical dump covers
+`public` + `app` only, that `auth.users` and Storage objects are outside
+it, and that it is a schema/product-data artefact rather than a
+standalone recovery path.
+
+#### F.3 What was not done
+
+An actual restore into a **throwaway hosted Supabase project**, followed
+by `regulatory:verify` and row-count comparison. Provisioning a new
+hosted project is a billable, account-level action that was not
+authorised for this pass. Recorded as an environment/owner blocker, not
+as a pass.
+
+Backup state on the hosted project, read 2026-09-03: `walg_enabled:
+true`, **`pitr_enabled: false`**, 7 daily backups retained, most recent
+2026-09-02T17:44Z. The backup tier / PITR decision remains the owner's
+(see **O**).
+
+**Nothing in this section should be read as "disaster recovery works."**
+A dump that runs is not a restore that was verified.
+
+### G. Auth-template evidence — **NOT DONE (access blocker)**
+
+The `/auth/confirm` route, the token-hash link handling, the error
+taxonomy, the set-password step and the local templates are implemented
+and covered by the integration and E2E suites, including the
+prefetch/scanner case (`team-invitation-journey`, passing on
+`[chromium]`).
+
+The hosted Supabase Auth templates are **not live**. Pasting them
+requires the Supabase dashboard; the CLI's `supabase config` surface in
+this project exposes only `push`, and no dashboard session is available
+here. The staged paste order, the per-template verification and the
+rollback procedure are written in
+`docs/runbooks/AUTH_EMAIL_TEMPLATES.md`.
+
+Consequences that must not be glossed:
+
+- The two-device password-recovery proof (**the most important recovery
+  proof in the brief**) has not been run against production.
+- Assumption **U1** — that `{{ .TokenHash }}` carries the `pkce_` prefix
+  for PKCE-initiated recovery links — remains **unverified against
+  hosted GoTrue**. It is load-bearing for the recovery leg. If it is
+  false, the Recovery template breaks password reset for every user,
+  which is why the runbook pastes Reset password **first**, alone, and
+  verifies it on two devices before anything else is touched.
+- Delivery is claimed from template source nowhere in this document.
+
+### H. Production smoke — **read-only only; no post-deploy smoke exists**
+
+Read against production on 2026-09-03, without mutating anything:
+
+| Check | Result |
+|---|---|
+| `/api/health` | `status: ok`, `git_sha` = `95c95bb…` |
+| `/api/health` checks | `database`, `active_regulatory_dataset`, `app_url`, `product_schema` — all ok |
+| `/api/live` | 200 |
+| Migration ledger | repo = ledger for all 63 applied; 9 pending; no drift |
+| `regulatory:verify` | `RESULT: VALID`, 12,540/12,540 |
+
+The post-deploy smoke the brief describes — new routes resolving, the
+three expected pre-deploy 404s changing, `git_sha` equal to the release
+SHA — **cannot exist yet**, because nothing has been deployed. Production
+still serves `95c95bb`, which is the correct and intended state.
+
+### I. Security verification
+
+A full adversarial re-check ran against the candidate, with live
+reproduction against local Postgres inside `begin … rollback`
+transactions. Findings were **not** taken at face value from the
+verification agents: of 24 candidate findings only one survived their
+refutation pass, yet direct `psql` probes confirmed **four more were
+real**. All four are recorded below. Refuted findings were re-tested by
+hand rather than accepted.
+
+#### I.1 Fixed in this pass
+
+**1. The evidence gate written earlier the same day had a bypass, and
+guarded the wrong half.** (`20260903150000`, commit `e31d3cc`.)
+
+`20260903140000` keyed its un-verify rule on `new.status = 'ACTIVE'` as
+well as `old.status`, so one UPDATE moving both columns walked past it,
+and the VERIFIED → strip evidence → VERIFIED chain that migration's own
+header named was reproducible again. Worse and simpler: no downgrade was
+needed at all —
+
+```
+update emission_data set evidence_file_ids = '{}' where …;
+```
+
+succeeded on an ACTIVE + VERIFIED record as an ordinary member, leaving
+it VERIFIED with no evidence. The row-level protections
+(`20260829560000`) cover the `evidence_files` **rows**; nothing covered
+the **array**, and the fact-immutability trigger deliberately omits it so
+files can still be added after verification. Evidence may now grow and
+never shrink, tested by set containment so a same-count swap is caught,
+and `ACTIVE → DRAFT` is refused outright to close the two-statement
+variant. Five regression tests; the legitimate DISCARD path still works.
+
+**2. `organizations.capabilities` was freely rewritable.**
+(`20260903160000`, commit `4ebfe73`.) Two separate gates —
+`20260903120000`'s provenance wall and
+`accept_sharing_grant_invitation`'s `CAPABILITY_NOT_HELD` check — argue
+from "capabilities are append-only". The application was; the database
+was not. An organisation could accept a producer's data and then drop
+the capability that authorised the acceptance, stranding a grant whose
+binding is immutable. Removal is now refused, including for the service
+role. Three regression tests, on a throwaway org.
+
+**3. `anon` and `authenticated` held TRUNCATE on every table in
+`public`.** (`20260903170000`, commit `1b4a6c7`.) From the standard
+Supabase bootstrap's `grant all`, inherited by every table added since.
+Not directly reachable — PostgREST has no verb that issues a TRUNCATE,
+and it is not reported as a one-request data-loss bug. What it is: the
+one privilege in this schema that RLS does not constrain at all, on an
+append-only compliance record. Revoked, including from the default
+privileges.
+
+#### I.2 Confirmed, **not** fixed — and §15 overstated its mitigation
+
+**Calculation-result output forgery reaches the filed snapshot.** A
+member can insert a `calculation_results` row through raw PostgREST with
+the line's correct determination, quantity and unit, and a forged
+`embedded_emissions_tco2e` — reproduced live: **0.001 against a true
+139**.
+
+The correction this pass must make to §15: the P14 filing clause
+(`20260903110000`) checks that the calculation's **quantity** matches the
+line's. A forgery that keeps the quantity honest and changes only the
+emissions figure passes it — the probe returned "ACCEPTED — forged output
+would be summed into the filed snapshot". `reproduceCalculationResult`
+cannot detect it either, because it recomputes from the row's own inputs.
+
+Bounds, stated fairly: it is the organisation's own data, requires raw
+API access rather than the UI, and reaches no other tenant. The declarant
+is the party who would be defrauding themselves or their own filing.
+
+The database cannot fix this without duplicating engine semantics in SQL.
+The correct fix is routing calculation writes through a SECURITY DEFINER
+RPC that computes the figure server-side. That is a design change beyond
+this pass's scope and is carried as **HIGH RISK** in **N**, not as
+closed.
+
+The first reproduction attempt failed twice and both failures are worth
+recording, because each was a real control working: once because it
+copied another user's `calculated_by_user_id`, and once because the
+target shipment was LOCKED and the insert policy excludes
+`LOCKED`/`VOID`. It succeeded only against a READY shipment.
+
+#### I.3 Verified sound and unchanged
+
+Every SECURITY DEFINER function sets `search_path`; RLS enabled on all
+public tables; no cross-org write path; append-only `audit_events` and
+`calculation_results`; storage policies scoped to the org prefix;
+function security attributes (`prosecdef`/`proconfig`) confirmed
+identical local vs production for all five replaced functions.
+
+#### I.4 Not re-run against production
+
+The deployed-release security re-check the brief describes assumes a
+deployed release. Nothing is deployed, so this ran against the candidate
+and local Postgres only. No production data was modified by any probe.
+
+### J. Regulatory verification
+
+`pnpm regulatory:verify` against **production**, 2026-09-03:
+
+```
+Canonical records: 12540
+Source checksum                 PASS
+Canonical identity uniqueness   PASS
+Database records: 12540
+Database identity uniqueness    PASS
+Canonical/database identities   PASS
+Field-level reconciliation      PASS (12540/12540)
+Emission semantic invariants    PASS
+Country coverage                PASS
+CBAM goods coverage             PASS
+Production route coverage       PASS
+
+RESULT: VALID
+```
+
+**D1 — the required reminder, recorded verbatim in substance:** the D1
+product decision is accepted and implemented; the **Annex II
+applicability proxy remains a high-risk follow-up until it is replaced
+with an exact versioned applicability dataset.** `ANNEX_II_SECTORS` in
+`calculate-line-emissions.ts` is a sector-level proxy, not the
+regulation's own goods list. It is not "fully solved", and this document
+does not claim it is. The interpretation was not broadened beyond the
+project's authoritative register.
+
+The implementation matches the decision: for an Annex II good only
+direct emissions enter the result; the reported indirect figure is
+**stored and kept visible in the trace** as
+`indirect_specific_excluded`; the `ANNEX_II_DIRECT_ONLY` step is emitted
+**whether or not indirect is zero**, so a reader of a frozen calculation
+can see the treatment was applied rather than infer it from a number
+that happens to match.
+
+R7/R9, UNLISTED, country mapping, production route, default values and
+the actual/default separation are unchanged from §4 and re-verified by
+the suites above. The EU-origin scope question is untouched and remains
+the owner's (see **O**).
+
+### K. Calculation verification
+
+| Item | State |
+|---|---|
+| Engine version | **1.3.0** (bumped from 1.2.0 for D1, per the project rule) |
+| Historical 1.2.0 rows | not rewritten |
+| `ENGINE_VERSION_CHANGED` | expected and correct where semantics genuinely changed |
+| Golden fixtures | pass; hand-authored from the source dataset, never engine-generated |
+| Byte-equality contract | preserved — reproduction compares `DecimalString` with `===` |
+| Precision | decimal.js, 40 digits, ROUND_HALF_UP, intermediate only |
+| Units | allowlist behaviour pinned, including the known-imperfect cases |
+| Frozen snapshots | unchanged |
+| Reproduction | integration test against real local Postgres; the CI half that §3.7 of the plan had found missing now exists |
+
+Older calculations are **not** claimed reproducible under the new
+engine. That is the correct behaviour and it is not being papered over.
+
+### L. Reporting / declaration verification
+
+Verified by the suites on this tree: full precision preserved;
+calculation-currency checks applied so stale results are excluded from
+totals and listed as incomplete; provenance columns present and derived
+from the **frozen** calculation rather than the line's current state;
+declaration snapshots frozen; the filing gate intact; amendment
+behaviour unchanged; the unbounded `.in()` that could render a FILED
+declaration as "No member shipments yet." is batched and now fails closed
+on a gateway error rather than returning a short list; no fabricated
+rounding — RULE-EE-006 remains `UNRESOLVED_ESCALATED` and disclosed.
+
+The one place the declaration system could still convert a refusal into
+a wrong number is **I.2**, and it is recorded there rather than here.
+
+### M. Owner UAT status — **NOT STARTED**
+
+No UAT step in the plan's §14.4 script has been executed. Every item in
+it depends on either a deployment or the hosted Auth templates, and
+neither exists. The five items the plan flagged as needing to be
+**re-earned** after this work (signup/confirmation, invitation receipt,
+producer mobile nav, hamburger/dialog stacking) are still open, and none
+of the pre-existing evidence for them survives the changes made here.
+
+### N. Remaining risks
+
+Classified as the brief requires. "Prevents controlled customer usage"
+means: would this stop a small number of supervised, known customers
+from using the product for real filings?
+
+| # | Item | Class | Evidence | Prevents controlled use? |
+|---|---|---|---|---|
+| N.1 | **Calculation-result output forgery reaches the filed snapshot**; the quantity clause does not close it | **HIGH RISK** | live probe, forged 0.001 vs true 139, "ACCEPTED" | No — own-tenant, raw API only. But it is the weakest point in a compliance filing path and the fix (SECURITY DEFINER write RPC) should not wait long |
+| N.2 | **Annex II applicability is a sector proxy**, not the regulation's goods list | **HIGH RISK** | `ANNEX_II_SECTORS`, `calculate-line-emissions.ts` | No, given D1 is an accepted owner decision — but it can mis-scope a real good, in either direction |
+| N.3 | **E2E rate-limit bypass artifact hazard** | **CLOSED** this pass | D.3, byte-identical `.next` | — |
+| N.4 | **GoTrue rate-limit buckets are project-wide**, so hosted per-IP limits apply to the shared Railway egress IP for all customers | **HIGH RISK** | `signInWithPassword` already server-side; token verification joins it | No, but it degrades for everyone at once; owner must record and raise the hosted limits |
+| N.5 | **Magic-link re-invite** mails a genuine sign-in credential to any address an org ADMIN types | **HIGH RISK** | bounded by per-address cap + IP limiter + `shouldCreateUser:false` | No — requires ADMIN of an org; needs explicit owner acceptance |
+| N.6 | **`/reset-password` accepts any live session without re-authentication** | **HIGH RISK** | strengthens a borrowed-device takeover | No; mitigated by enabling `secure_password_change` hosted |
+| N.7 | **Redetermination has no compare-and-swap** — concurrent redeterminations are a lost update with two audit events naming the same previous determination | **POST-RELEASE** | `redetermineLineFromActualData` | No |
+| N.8 | **A filed line's figure can never be corrected** — filing LOCKs every member and LOCKED lines are immutable; an amendment can add an omitted shipment, not fix a number | **HIGH RISK** | declaration lifecycle | **Possibly yes for a real filing**, and it is a product-shape question, not a bug. The owner should decide before the first real declarant files |
+| N.9 | **Observability insufficient for an incident** — `createRequestId()` has zero production call sites, no SIGTERM graceful shutdown, no error tracker, no paging | **HIGH RISK** | code | No, but a production incident would be diagnosed blind |
+| N.10 | **The capability gate is a scoping control, not a security boundary** — an org can still grant itself a capability; only removal is now blocked | **ACCEPTED, newly explicit** | `20260903160000` header | No — deliberate, and the dual-capability case is legitimate |
+| N.11 | **The logical dump is not a recovery path** and a naive validation passes on a broken restore | **HIGH RISK** | F.2, 5 of 56 INSERT policies lost | No — but "we have backups" is not currently true in the sense that matters |
+
+`.next-e2e` is git-ignored and Docker-ignored; the ignore was verified
+empirically (by creating a probe file and observing `?? .next-e2e/`)
+rather than trusted from `git check-ignore`, which had produced a
+spurious match.
+
+### O. Remaining owner decisions
+
+Unchanged from §14 unless noted; none was silently converted into
+product policy by this pass.
+
+1. **EU-origin scope** — Option 1 (remain determinable via the R7
+   fallback) or Option 2 (exclude, with the scope text and Annex III
+   ingested as versioned datasets). Required before the first real
+   declarant files. No EU-origin line may be created in production UAT
+   until this is answered.
+2. **Railway deploy branch / auto-deploy strategy** — now the single
+   highest-leverage decision, because **B**, **D**, **E** and everything
+   downstream are blocked on it.
+3. **Backup tier / PITR** — `pitr_enabled: false` today; and authorise a
+   throwaway hosted project for the restore drill (**F.3**).
+4. **Production fixture cleanup** — test users and P13 orgs still live.
+5. **The ABC installation name `btrim`** — a one-off owner-run update,
+   deliberately not a migration.
+6. **Direct CELEX re-read** (`32025R2621`, `32026R1740` Annex I) — the
+   R7/R9 memo's own outstanding request.
+7. **ACTUAL dataset period vs shipment period** — allowed today, shown in
+   the picker, not recorded in the snapshot.
+8. **Hosted Auth configuration** — Site URL, redirect allowlist,
+   `secure_password_change`, CAPTCHA off, and the rate limits; plus the
+   staged template paste (**G**).
+9. **`tCO2/t` treated as CO2e** — a deliberate decision, and an open
+   question for aluminium PFCs / fertiliser N2O.
+10. **Navigation placeholders** — remove (recommended) or keep as a
+    labelled "Planned" group.
+11. **New:** whether `VERIFY` should refuse when the verifier is the
+    record's creator. Production's own ABC dataset was self-verified.
+
+### P. Final release recommendation
+
+**RELEASE BLOCKED**
+
+Not because this pass found the implementation unsound — it did not — and
+not to hedge. Four mandatory certification gates have never executed:
+
+1. **CI has never run on the release candidate SHA** (**D.1**), because
+   the branch cannot be pushed without knowing whether that deploys to
+   production (**B**).
+2. **The actual-data determination end-to-end journey has never executed
+   anywhere** (**E**) — the brief's own "most important missing
+   functional proof". Locally the Storage container returns 503; in CI
+   it is enabled and hard-failed, so this is one push away and blocked
+   behind the same gate.
+3. **No restore has ever been performed against a hosted project**
+   (**F.3**), and the local drill proved the dump alone is not a
+   recovery path.
+4. **The hosted Auth templates are not live** (**G**), so the two-device
+   recovery proof has not been run and assumption U1 is unverified.
+
+Plus one substantive item that is not an environment gate: **N.1**, the
+filed-snapshot forgery class, whose mitigation §15 described more
+strongly than it deserves. That correction is made in **I.2** and the
+class is carried as HIGH RISK, not closed.
+
+What is true, and is a real change from §17: the release-process defect
+that could have shipped a rate-limit-disabled artifact is **closed and
+proven closed**; three further security defects — one of them a hole in
+a gate this very audit had claimed as a fix — were found, reproduced,
+corrected and pinned by regression tests; the migration ledger is clean
+with nine well-ordered pending migrations; `regulatory:verify` is VALID
+against production; and the local gate is 1616 tests passing with **zero
+skips**.
+
+That is a stronger candidate than the one §17 described. It is still not
+a certified release, and every gap above is an absence of evidence, not
+an assertion that the gap is harmless.
+
+**Recommended next action, single and concrete:** read the Railway
+service configuration for the production service and record the deploy
+branch and auto-deploy setting (**B**). Everything else that remains
+technically executable — CI on the exact SHA, the Storage-backed
+actual-data E2E, the production smoke — unblocks from that one answer.
+
+---
+
+**This is not an independent review, and it is not an approval.** It was
+written by the agent that implemented the work it assesses, including the
+defect in **I.1(1)** that this same agent introduced earlier the same day
+in this same document's name. The independent adversarial review and the
+owner's UAT remain separate, and both remain outstanding.
