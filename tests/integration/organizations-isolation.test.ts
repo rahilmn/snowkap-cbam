@@ -2789,5 +2789,145 @@ describe.skipIf(!localSupabaseReachable)(
         );
       },
     );
+
+    describe(
+      "P14 security re-check: organizations.capabilities is append-only",
+      () => {
+        /**
+         * 20260903120000's provenance wall and
+         * accept_sharing_grant_invitation's CAPABILITY_NOT_HELD gate both
+         * argue from the same premise: "capabilities are append-only, so
+         * an org that holds IMPORTER_DECLARANT today cannot lose it and
+         * strand an existing grant."
+         *
+         * The application was append-only -- organization-profile.ts
+         * offers addCapability and computes
+         * [...context.capabilities, update.addCapability] -- but the
+         * DATABASE never enforced it. An organization could accept a
+         * producer's data into itself and then drop the capability that
+         * authorized the acceptance, leaving a grant whose binding is
+         * immutable bound to an org that no longer qualifies. Reproduced
+         * live as an ordinary OWNER before this was fixed.
+         *
+         * Run against a throwaway organization rather than orgA, because
+         * append-only means a capability added by a test cannot be taken
+         * back -- a test must not permanently reshape a fixture the rest
+         * of the suite reads.
+         */
+        let throwawayOrgId: string;
+
+        beforeAll(async () => {
+          const { data, error } =
+            await serviceClient
+              .from("organizations")
+              .insert(
+                {
+                  name: `Capabilities Append-Only ${runId}`,
+                  slug: `capabilities-append-only-${runId}`,
+                  capabilities: ["PRODUCER_OPERATOR"],
+                },
+              )
+              .select("id")
+              .single();
+
+          if (error || !data) {
+            throw new Error(
+              `Failed to create the throwaway org: ${error?.message}`,
+            );
+          }
+
+          throwawayOrgId = data.id;
+        });
+
+        afterAll(async () => {
+          await serviceClient
+            .from("organizations")
+            .delete()
+            .eq("id", throwawayOrgId);
+        });
+
+        it(
+          "refuses to remove a capability, even for the service role -- the wall is a trigger, not a policy",
+          async () => {
+            // The service role bypasses RLS and does not bypass triggers.
+            // Asserting it here is the difference between "the API
+            // refuses this" and "the database refuses this".
+            const { error } =
+              await serviceClient
+                .from("organizations")
+                .update(
+                  { capabilities: [] },
+                )
+                .eq("id", throwawayOrgId);
+
+            expect(error).not.toBeNull();
+
+            expect(error?.message).toContain(
+              "append-only",
+            );
+
+            const { data: after } =
+              await serviceClient
+                .from("organizations")
+                .select("capabilities")
+                .eq("id", throwawayOrgId)
+                .single();
+
+            expect(
+              (after as { capabilities: string[] }).capabilities,
+            ).toEqual(
+              ["PRODUCER_OPERATOR"],
+            );
+          },
+        );
+
+        it(
+          "refuses to SWAP one capability for another, which would remove one under cover of adding one",
+          async () => {
+            const { error } =
+              await serviceClient
+                .from("organizations")
+                .update(
+                  { capabilities: ["IMPORTER_DECLARANT"] },
+                )
+                .eq("id", throwawayOrgId);
+
+            expect(error).not.toBeNull();
+
+            expect(error?.message).toContain(
+              "append-only",
+            );
+          },
+        );
+
+        it(
+          "still allows a capability to be ADDED -- the only change the product actually offers",
+          async () => {
+            const { error } =
+              await serviceClient
+                .from("organizations")
+                .update(
+                  { capabilities: ["PRODUCER_OPERATOR", "IMPORTER_DECLARANT"] },
+                )
+                .eq("id", throwawayOrgId);
+
+            expect(error).toBeNull();
+
+            const { data: after } =
+              await serviceClient
+                .from("organizations")
+                .select("capabilities")
+                .eq("id", throwawayOrgId)
+                .single();
+
+            expect(
+              (after as { capabilities: string[] }).capabilities.sort(),
+            ).toEqual(
+              ["IMPORTER_DECLARANT", "PRODUCER_OPERATOR"],
+            );
+          },
+        );
+      },
+    );
   },
 );
