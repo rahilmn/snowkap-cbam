@@ -107,15 +107,21 @@ jobs:
         run: pnpm build
 
       - name: Scan for committed secrets
-        run: |
-          set -euo pipefail
-          PATTERN='eyJ[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|re_[A-Za-z0-9]{20,}|sb_(publishable|secret)_[A-Za-z0-9_-]{10,}'
-          if git grep -InE "$PATTERN" -- . ':!pnpm-lock.yaml' ':!.github/workflows/ci.yml'                | grep -vF 'eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6'; then
-            echo "::error::Possible committed secret found."
-            exit 1
-          fi
-          echo "Secret scan clean."
-
+        # 2026-09-03 (P14 blockers B3 + B4). Was two divergent inline
+        # shell scans. The build-and-test copy referenced an undefined
+        # variable, which `set -u` turned into a fatal that the
+        # trailing `|| true` then swallowed, so it printed its success
+        # string and exited 0 on every run since 464d6d8 -- while the
+        # fast-gates copy had never carried the SUPABASE_*= or
+        # postgres:// rules at all. Between them, no job in this
+        # pipeline could catch a committed database password.
+        #
+        # One Node implementation, called by both jobs. An undefined
+        # name is now a ReferenceError that kills the process instead
+        # of an empty expansion, and the script self-tests both
+        # directions before it looks at the repository, so a clean
+        # report means the scanner proved it still works.
+        run: node scripts/ci/scan-for-committed-secrets.mjs
   build-and-test:
     name: Typecheck, test, build, smoke, secret scan
     runs-on: ubuntu-latest
@@ -314,6 +320,23 @@ jobs:
           # idempotent (grants only).
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/seed.sql
 
+          # 2026-09-03 (P14 remediation). Run the database-posture
+          # acceptance check that BACKUP_RESTORE.md and DEPLOYMENT.md
+          # both name as the acceptance test for a restore -- which,
+          # until now, no CI job had ever invoked. The P14 review found
+          # it printing "RESULT: POSTURE MATCHES" on a database with the
+          # P14.1 calculation-write boundary fully reverted, and nothing
+          # would have caught that, because nothing ran it.
+          #
+          # Running it HERE is the whole point: this is the moment
+          # seed.sql's blanket grants have just executed over a freshly
+          # migrated database, which is exactly the sequence that
+          # silently reopened those revokes once already. The check
+          # includes privilege_invariants_hold, which reads the registry
+          # every revoke-migration writes to, so a future revoke is
+          # covered without editing either this workflow or the script.
+          node scripts/ops/compare-database-posture.mjs --check             "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+
           ACTIVE=$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -tAc "select count(*) from public.default_emission_values dev join public.regulatory_datasets rd on rd.id=dev.dataset_id where rd.status='ACTIVE'" | tr -d '[:space:]')
           echo "ACTIVE regulatory rows: ${ACTIVE}"
           if [ "${ACTIVE}" != "12540" ]; then
@@ -495,116 +518,18 @@ jobs:
         run: pnpm audit --audit-level high
 
       - name: Scan for committed secrets
-        run: |
-          set -euo pipefail
-
-          # Deliberately dependency-free pattern scan (no external action,
-          # no token required) over tracked files only. Looks for common
-          # secret shapes: JWT-prefixed tokens, cloud/service API-key
-          # prefixes, and generic "<SECRET_NAME> = <long literal>"
-          # assignments. False positives are expected to be rare given the
-          # project's env-indirection convention (see .env.example); a
-          # true hit must fail the build.
-          #
-          # P11 secrets-hygiene audit (docs/plans/MASTER_PLAN.md §11/§32/§41)
-          # tightened this beyond the original P4 version -- confirmed by
-          # constructing fake secret-shaped strings and checking them against
-          # the old pattern before changing it, per that audit's own bar:
-          #   - SUPABASE_(SERVICE_ROLE_KEY|DB_PASSWORD|ANON_KEY)=<value> only
-          #     matched an UNQUOTED literal ([^$[:space:]"'] excluded the
-          #     quote itself as the first character), so
-          #     SUPABASE_DB_PASSWORD="hunter2..." or a JSON
-          #     "SUPABASE_SERVICE_ROLE_KEY": "hunter2..." pair -- exactly the
-          #     shape a YAML/JSON config or a shell script would use -- sailed
-          #     through uncaught. Now an optional quote (after the name, and
-          #     before the value) and ':' as an alternative to '=' are both
-          #     accepted, so quoted and JSON/YAML-style assignments match too.
-          #   - Newer Supabase "publishable"/"secret" API keys (sb_publishable_*
-          #     / sb_secret_*, the replacement for the legacy anon/service_role
-          #     JWTs -- see .env.example's own "publishable" phrasing) had no
-          #     shape check at all; added one.
-          #   - A raw postgres://user:password@host connection string --
-          #     exactly what SUPABASE_DB_PASSWORD's value lives inside once
-          #     combined with supabase/.temp/pooler-url, the way
-          #     scripts/regulatory/verify-definitive-regulatory-data.py's
-          #     connect() does at runtime (passed to psycopg separately, never
-          #     concatenated into logged text there -- but nothing enforced
-          #     the same discipline for some future script or doc) -- was not
-          #     checked independently of the SUPABASE_DB_PASSWORD= name; added
-          #     a name-independent postgres(ql)://...:...@ check.
-          # Re-verified after the change that every one of the fake strings
-          # above now matches, and that the pattern still matches every case
-          # the original one did.
-          PATTERN='eyJ[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|sb_(publishable|secret)_[A-Za-z0-9_-]{10,}|SUPABASE_(SERVICE_ROLE_KEY|DB_PASSWORD|ANON_KEY)"?\s*[:=]\s*['"'"'"]?[^$[:space:]"'"'"']|postgres(ql)?://[^[:space:]"'"'"'/]+:[^[:space:]"'"'"'/@]{6,}@'
-
-          # Two intentional exceptions, both allow-listed by their exact,
-          # fixed, local-only payload -- never by excluding a whole file
-          # class, which would also hide a real secret accidentally added
-          # there. 2026-08-29 (P13 audit finding): this scan previously
-          # excluded ':!*.md' -- ALL 36 tracked Markdown files repo-wide,
-          # not just README.md -- including docs/runbooks/SECRET_ROTATION.md,
-          # BACKUP_RESTORE.md, SUPPORT_ACCESS.md, and DEPLOYMENT.md, i.e.
-          # precisely the documents whose subject matter is credentials and
-          # that this project's own convention fills with real command
-          # transcripts. Confirmed removing it surfaces exactly one
-          # legitimate false positive (the local Postgres connection string
-          # below), not a flood -- so a second narrow allow-list entry, not
-          # a broad exclusion, is what the false-positive-suppression goal
-          # actually needed.
-          #
-          # 1. The fixed local-only Supabase CLI demo JWTs (iss
-          #    "supabase-demo") used as test fixtures in
-          #    tests/integration/*-isolation.test.ts (see
-          #    organizations-isolation.test.ts's header comment -- "the
-          #    fixed local demo JWTs -- not secrets"). Identical across
-          #    every local Supabase install everywhere, not derived from
-          #    this project's own credentials.
-          KNOWN_SAFE_LOCAL_DEMO_JWT='eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6'
-
-          # 2. The fixed local Supabase Postgres connection string
-          #    (username "postgres", password "postgres", 127.0.0.1:54322)
-          #    -- Supabase CLI's own hardcoded local default, identical on
-          #    every machine that has ever run `supabase start`, quoted
-          #    verbatim in docs/runbooks/BACKUP_RESTORE.md's real drill
-          #    transcript.
-          KNOWN_SAFE_LOCAL_PG_URL='postgres:postgres@127.0.0.1'
-
-          # 2026-08-30 (P13 production-config review, round 2): the
-          # trailing `|| true` two steps below is required to survive
-          # `git grep`'s own "no matches = exit 1" under `set -e`
-          # (verified locally) -- but `$(...)` only captures stdout, so
-          # under the ORIGINAL single-pipeline form that same `|| true`
-          # also silently absorbed `git grep` exiting 128 on a malformed
-          # PATTERN (confirmed by reproducing both cases): the fatal
-          # error would print to stderr, but $MATCHES would stay empty
-          # and the step would print "no secrets found" and exit 0 --
-          # this security gate quietly becoming a no-op on its own future
-          # edit. Splitting `git grep` out and checking its exit code
-          # explicitly (0 = matches, 1 = no matches, anything else = the
-          # scan itself is broken) closes that without changing what
-          # counts as a real secret finding.
-          if RAW_MATCHES="$(git grep -InE "$PATTERN" -- . \
-              ':!pnpm-lock.yaml' \
-              ':!.github/workflows/ci.yml')"; then
-            GIT_GREP_EXIT=0
-          else
-            GIT_GREP_EXIT=$?
-          fi
-
-          if [ "$GIT_GREP_EXIT" -gt 1 ]; then
-            echo "::error::git grep exited with status $GIT_GREP_EXIT while scanning for secrets (expected 0 = matches found or 1 = no matches) -- treating this as a broken scan, not \"no secrets found\". Likely a malformed PATTERN regex."
-            exit 1
-          fi
-
-          MATCHES="$(printf '%s\n' "$RAW_MATCHES" \
-            | grep -vF "$KNOWN_SAFE_LOCAL_DEMO_JWT" \
-            | grep -vF "$KNOWN_SAFE_LOCAL_PG_URL" \
-            | grep -vE "$KNOWN_SAFE_PROCESS_ENV_ASSIGNMENT" || true)"
-
-          if [ -n "$MATCHES" ]; then
-            echo "$MATCHES"
-            echo "::error::Possible secret literal found in a tracked file (see matches above)."
-            exit 1
-          fi
-
-          echo "No secret-shaped literals found in tracked files."
+        # 2026-09-03 (P14 blockers B3 + B4). Was two divergent inline
+        # shell scans. The build-and-test copy referenced an undefined
+        # variable, which `set -u` turned into a fatal that the
+        # trailing `|| true` then swallowed, so it printed its success
+        # string and exited 0 on every run since 464d6d8 -- while the
+        # fast-gates copy had never carried the SUPABASE_*= or
+        # postgres:// rules at all. Between them, no job in this
+        # pipeline could catch a committed database password.
+        #
+        # One Node implementation, called by both jobs. An undefined
+        # name is now a ReferenceError that kills the process instead
+        # of an empty expansion, and the script self-tests both
+        # directions before it looks at the repository, so a clean
+        # report means the scanner proved it still works.
+        run: node scripts/ci/scan-for-committed-secrets.mjs

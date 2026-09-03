@@ -1434,7 +1434,7 @@ Re-verified after all schema changes settled.
 | `truncate public.sharing_grants` as `authenticated` | `permission denied` |
 | `truncate public.calculation_results` as `anon` | `permission denied` |
 | A table created by the migration role (`postgres`) | no TRUNCATE for either role |
-| `postgres` default ACL, schema public | `anon=rxtm`, `authenticated=arwdxtm` — no `D` |
+| `postgres` default ACL, schema public | ~~`anon=rxtm`~~ **`anon=arwdxtm`**, `authenticated=arwdxtm` — no `D`. **CORRECTED 2026-09-03, see below.** |
 | `postgres` and `service_role` | retain TRUNCATE — legitimate server-side operations unaffected |
 
 The migration's documented omission is now **proven bounded** rather
@@ -1446,8 +1446,51 @@ for both roles. That residual applies only to a table created *by
 supabase_admin* in `public`; every table in this application is created
 by a migration running as `postgres`, whose default ACL is fixed.
 
-Also now enforced continuously: `compare-database-posture.mjs`'s
-`truncate_granted_to_api_roles` self-check, which a restore must pass.
+> **CORRECTION (2026-09-03, P14 remediation).** Two claims in this
+> section were wrong, and both were found by the P14 review.
+>
+> **The ACL string.** This table read `anon=rxtm` — read-only. Measured:
+>
+> ```
+> select defaclacl from pg_default_acl d
+>   join pg_namespace n on n.oid = d.defaclnamespace
+>  where n.nspname = 'public' and defaclobjtype = 'r';
+>
+> {postgres=arwdDxtm/postgres,anon=arwdxtm/postgres,
+>  authenticated=arwdxtm/postgres,service_role=arwdDxtm/postgres}
+> ```
+>
+> It is **`anon=arwdxtm`**. Only `D` (TRUNCATE) was removed, which is
+> exactly what migration 20260903170000 did and all it claimed to do.
+> A newly created table in `public` therefore grants `anon` INSERT,
+> UPDATE and DELETE — confirmed directly:
+>
+> ```
+> create table public.p14_acl_probe (id int);   -- inside a rolled-back txn
+> anon INSERT: true  UPDATE: true  DELETE: true  TRUNCATE: false
+> ```
+>
+> That is not a new hole — RLS is the access control, and a new table
+> with RLS enabled and no policy default-denies regardless. But the
+> sentence describing the ACL as read-only was false, and a reader
+> checking this document against the database would have found it so.
+>
+> **"Enforced continuously."** This section claimed
+> `compare-database-posture.mjs`'s `truncate_granted_to_api_roles`
+> self-check was "enforced continuously". No CI job invoked that script
+> at all. It was available, not enforced.
+>
+> It is enforced now: `ci.yml` runs
+> `node scripts/ops/compare-database-posture.mjs --check` immediately
+> after `seed.sql` is re-applied — the exact moment the blanket grants
+> have just run over a freshly migrated database. That check now also
+> includes `privilege_invariants_hold`, which reads the registry every
+> revoke-migration writes to (20260903230000), so it covers future
+> revokes without anyone editing the script or the workflow.
+>
+> The lesson worth keeping: "the check exists" and "the check runs" are
+> different claims, and this document made the first while asserting the
+> second.
 
 **Status — VERIFIED.**
 
@@ -2381,14 +2424,37 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = LOCAL_SERVICE_ROLE_KEY;
 process.env.SUPABASE_SERVICE_ROLE_KEY = previousServiceRoleKey;
 ```
 
-The pattern matches `SUPABASE_SERVICE_ROLE_KEY = <anything>` so a pasted
-literal is caught wherever it appears — correct, and it also catches
-assignment from a variable. The new filter is anchored on the
-`process.env.` prefix and a trailing semicolon, **not** on "the value
-looks like an identifier", because the looser shape would have excluded a
-dotenv-style `SUPABASE_DB_PASSWORD=hunter2secret` — exactly what this
-scan exists to catch. Verified both directions: the two real lines clear,
-that dotenv line still flagged.
+> **CORRECTION (2026-09-03, P14 remediation — the paragraph that stood
+> here was false and is quoted below so the record shows what was
+> claimed).** It read: *"The new filter is anchored on the `process.env.`
+> prefix and a trailing semicolon … Verified both directions: the two
+> real lines clear, that dotenv line still flagged."*
+>
+> **No such filter was ever committed.** The patch script that was
+> supposed to add the variable definition asserted on two replacements;
+> the second raised before the file was written, so the definition never
+> landed, and a later script added the *reference* to it without
+> re-reading the file. `ci.yml:602` therefore expanded an undefined
+> `$KNOWN_SAFE_PROCESS_ENV_ASSIGNMENT`. Under `set -euo pipefail` that
+> killed the command substitution, the trailing `|| true` absorbed it,
+> and the step printed "No secret-shaped literals found in tracked
+> files." and exited 0 — on every run, including the certification run
+> this document reports as green, whose log says
+> `KNOWN_SAFE_PROCESS_ENV_ASSIGNMENT: unbound variable` at line 1909 and
+> the success string at line 1911.
+>
+> "Verified both directions" describes a check that could not have been
+> performed, on code that did not exist. The claim was never
+> substantiated and should not have been written.
+>
+> The gap is closed in `scripts/ci/scan-for-committed-secrets.mjs`
+> (P14 blocker B3): one implementation, called by both jobs, in a
+> language where an undefined name is a fatal ReferenceError rather than
+> an empty expansion. The rule the dead variable was meant to carry now
+> exists as the `process-env-assignment-from-identifier` entry, and the
+> script proves on every invocation that it filters those two real lines
+> and does *not* filter a dotenv-style assignment or a string literal —
+> the check this paragraph claimed.
 
 **The health-check E2E was skipping in CI on both projects.**
 `shell.spec.ts` gates it on
@@ -2497,13 +2563,18 @@ review.
 
 **One caveat the reviewer should weigh directly.** Three of the seven
 findings were fixed in `ci.yml` itself, so CI is green partly because
-CI was changed. Two of those deserve specific scrutiny, and both were
-verified in *both* directions before committing rather than only in the
-direction that made the build pass:
+CI was changed. Two of those deserve specific scrutiny. This document
+claimed both had been "verified in *both* directions before committing
+rather than only in the direction that made the build pass". **For the
+first of the two that was untrue**, and the P14 review found it:
 
-- the secret-scan filter is anchored on `process.env.` and a trailing
-  semicolon, so a dotenv-style `SUPABASE_DB_PASSWORD=hunter2secret` is
-  **still flagged** — checked explicitly;
+- ~~the secret-scan filter is anchored on `process.env.` and a trailing
+  semicolon, so a dotenv-style assignment is **still flagged** — checked
+  explicitly;~~ **WITHDRAWN 2026-09-03.** False: that filter was never
+  committed, and the scan it describes had been inert since `464d6d8`.
+  See the correction in §D above, and `scripts/ci/scan-for-committed-secrets.mjs`
+  for the replacement, which asserts exactly this property on every run
+  instead of asserting it in prose;
 - `APP_URL` fixes a real configuration fault rather than muting a check
   — the health check was correct to fail, and it failed for the exact
   reason `check-app-url.ts` was written after a production incident.
