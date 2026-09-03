@@ -117,20 +117,47 @@ const SECRET_SHAPES = [
     name: "supabase-env-assignment",
     description:
       "a SUPABASE_SERVICE_ROLE_KEY / SUPABASE_DB_PASSWORD / SUPABASE_ANON_KEY assignment, quoted or unquoted, = or :",
-    // `<` is excluded from the first value character alongside `$`:
-    // `SUPABASE_SERVICE_ROLE_KEY=<the local service_role key>` is a
-    // documentation placeholder, and README.md's E2E setup section is
-    // full of them. Narrow on purpose -- it exempts the one character
-    // that cannot begin a real credential, not a file or a directory.
-    // The notMatch lines below prove a real value still matches.
+    // Written to match the SYNTAX of an assignment rather than
+    // "the name, then roughly anything". Every refinement here came
+    // from a false positive on a document whose SUBJECT is this scan --
+    // the P14 review reports quote the shapes it is meant to catch, and
+    // that is precisely the document class the P13 audit found excluded
+    // wholesale and correctly refused to exclude again.
+    //
+    //  * The value cannot begin with `<`, a backtick or a backslash:
+    //    those begin a documentation placeholder, a markdown code span
+    //    and a JSON string escape respectively, and all three are
+    //    everywhere in text about credentials. None can begin a real
+    //    credential.
+    //  * The value must run at least 8 characters with no whitespace.
+    //    Prose breaks immediately -- `SUPABASE_DB_PASSWORD= or the anon
+    //    key` and `SUPABASE_SERVICE_ROLE_KEY = ...` both stop at two or
+    //    three -- while a Supabase credential never does: a
+    //    service-role key is a JWT and a database password is
+    //    generated. The trade-off is stated rather than hidden: a
+    //    committed password shorter than eight characters would be
+    //    missed by THIS rule, though a JWT-shaped one is still caught
+    //    by the `jwt` rule above.
+    //
+    // An earlier version of this refinement forbade whitespace after
+    // `=` instead. The self-test rejected it: that also stops matching
+    // `process.env.SUPABASE_SERVICE_ROLE_KEY = "<a real key>"`, and the
+    // run said so by reporting the process.env allow-list entry as
+    // newly dead. The length rule keeps that shape detectable.
+    //
+    // Nothing here changes what a real leak looks like, and every
+    // refinement is asserted in both directions on every run --
+    // `example` for the positive, `mustNotMatch` for each exemption.
     pattern:
-      /SUPABASE_(SERVICE_ROLE_KEY|DB_PASSWORD|ANON_KEY)"?\s*[:=]\s*['"]?[^$\s'"<]/,
+      /SUPABASE_(SERVICE_ROLE_KEY|DB_PASSWORD|ANON_KEY)"?\s*[:=]\s*['"]?[^$\s'"<`\\]{8,}/,
     example: 'SUPABASE_DB_' + 'PASSWORD="hunter2hunter2"',
-    // Asserted by the self-test: each of these must NOT match, or the
-    // exemption above has become a hole.
     mustNotMatch: [
       "SUPABASE_SERVICE_ROLE_" + "KEY=<the local service_role key>",
       "SUPABASE_DB_" + "PASSWORD: <your password>",
+      "cannot match " + "SUPABASE_DB_" + "PASSWORD= or the anon key",
+      "`" + "SUPABASE_SERVICE_ROLE_" + "KEY = ...`",
+      "and cannot match `" + "SUPABASE_DB_" + "PASSWORD=` or",
+      '"evidence": "' + "SUPABASE_DB_" + 'PASSWORD=\\n"',
     ],
   },
   {
@@ -296,6 +323,91 @@ const KNOWN_SAFE = [
         "PASSWORD=aRealProductionPassword`",
     ],
   },
+
+  // ----------------------------------------------------------------
+  // 2026-09-03 (P14 remediation). The credentials the review INVENTED
+  // in order to prove the old scan was dead.
+  //
+  // P14_INDEPENDENT_ADVERSARIAL_FINDINGS.json records, verbatim, the
+  // planted files the attack agents committed to throwaway repositories
+  // to demonstrate that build-and-test's scan reported clean on real
+  // leaks. Those strings are the evidence. They are also, by
+  // construction, exactly the shape this scan exists to catch -- which
+  // is the whole point of them, and why they are here rather than
+  // edited out of the record.
+  //
+  // Each is allow-listed as its COMPLETE payload, including the
+  // fabricated password, so a genuine credential is filtered only if it
+  // is character-for-character one of these. Every entry carries a
+  // notMatch that changes one character and asserts it still fails.
+  //
+  // The alternative -- excluding the file -- is the exact move the P13
+  // audit found had left SECRET_ROTATION.md, BACKUP_RESTORE.md and
+  // DEPLOYMENT.md unscanned, and it stays refused.
+  // ----------------------------------------------------------------
+  {
+    name: "p14-review-planted-pg-url-supabase-host",
+    literal:
+      "postgresql://postgres:RealProdPassword9@db.abcdefgh.supabase.co:5432/postgres",
+    mustMatch:
+      "docs/plans/P14_INDEPENDENT_ADVERSARIAL_FINDINGS.json:560:postgresql://postgres:RealProdPassword9@db.abcdefgh.supabase.co:5432/postgres",
+    notMatch: [
+      "src/x.ts:1:postgresql" +
+        "://postgres:RealProdPassword8@db.abcdefgh.supabase.co:5432/postgres",
+    ],
+  },
+  {
+    name: "p14-review-planted-pg-url-example-host",
+    literal: "postgresql://admin:RealProdPassword123@db.example.com:5432/app",
+    mustMatch:
+      "docs/plans/P14_INDEPENDENT_ADVERSARIAL_FINDINGS.json:1460:postgresql://admin:RealProdPassword123@db.example.com:5432/app",
+    notMatch: [
+      "src/x.ts:1:postgresql" +
+        "://admin:RealProdPassword124@db.example.com:5432/app",
+    ],
+  },
+  {
+    name: "p14-review-generic-pg-url-template",
+    // Literally the word "password" between the colons -- a shape
+    // template in prose, not a credential.
+    literal: "postgres://user:password@host",
+    mustMatch:
+      "docs/plans/P14_INDEPENDENT_ADVERSARIAL_FINDINGS.json:484:a `postgres://user:password@host` URL",
+    notMatch: ["src/x.ts:1:postgres" + "://user:hunter2secret@host"],
+  },
+  {
+    name: "p14-review-placeholder-pg-url-template",
+    literal: "postgresql://postgres:<realpassword>@db.<ref>.supabase.co",
+    mustMatch:
+      "docs/plans/P14_INDEPENDENT_ADVERSARIAL_FINDINGS.json:559:postgresql://postgres:<realpassword>@db.<ref>.supabase.co:5432/postgres",
+    notMatch: [
+      "src/x.ts:1:postgresql" +
+        "://postgres:anActualPassword@db.abcdefgh.supabase.co",
+    ],
+  },
+  {
+    name: "p14-review-planted-db-password",
+    literal: "SUPABASE_DB_PASSWORD=Hunter2ProdPassword",
+    mustMatch:
+      "docs/plans/P14_INDEPENDENT_ADVERSARIAL_FINDINGS.json:560:  SUPABASE_DB_PASSWORD=Hunter2ProdPassword",
+    notMatch: [
+      "src/x.ts:1:SUPABASE_DB_" + "PASSWORD=Hunter3ProdPassword",
+    ],
+  },
+  {
+    name: "local-supabase-db-password-dotenv",
+    // The Supabase CLI's local default in its dotenv form, in a
+    // recommendation to add a CI step. The trailing " pnpm" is part of
+    // the allow-listed literal on purpose: without it, this entry would
+    // also filter `SUPABASE_DB_PASSWORD=postgresqlRealSecret`, and the
+    // self-test said so when the first version omitted it.
+    literal: "SUPABASE_DB_PASSWORD=postgres pnpm",
+    mustMatch:
+      "docs/plans/P14_INDEPENDENT_ADVERSARIAL_FINDINGS.json:1943:`SUPABASE_DB_PASSWORD=postgres pnpm regulatory:verify`",
+    notMatch: [
+      "src/x.ts:1:SUPABASE_DB_" + "PASSWORD=postgresqlRealSecret",
+    ],
+  },
 ];
 
 const EXCLUDED_PATHSPECS = [
@@ -435,7 +547,7 @@ ${listed.stderr}`,
   );
 
   const paths = listed.stdout
-    .split(" ")
+    .split("\u0000")
     .filter((path) => path.length > 0 && !excluded.has(path));
 
   const lines = [];
