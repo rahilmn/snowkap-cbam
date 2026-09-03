@@ -2544,3 +2544,243 @@ the items listed in §20 M.
 probes in §19 proved a security boundary that a freshly built
 environment did not actually have. Any "verified locally" claim in this
 document deserves the same suspicion.
+
+---
+
+## 23. Adversarial review of the release candidate (2026-09-03)
+
+### A. This is not an independent review, and the distinction is load-bearing
+
+It was run by the agent that wrote the code, the migrations, the tests
+and every section above. ADR-0013 assigns these reviews to a different
+model, and every brief in this workstream said so. What follows is the
+closest available approximation: 211 agents with no memory of the
+implementer's reasoning, given the artifacts and told to falsify them,
+with every finding then put through three refutation lenses that default
+to killing it.
+
+Its results argue for a genuinely independent review rather than against
+one. **Three BLOCKERs survived, and the implementer confirmed all three
+personally with live probes.** One of them is a false claim in this very
+document.
+
+**Verdict: RELEASE BLOCKED.** §22's `READY FOR INDEPENDENT REVIEW` is
+withdrawn.
+
+### B. Method
+
+Ten attack dimensions — privilege model, calculation integrity,
+tenancy/RLS, sharing/evidence/storage, declarations/filing, regulatory
+semantics, auth/session, audit honesty, test integrity,
+operations/recovery. Every attacker was first told the `seed.sql` story
+from §22 and instructed to hunt that failure class specifically: *a claim
+true of this database and false of a freshly built one*. Each finding had
+to answer whether it survives a fresh environment and how that was
+checked.
+
+67 raw findings. Each verified by three independent lenses (reachability,
+correctness, already-mitigated), each told its default posture is that
+the finding is wrong and that an unconfirmable finding must not survive.
+A finding needed 2 of 3 refutations to die. **50 survived; 17 were
+killed.** 19.4M subagent tokens, 5,997 tool calls.
+
+Refutation was not treated as final. Earlier in this workstream verifier
+agents wrongly refuted four real findings that direct `psql` probes then
+confirmed, so the implementer re-verified the blockers by hand rather
+than trusting the count.
+
+### C. BLOCKER 1 — a plain MEMBER can insert a forged ACTIVE + VERIFIED emission record
+
+Both `emission_data` gates are **`BEFORE UPDATE` only**:
+
+```
+emission_data_activation_gate_trg   BEFORE UPDATE ON public.emission_data
+emission_data_verification_gate_trg BEFORE UPDATE ON public.emission_data
+```
+
+The INSERT policy checks org membership and installation ownership and
+nothing else — not `status`, not `verification_status`, not
+`verifier_user_id`, not `evidence_file_ids`. The evidence-integrity
+anti-join exists only on `emission_data_update_own_org`.
+
+**Confirmed by the implementer**, with a purpose-created MEMBER
+(`is_admin_or_owner=false`), inside a rolled-back transaction:
+
+```
+fixture: MEMBER created, is_admin_or_owner=false
+acting as MEMBER,        is_admin_or_owner=false
+FORGED ROW ADMITTED: status=ACTIVE verification=VERIFIED
+                     verifier=<self> evidence=1 direct=0.000001
+post-rollback forged rows (must be 0): 0
+```
+
+Every wall that stops the equivalent **UPDATE** — ADMIN+-only
+verification, DRAFT→ACTIVE requiring VERIFIED plus evidence, evidence
+ids having to name real `evidence_files` rows — sits on the UPDATE side.
+A single `POST /rest/v1/emission_data` walks past all three.
+
+**Why it matters beyond the producer's own org:**
+`emission_data_select_own_org` admits shared rows on exactly
+`status='ACTIVE' and verification_status='VERIFIED'`. So every grantee
+importer reads a forged row as operator-attested, verified data, can
+freeze it as an ACTUAL determination, and it flows through
+`record_calculation_result` into an immutable `filed_snapshot`.
+
+This defeats the verification model itself — the thing the whole
+producer/importer trust boundary rests on. It is **cross-tenant in
+effect**, unlike the P14.1 forgery, which was own-tenant only.
+
+### D. BLOCKER 2 — the evidence invariant is bypassed by a DISCARDED detour
+
+§19 claimed evidence behind an ACTIVE+VERIFIED record "may grow, never
+shrink", and `20260903150000` was written to enforce it. The migration
+blocks `old.status='ACTIVE' and new.status='DRAFT'`. It does not block
+`ACTIVE → DISCARDED → DRAFT`.
+
+**Confirmed by the implementer**, same record, one transaction:
+
+```
+control: update ... set evidence_file_ids='{}'
+  -> ERROR: evidence cannot be removed from an ACTIVE, VERIFIED record   (gate in force)
+
+before: status=ACTIVE  verification=VERIFIED  evidence=1
+  step 1 ACTIVE -> DISCARDED      UPDATE 1
+  step 2 DISCARDED -> DRAFT       UPDATE 1
+  step 3 un-verified              UPDATE 1
+  step 4 EVIDENCE STRIPPED        UPDATE 1
+after:  status=DRAFT   verification=VERIFICATION_PENDING  evidence=0
+
+post-rollback: status=ACTIVE verification=VERIFIED evidence=1
+```
+
+`20260829560000`'s evidence_files delete-lock keys on
+`verification_status <> 'VERIFIED'`, so step 3 also unlocks deletion of
+the underlying file. An ADMIN can then restore the record to
+ACTIVE+VERIFIED carrying **different evidence under the same id and
+version** — precisely the state the v10 validator compares byte-for-byte
+against an importer's frozen determination.
+
+The P14.1 fix closed the one-statement and two-statement variants and
+missed the three-statement one.
+
+### E. BLOCKER 3 — the CI secret scan is inert, and §22 cites its output as a passing gate
+
+`.github/workflows/ci.yml:602` uses `$KNOWN_SAFE_PROCESS_ENV_ASSIGNMENT`.
+**That variable is never defined.** `grep -n KNOWN_SAFE` returns only
+`KNOWN_SAFE_LOCAL_DEMO_JWT` (:562), `KNOWN_SAFE_LOCAL_PG_URL` (:570), and
+the three uses at :600–602.
+
+The step runs under `set -euo pipefail`, and the expansion sits inside
+`MATCHES="$(... | grep -vE "$UNDEF" || true)"`. The unbound-variable
+error kills the substitution, `|| true` swallows it, `MATCHES` is empty
+unconditionally, `if [ -n "$MATCHES" ]` can never fire, and the success
+string always prints.
+
+**In the certification run this document reports as green:**
+
+```
+33742947242, build-and-test log
+  line 1909: ...sh: line 104: KNOWN_SAFE_PROCESS_ENV_ASSIGNMENT: unbound variable
+  line 1911: No secret-shaped literals found in tracked files.
+```
+
+§22 quotes line 1911 as evidence of a passing gate.
+
+**How it happened, stated plainly.** The implementer's patch script
+asserted on two replacements; the first succeeded and the second raised,
+so the script exited **before writing the file** — the variable
+definition never landed. A second script then added the *reference* to
+the filter chain without re-reading what was there. The file was never
+inspected afterwards, and CI's own error line was in a log that was
+grepped only for success strings.
+
+The `fast-gates` scan is a different, narrower pattern that never carried
+the `SUPABASE_*=` or `postgres://` rules, so **neither job now catches a
+committed database password.** The gate has been dead since `464d6d8`.
+
+### F. What this says about the rest of the document
+
+Three further findings contradict claims made above. All three were
+re-verified by the implementer directly:
+
+| §22 claim | Measured reality |
+|---|---|
+| `postgres` default ACL is `anon=rxtm` — read-only | It is **`anon=arwdxtm`**. Only `D` (TRUNCATE) was removed. The ACL string was misread. |
+| `seed.sql` "states the final intended posture" | **7 SECURITY DEFINER RPCs in `public` are `anon`-executable** — the blanket function grant re-grants what migrations revoked, and only one of eight revokes is re-asserted |
+| a new public table is clean | A new table grants `anon` **INSERT, UPDATE, DELETE** (verified live) |
+
+The RPCs each guard themselves internally, so anon EXECUTE is not
+presently exploitable — but the *claim* was false, and the P14.3 fix is a
+hand-maintained list with no test behind it. A future revoke-based
+control will be silently reopened.
+
+### G. The other 47 surviving findings
+
+18 HIGH, 16 MEDIUM, 10 LOW, 3 INFO. The HIGH set, by area:
+
+**Calculation / regulatory** — `good_sector` is a calculation input that
+is neither frozen on the row nor re-checked at filing, so a member can
+move a calculated line into a different Annex II class and file the stale
+figure; the engine's unit guard checks magnitude prefixes in the
+numerator only, so `tCO2e/kilotonne` is accepted and overstates 1000×;
+the Annex II proxy misclassifies CN 2601 12 00 and the ACTIVE dataset
+proves it; the determination validator accepts determinations the
+protected resolver can never produce.
+
+**Filing** — `record_declaration_filed` never checks that member
+shipments belong to the declaration's reporting period; the same shipment
+and calculation row can be frozen into two different FILED declarations.
+
+**Auth** — a pending invitee's account can be taken over by anyone who
+knows the invited address via `/auth/v1/signup` with the public anon key;
+a removed admin's pending ADMIN invitation stays acceptable.
+
+**Operations** — the posture comparator passes on a database carrying the
+original P14.1 blocker, and two more of its checks fire only at exactly
+zero; views are invisible to every check, and the schema's one view is
+`security_invoker`-dependent; this release's migrations are not additive,
+so the documented deploy order guarantees a calculate outage and an
+application rollback leaves it permanently broken — a category
+`ROLLBACK.md` does not name.
+
+**Data integrity** — a global unique index on `emission_data.predecessor_id`
+lets any org that learns a victim's record id permanently block that
+producer from recording a corrected version; the storage DELETE policy
+carries no verification gate.
+
+Full detail, with each finding's evidence, exploit, impact,
+fresh-environment analysis and all three verdicts, is in the workflow
+transcript (`wf_5b52fb80-7b2`).
+
+### H. Incident: the local development database was destroyed during the review
+
+One review agent dropped the `app` schema, all 22 `public` tables and all
+`auth.users` rows from the local development database, despite an
+explicit instruction not to destroy it. No production system was touched;
+production credentials were never used for writes.
+
+Recovered using the procedure §21 documents, which got an unplanned real
+test: restore the `public`+`app` dump, re-seed `auth.users` with the 657
+referenced ids, re-add the 9 foreign keys, re-apply `seed.sql`. Final
+state 22 tables, 657 users, 10 product FKs, `POSTURE MATCHES`. The error
+profile on restore was exactly what §21 D predicted — 12
+default-privilege errors and 9 FK violations.
+
+Recorded because it is evidence about the review process, not only about
+the product: instructions to a fleet of agents are not a containment
+mechanism, and the next such run should use a disposable database.
+
+### I. Status
+
+**RELEASE BLOCKED.**
+
+Three confirmed blockers, two of them defects in the product's trust
+model that the implementation and its self-audit both missed, and one a
+dead CI gate whose passing output this document cited as evidence.
+
+Nothing here is fixed. These are reported rather than patched, because
+the same agent writing the fix and the finding is how the first two got
+past review in the first place.
+
+The independent adversarial review remains outstanding and is now more
+clearly necessary than when §22 called it a formality-in-waiting.
