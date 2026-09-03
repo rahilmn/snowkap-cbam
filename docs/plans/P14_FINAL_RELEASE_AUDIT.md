@@ -3089,3 +3089,192 @@ Authentication takeover remains **UNPROVEN rather than disproved** — no
 live path was demonstrated, and none could be, because no auth service
 was reachable. That is a gap in evidence, not a clean bill, and it is
 the first thing the independent review should reach for.
+
+---
+
+## 25. P14 remediation certification (2026-09-04)
+
+Self-certification by the implementation session. Not the independent
+review.
+
+Every claim below was produced by: reproduce the attack → implement →
+attack again → exercise the legitimate path → inspect the actual
+database state. Where that sequence could not be completed, the item
+says **UNPROVEN** or **ENVIRONMENT BLOCKED** and is not counted as
+closed.
+
+### Candidate SHA
+
+The tip of `phase14/release-hardening`. The last functional change is
+`9a949df`; this report is the commit after it. Five commits from
+`5fac028`, six new migrations (79 → 85).
+
+`origin/main` (`909233d`) and the deploy branch (`95c95bb`) are
+untouched. Nothing pushed, merged or deployed. Production still serves
+`95c95bb` and was never contacted.
+
+### Owner decisions
+
+| | Decision | Status |
+|---|---|---|
+| 1 | READY is an approval checkpoint | **PROVEN** — `20260904090000`; RLS DRAFT-only on insert/update/delete plus a trigger binding every role, including service_role. REOPEN is the audited way to edit. 9 regression cases. |
+| 2 | Current engine version required for filing | **PROVEN** — `20260904100000`; `CALCULATION_ENGINE_OUTDATED`, current version read from `app.engine_version` (not a parameter, because the RPC is callable by `authenticated`). 5 cases including recalculate-then-file and history preservation. |
+| 3 | Hosted `secure_password_change = true` | **PARTIAL — see AUTH-1.** Implemented, measured, documented. Does not close the boundary, and the hosted value has not been read. |
+| 4 | No silent auth callback session adoption | **PROVEN** — the effect only reads; adoption requires a press; the hash is stripped from the address bar. 6 source-level + 4 browser-level cases. |
+| 5 | EU-origin not determinable | **PROVEN** — refused on both determination paths before the resolver is consulted; protected zone untouched; 6 cases. |
+| 6 | Verifier independence | **PROVEN** — `20260904120000`; `created_by_user_id` written from `auth.uid()`, never accepted; self-verify refused, independent verify allowed. |
+| 7 | Freeze the emissions-data period | **PROVEN** — `20260904130000`; `dataset_reporting_period` frozen and validated against the record's own columns, mirroring `record_provenance`. |
+| 8 | Known regulatory limitations stay explicit | **PROVEN** — nothing regulatory changed; see Regulatory below. |
+
+### Blocker status
+
+```
+B1     emission INSERT authority        CLOSED    (unchanged, re-verified)
+B2     verified evidence lifecycle      CLOSED    (unchanged, re-verified)
+B3     secret scan                      CLOSED    (self-testing, both directions, every run)
+B4     candidate scan                   CLOSED    (tree passes its own gate)
+H3     E2E production targeting         CLOSED    (fails closed on provenance; no override)
+FILE-1 READY population drift           CLOSED    (reproduced at this SHA, then closed at the mutation boundary)
+AUTH-2 callback session adoption        CLOSED    (explicit consent; proven in source and in a browser)
+AUTH-1 password-change boundary         BLOCKED   (see below)
+```
+
+**AUTH-1 is the one open blocker.** Measured against a real GoTrue
+v2.195.0 with `secure_password_change = true`:
+
+| session | `PUT /auth/v1/user {password}` | |
+|---|---|---|
+| aged past the window | `400 reauthentication_needed` | blocked |
+| created moments earlier | `200` | **still succeeds** |
+
+So the prescribed control stops a *stale* stolen session and not a
+*fresh* one — and fresh is the realistic shape, because a cookie lifted
+from a live browser is by definition recent. The full chain still runs:
+stolen access token → password rewritten → owner's password rejected →
+`POST /logout?scope=others` evicts the owner's remaining sessions.
+Session theft becomes permanent, exclusive control, and the owner's
+normal remedy goes with it.
+
+Decision 3 was implemented exactly as specified and is worth having —
+with the setting off there is no boundary at all. It is not sufficient,
+and reporting it as sufficient would be the failure this whole
+workstream exists to correct. Closing it needs a current-password
+prompt on the change-password screen: an application change, outside
+this pass's scope, and an owner decision.
+
+`configured on the hosted project:` **not read.** Local now matches the
+required value so developer behaviour is not laxer than production.
+
+### Security
+
+| | |
+|---|---|
+| `calculation_results` grants | `anon` / `authenticated`: SELECT, REFERENCES, TRIGGER only. No INSERT/UPDATE/DELETE/TRUNCATE. Zero INSERT policies. All four write verbs refused at the GRANT layer as a live MEMBER. |
+| Trusted RPC | `record_calculation_result`: SECURITY DEFINER, `search_path=public`, EXECUTE `service_role` only (`anon`=false, `authenticated`=false). The only function in the schema that writes the table. |
+| Write paths | Repository-wide search: one caller, `calculate-line.ts`, whose values come from the engine's own output object. The other two references are a comment and a `.select()`. |
+| RPC guards | Binds determination, quantity, unit basis, actor membership and capability; derives `shipment_id` from the line; sets `calculated_at` from `clock_timestamp()`; rejects non-semver versions and negative magnitudes. **Does not verify the emissions value** — by design, documented: the engine is TypeScript and a plpgsql second copy would be worse than none. Security rests on unreachability, which held under every path found. |
+| RLS | All 21 public tables. Comparator's `tables_without_rls`, `rls_without_policies`, `tables_without_insert_policy` all OK. |
+| Seed | `seed.sql` re-applied over the built schema: privilege invariants hold. |
+| TRUNCATE | Not held by `anon`/`authenticated`; registered as an invariant. |
+| Verifier independence | Enforced in the database, both directions tested. |
+| Cross-org | Unchanged and re-verified by the existing isolation suites (0 failures). |
+
+### Filing
+
+| | |
+|---|---|
+| READY immutability | PROVEN. Reproduced (2640 filed against 3960), then closed; delete/insert/update/redetermine all refused, DRAFT untouched, REOPEN works. |
+| Period binding | Enforced (`20260903220000`), re-verified. |
+| Duplicate shipment | Enforced; within a period also blocked by `declarations_period_original_uq`. |
+| Engine-version gate | PROVEN. Stale refused, recalculate appends, filing then succeeds, 1.2.0 row preserved. |
+| Stale calculations | Unchanged: determination/quantity/unit mismatch → INCOMPLETE. |
+| Amendments | Run the same function; engine gate and period rules apply. Amendment and amendment-of-amendment both still file. |
+
+### Regulatory
+
+`pnpm regulatory:verify` → **`RESULT: VALID`**, 12,540/12,540, checksum
+`900583811c7e1194799eb9bdbad2d6d7e1100f5a7d80a664c1584a8fce6f9f35`.
+**Run against the LOCAL database.** The protected zone is byte-identical
+to the candidate — resolver, adapter, the five foundation migrations and
+the Python pipeline all unchanged — so the gate verifies the dataset,
+not a change to it. A production-targeted run has not been performed.
+
+- **D1** — Annex II direct-only treatment stands. The applicability
+  mechanism remains a **sector proxy**, not an exact Annex II code
+  dataset, and is not described as one. Unchanged; still a high-risk
+  follow-up.
+- **EU-origin** — now fails closed on both determination paths. The
+  refusal is a refusal, never an exemption; the message says the
+  treatment is unresolved and says nothing about applicability.
+  Historical snapshots are unaffected, so the authoritative rule can
+  replace the interim gate without rewriting anything frozen.
+- **R7/R9** — untouched. The clause-1 fallback test now uses a
+  genuinely unlisted third country (Kiribati) rather than an EU code,
+  so it still pins the mechanism.
+- **`tCO2/t`** — unchanged, still the recorded open owner question.
+
+### Tests
+
+```
+typecheck:              PASS
+unit/integration:       458 files, 1717 tests, 1717 passed, 0 failed, 0 skipped
+E2E:                    47 passed, 0 failed, 0 flaky, 9 skipped
+build:                  PASS -- artifact carries no E2E bypass and no env file
+regulatory:             RESULT: VALID, 12540/12540 (local, see above)
+fresh DB migrations:    82 applied, 2 skipped (pipeline-dependent), 0 failed
+posture comparator:     POSTURE MATCHES; negative test PASS -> FAIL (naming the
+                        reverted control and its migration) -> PASS
+```
+
+**The 9 E2E skips, separated as required.** Eight are the deliberate
+desktop-only journeys on `mobile-chromium`. The ninth is **not**
+deliberate: `actual-data-determination.spec.ts` — the Storage-backed
+journey — skipped on chromium because local Storage returns 503.
+`supabase/config.toml` ships `[storage] enabled = false`; enabling it
+and restarting reproduced the known host failure
+(`supabase_storage container is not ready: unhealthy`), so the setting
+was reverted. **That journey has not executed here and is not counted
+as passed.** CI is the authorized environment for it.
+
+### Remaining items
+
+**Blocker**
+- **AUTH-1**, above. One item, precisely characterised.
+
+**Environment blocked**
+- The Storage-backed actual-data journey must execute in CI.
+- CI has not run: this SHA is not pushed.
+- `regulatory:verify` against production has not been run.
+- Hosted Auth settings (Site URL, rate limits, CAPTCHA off,
+  `secure_password_change`) have not been read.
+
+**Owner decisions still open**
+- Current-password prompt on password change (would close AUTH-1).
+- D1's sector proxy vs an exact Annex II dataset.
+- `tCO2/t` as CO2e.
+- Whether a dataset period must equal the shipment's — the provenance
+  is now frozen so the question can be answered later about historical
+  calculations; the rule itself is not invented here.
+- Whether an EU-origin line should ever be determinable, and on what
+  authority.
+
+**Accepted risk**
+- The trusted RPC does not verify the emissions value. Documented, and
+  the reason it is not fixed is that the alternative is worse.
+
+### Verdict
+
+**RELEASE BLOCKED.**
+
+Seven of eight blockers are closed, each reproduced before and pinned by
+a regression after. FILE-1 — the one that mattered most, a 33%
+under-report filed through the supported UI by the lowest-privileged
+role — is closed at the mutation boundary rather than patched at the
+filing gate.
+
+AUTH-1 is not closed. The owner's prescribed control is implemented and
+is worth having; it is also, measured rather than assumed, partial, and
+the live takeover path still runs against a fresh session. Calling that
+CLOSED because the prescribed action was taken would be the exact
+failure mode this workstream has been correcting: reporting the action
+instead of the outcome.
