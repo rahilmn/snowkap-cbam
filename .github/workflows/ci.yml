@@ -397,6 +397,28 @@ jobs:
           } >> .env.local
           echo "Wrote .env.local pointing at the local Supabase this job started."
 
+          # 2026-09-03 (P14.3). .env.local is a FILE the app build reads.
+          # The Playwright runner's own process never saw these, and
+          # shell.spec.ts gates its health-check test on
+          # `Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)`
+          # -- so that test skipped itself in CI on BOTH projects, while
+          # passing locally for anyone who exports the pair in their
+          # shell. The release gate protocol requires it to RUN.
+          #
+          # This is the same "green by omission" the comment below
+          # describes for the journey specs: that gap was closed by
+          # starting Supabase for this step, and the health check was
+          # left behind because nothing failed when it skipped.
+          #
+          # Only the local demo credentials -- the fixed values
+          # `supabase status` prints on every machine, already committed
+          # verbatim in this repository's own test files.
+          {
+            echo "SUPABASE_URL=${API_URL}"
+            echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}"
+          } >> "$GITHUB_ENV"
+          echo "Exported SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY so the health-check E2E runs."
+
       # Builds the app and runs the WHOLE Playwright suite against it
       # (playwright.config.ts's webServer builds+starts the app itself).
       #
@@ -565,7 +587,8 @@ jobs:
 
           MATCHES="$(printf '%s\n' "$RAW_MATCHES" \
             | grep -vF "$KNOWN_SAFE_LOCAL_DEMO_JWT" \
-            | grep -vF "$KNOWN_SAFE_LOCAL_PG_URL" || true)"
+            | grep -vF "$KNOWN_SAFE_LOCAL_PG_URL" \
+            | grep -vE "$KNOWN_SAFE_PROCESS_ENV_ASSIGNMENT" || true)"
 
           if [ -n "$MATCHES" ]; then
             echo "$MATCHES"
