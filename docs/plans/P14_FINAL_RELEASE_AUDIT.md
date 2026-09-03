@@ -3772,3 +3772,224 @@ reviewer who found the last blocker was the session that wrote the fix,
 which is the worst possible arrangement for catching an error of that
 shape. An independent reviewer is owed, and the three environment items
 above are unverified rather than verified-good.
+
+---
+
+## 28. Session fixation closed (2026-09-04)
+
+§27 moved the provider credentials out of the browser and left it
+holding an opaque identifier. That closed credential theft and
+introduced a different defect: the identifier was unguessable but not
+*unfixable*. This section is that remediation.
+
+### SESSION FIXATION
+
+```
+Before:
+  attacker signs in normally, keeps identifier T
+    -> T planted as an ordinary non-httpOnly cookie in a signed-out
+       victim's browser (a signed-out browser holds no httpOnly cookie
+       of that name, so there is nothing to refuse, and any script on
+       the origin can write one)
+    -> victim signs in normally, through the real form
+    -> persistAppSession found a live row for T and UPDATEd it,
+       including user_id -> victim
+    -> identifier NOT rotated: the victim's cookie was still T
+    -> attacker replays T and IS the victim
+
+  Measured: "identifier ROTATED on authentication: false"; the row's
+  owner became the victim; the replaying browser rendered
+  "Signed in as <victim>"; page mentions VICTIM address: true,
+  ATTACKER address: false.
+
+After (same script, same users, unchanged otherwise):
+  attacker's identifier   DMBjpe-gd_qz...
+  victim's identifier     Iz6lMmyRi2J4...     <- rotated
+  identifier ROTATED on authentication: true
+  attacker replaying the planted identifier:
+    URL                   /sign-in
+    signed in as          (nobody -- redirected)
+    mentions VICTIM       false
+    mentions ATTACKER     false
+  rows owned by the victim: 1
+```
+
+The planted identifier is **retired**, not merely bypassed: a copy taken
+a moment before the victim signed in does not outlive the authentication
+that replaced it.
+
+**The distinction the code now makes explicitly**, because collapsing it
+is what caused the defect:
+
+| supplied identifier | treated as | outcome |
+|---|---|---|
+| live row, **same** user | ordinary session refresh | keep the identifier — rotating here would end a live session on every token refresh |
+| live row, **different** user | authentication boundary | retire it, mint a fresh identifier |
+| no row / revoked / expired | authentication boundary | mint a fresh identifier |
+
+The legitimate identity switch — an invitation or recovery link opened
+in a browser already signed in as someone else — lands in the same
+branch as the attack, because from the store's position they are the
+same event.
+
+### DATABASE OWNERSHIP
+
+**Yes — immutable at the database boundary**, not only in the
+application. `20260905100000` adds
+`app.enforce_app_session_ownership_is_immutable`, a BEFORE UPDATE
+trigger that refuses any change to `user_id`, `token_hash` or
+`created_at` with `42501`. It binds the service role too, which is the
+only role that can reach the table at all.
+
+Measured as the service role:
+
+```
+update app_sessions set user_id = <other user>   -> refused
+   "a session belongs to the identity it was created for"
+update app_sessions set token_hash = <other>     -> refused
+```
+
+The application fix is the real one; the trigger is what stops a later
+refactor, a well-meant upsert, or a second writer from quietly
+reopening the takeover with no behavioural test necessarily noticing.
+The comparator's `session_store_is_sealed_off` now asserts the trigger's
+presence as well, so a restore that loses it fails loudly — verified by
+dropping it (`has no ownership-immutability trigger`) and restoring.
+
+### AUTH PATHS
+
+Every write to `app_sessions` goes through `persistAppSession`, which is
+called from exactly one place — the cookie adapter's `setAll` — which is
+constructed in exactly two: `server-client.ts` and `proxy.ts`. So the
+fix is at a genuine choke point rather than applied per flow. Traced and
+confirmed that each identity-establishing path uses
+`getServerSupabaseClient` and therefore passes through it:
+
+| path | entry point | routed |
+|---|---|---|
+| password sign-in | `app/(auth)/actions.ts` `signInAction` | yes |
+| sign-up | `app/(auth)/actions.ts` `signUpAction` | yes |
+| email link — invite / magic link / recovery (hash) | `app/auth/callback/actions.ts` `establishSessionAction` | yes |
+| PKCE recovery (`?code=`) | `app/auth/callback/actions.ts` `exchangeCodeForSessionAction` | yes |
+| `/auth/confirm` token_hash | `app/auth/confirm/actions.ts` `confirmEmailLinkAction` | yes |
+| invitation acceptance | `app/accept-invitation/actions.ts` | yes |
+| recovery completion | `app/(auth)/reset-password/actions.ts` | yes |
+| session refresh | `proxy.ts` middleware | yes |
+
+No OAuth provider is configured. There is no path where a
+caller-selected identifier is rebound.
+
+### REGRESSION
+
+Two suites, and both were shown to be load-bearing rather than assumed
+to be.
+
+`tests/integration/app-session-store.test.ts` — 12 cases, 4 new:
+- NEVER rebinds a supplied identifier to a different user
+- rotates on an identity switch too
+- does NOT rotate an ordinary refresh of the same identity
+- makes ownership immutable at the DATABASE
+
+`tests/e2e/opaque-session.spec.ts` — "a planted session identifier never
+becomes the victim's session", running the brief's A–J in real browsers:
+attacker's identifier planted as a **non-httpOnly** cookie (what a
+script writes, not Playwright's privileged API), victim signs up and in
+through the real UI, then asserts the cookie changed, the planted value
+lands on `/sign-in` mentioning neither address, and the victim's fresh
+identifier authenticates as the victim.
+
+**Broken deliberately, three ways:**
+
+```
+1. trigger dropped, application fix present
+     -> 1 failed: "makes ownership immutable at the DATABASE"
+        (fixation cases still pass -- the application fix carries it)
+
+2. application fix reverted, trigger present
+     -> 2 failed: "NEVER rebinds ...", "rotates on an identity SWITCH"
+        (so the application fix is load-bearing, not belt-and-braces)
+
+3. BOTH removed -- the original defect
+     -> 3 failed, at exactly the right assertion:
+        expect(victimToken).not.toBe(plantedToken)
+        AssertionError: expected 'kJCZTi9i...' not to be 'kJCZTi9i...'
+```
+
+Both layers restored; all 12 pass.
+
+### PREVIOUS AUTH SECURITY
+
+Re-run at this SHA, unchanged and unregressed:
+
+| | |
+|---|---|
+| cookie contains an access token | no — unparseable under every decoding tried |
+| cookie contains a refresh token | no |
+| opaque value as `Bearer` (+ anon key) | `403 bad_jwt` |
+| opaque value as `Bearer`, no apikey | `403 bad_jwt` |
+| opaque value as `apikey` | `401 no_authorization` |
+| fresh stolen session, no current password | REFUSED |
+| current-password field deleted from the DOM | REFUSED |
+| `/reset-password` with an ordinary session | REFUSED, form not rendered |
+| correct current password | CHANGED; old password dead |
+| AUTH-2 callback consent | GREEN — source guards and browser tests |
+
+The current-password proof is untouched.
+
+### Gates
+
+```
+typecheck:              PASS
+unit/integration:       151 files, 1768 tests, 1768 passed, 0 failed, 0 skipped
+targeted auth/session:  15 files, 125 tests, 125 passed, 0 skipped
+E2E:                    65 passed, 0 failed, 0 flaky, 9 skipped
+build:                  PASS -- artifact assertion OK
+posture comparator:     RESULT: POSTURE MATCHES
+secret scan:            PASS
+fresh DB + seed:        84 applied, 2 skipped (pipeline-dependent), 0 failed
+comparator negative:    PASS -> 3 independent breaks each FAIL naming the
+                        offending row -> PASS
+```
+
+**Artifact audit:** 0 env files, 0 E2E bypass, 0 JWT-shaped literals in
+browser JS, `APP_SESSION_SECRET` absent from both `.next/static` and
+`.next/standalone`, service-role key absent from browser JS.
+
+**Skips, separated.** 9, the same set as §25–§27 with none added: **8**
+deliberate desktop-only journeys on `mobile-chromium`, and the **9th on
+chromium is functional and did not execute** — the Storage-backed
+actual-data journey, still **ENVIRONMENT BLOCKED**. Not counted as
+passed.
+
+### Remaining items
+
+Unchanged from §27: Storage journey and CI unexecuted, hosted Auth
+settings unread, `regulatory:verify` not run against production;
+`APP_SESSION_SECRET` required in every environment before deploy;
+the open owner decisions (D1 sector proxy, `tCO2/t`, dataset period,
+EU-origin determinability); and the accepted risk that the trusted
+calculation RPC does not verify the emissions value.
+
+Newly recorded and unchanged by this fix: a stolen opaque cookie
+authenticates to this application as the user until revoked or expired.
+That is what a session cookie is.
+
+### Verdict
+
+**READY FOR INDEPENDENT REVIEW.**
+
+Against the eight conditions: session fixation is closed; a planted
+pre-auth identifier cannot become the victim's session; the old
+identifier authenticates as nobody; the victim receives a fresh one;
+ownership cannot be reassigned even by the service role; the direct
+Supabase-credential exposure remains closed; the gates are green subject
+only to the documented Storage skip; the tree is clean.
+
+Stated plainly, because it is the pattern worth noticing: **this blocker
+was introduced by the previous remediation, and the one before it by the
+remediation before that.** Each was found only after the fact, by the
+session that had just written it. Sections 26, 27 and 28 are three
+consecutive self-assessments, two of which were wrong. The next review
+must be by someone else, and it should resume at filing/READY population
+integrity — sections 2 through 5 of the review brief have never been
+independently attacked at any SHA in this series.
