@@ -24,21 +24,30 @@ const FAKE_ACCESS_TOKEN =
 const FAKE_REFRESH_TOKEN =
   "p14-not-a-real-refresh-token";
 
-async function sessionCookieCount(
-  context: import("@playwright/test").BrowserContext,
-): Promise<number> {
-  const cookies =
-    await context.cookies();
+/**
+ * Whether the browser actually holds an authenticated session.
+ *
+ * Deliberately NOT "does a cookie named sb-* exist". The first version
+ * of this suite asserted that and flaked: @supabase/ssr's middleware
+ * runs on every request and can write auth cookie chunks -- including
+ * empty ones -- without anybody being signed in. Counting cookie names
+ * measured the framework's bookkeeping, not the property under test.
+ *
+ * The property under test is whether a protected route lets you in.
+ */
+async function isAuthenticated(
+  page: import("@playwright/test").Page,
+): Promise<boolean> {
+  await page.goto("/shipments");
 
-  return cookies.filter(
-    (cookie) => cookie.name.startsWith("sb-"),
-  ).length;
+  // Signed out, every product route funnels to sign-in.
+  return !page.url().includes("/sign-in");
 }
 
 test.describe("auth callback requires explicit consent", () => {
   test(
     "opening the link does not sign anyone in, and shows a Continue step",
-    async ({ page, context }) => {
+    async ({ page }) => {
       await page.goto(
         `/auth/callback#access_token=${FAKE_ACCESS_TOKEN}&refresh_token=${FAKE_REFRESH_TOKEN}&type=invite`,
       );
@@ -47,15 +56,16 @@ test.describe("auth callback requires explicit consent", () => {
         page.getByRole("button", { name: "Continue" }),
       ).toBeVisible();
 
-      // The load did not establish anything.
-      expect(await sessionCookieCount(context)).toBe(0);
-
-      // And the credential is not on the screen.
+      // The credential is not on the screen.
       const body =
         await page.locator("body").innerText();
 
       expect(body).not.toContain(FAKE_ACCESS_TOKEN);
       expect(body).not.toContain(FAKE_REFRESH_TOKEN);
+
+      // And the load established nothing: a protected route still
+      // refuses.
+      expect(await isAuthenticated(page)).toBe(false);
     },
   );
 
@@ -78,7 +88,7 @@ test.describe("auth callback requires explicit consent", () => {
 
   test(
     "a cookie-less request -- a scanner or a preloader -- establishes nothing",
-    async ({ request, context }) => {
+    async ({ request, page }) => {
       // No JavaScript runs at all here, which is the weaker of the two
       // scanner shapes; the page.goto cases above cover the stronger one
       // (a real browser executing the page but not clicking).
@@ -98,7 +108,7 @@ test.describe("auth callback requires explicit consent", () => {
         setCookie.some((header) => header.value.includes("sb-")),
       ).toBe(false);
 
-      expect(await sessionCookieCount(context)).toBe(0);
+      expect(await isAuthenticated(page)).toBe(false);
     },
   );
 

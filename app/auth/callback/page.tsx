@@ -4,6 +4,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -201,8 +202,31 @@ function AuthCallback() {
    * not sit in browser history, in the address bar, or in anything a
    * later navigation might carry.
    */
+  /**
+   * The URL is read exactly once.
+   *
+   * Found by this page's own E2E: the effect strips the hash after
+   * capturing it, so ANY later run of the effect sees a URL with no
+   * auth material and takes the "incomplete link" branch -- replacing
+   * the Continue button the user was about to press with an error panel
+   * saying their link was invalid. It reproduced intermittently, which
+   * is exactly how a real user would have met it.
+   *
+   * A ref rather than a state flag: this must not itself trigger a
+   * render, and it must be true for the rest of the effect's own run,
+   * not on the next one.
+   */
+  const consumedUrl =
+    useRef(false);
+
   useEffect(
     () => {
+      if (consumedUrl.current) {
+        return;
+      }
+
+      consumedUrl.current = true;
+
       const hash =
         window.location.hash;
 
