@@ -277,13 +277,23 @@ const SELF_CHECKS = [
     name: "auth_user_foreign_keys_present",
     why: "ten product tables reference auth.users. A restore into a target without that table drops all ten silently, and every one of them is a referential-integrity rule the application assumes",
     sql: `
-      select 'NO foreign keys reference auth.users -- expected 10'
+      -- Scoped to product tables deliberately. An earlier version counted
+      -- EVERY foreign key pointing at auth.users, which a bare Supabase
+      -- project satisfies through auth's own internal tables
+      -- (auth.identities, auth.sessions) -- so it passed on a project
+      -- holding none of this application's schema at all. That is the
+      -- same vacuous-pass this file exists to prevent.
+      select 'NO product foreign key references auth.users -- expected 10'
       where (
         select count(*)
         from pg_constraint con
         join pg_class c on c.oid = con.confrelid
-        join pg_namespace n on n.oid = c.relnamespace
-        where con.contype = 'f' and n.nspname = 'auth' and c.relname = 'users'
+        join pg_namespace cn on cn.oid = c.relnamespace
+        join pg_class r on r.oid = con.conrelid
+        join pg_namespace rn on rn.oid = r.relnamespace
+        where con.contype = 'f'
+          and cn.nspname = 'auth' and c.relname = 'users'
+          and rn.nspname in ('public', 'app')
       ) = 0
     `,
   },
