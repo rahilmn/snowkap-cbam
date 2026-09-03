@@ -24,6 +24,10 @@ import {
 } from "../../../../src/infrastructure/regulatory/get-regulatory-repository";
 
 import {
+  getCalculationResultWriter,
+} from "../../../../src/infrastructure/calculations/get-calculation-result-writer";
+
+import {
   createInMemoryRateLimiter,
   type RateLimitConfig,
 } from "../../../../src/infrastructure/rate-limit/rate-limiter";
@@ -1085,6 +1089,13 @@ export async function calculateLineAction(
     await calculateLine(
       supabase,
       getRegulatoryRepository(),
+      // 2026-09-03 (P14.1). calculation_results is no longer writable
+      // by `authenticated` at all -- see 20260903190000. The privileged
+      // write channel is composed here, in the Server Action, for the
+      // same reason getRegulatoryRepository() is: this is the layer
+      // that owns composition, and src/application/** must not reach
+      // into src/infrastructure/** to build one itself.
+      getCalculationResultWriter(),
       orgSummary.context,
       parsed.data.lineId as never,
     );
@@ -1099,7 +1110,11 @@ export async function calculateLineAction(
             ? "This shipment is locked or void and can no longer be recalculated."
             : result.reason === "CAPABILITY_NOT_HELD"
               ? "Your organization is not set up as a CBAM importer/declarant."
-              : "Something went wrong. Please try again.",
+              : result.reason === "CALCULATION_INPUTS_CHANGED"
+                ? "This line changed while the calculation was running. Reload the line and calculate it again."
+                : result.reason === "ACTOR_NO_LONGER_A_MEMBER"
+                  ? "Your membership of this organization is no longer active."
+                  : "Something went wrong. Please try again.",
     };
   }
 

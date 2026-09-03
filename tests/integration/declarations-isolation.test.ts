@@ -346,40 +346,51 @@ describe.skipIf(!localSupabaseReachable)(
           continue;
         }
 
-        const { error: resultError } =
-          await clientOwnerA
-            .from("calculation_results")
-            .insert(
-              {
-                org_id: orgAId,
-                line_id: line.id,
-                shipment_id: shipment.id,
-                engine_version: "1.1.0",
-                quantity: "10",
-                quantity_unit: "TONNES",
-                // Deliberately BYTE-IDENTICAL to the line's own
-                // emission_determination above (both determinationFrom(recordA))
-                // -- calculation_results isn't subject to the new
-                // regulatory-content WITH CHECK itself (only
-                // shipment_lines is), but the P13 stale-calculation
-                // gate (20260829470000) compares this column against
-                // shipment_lines.emission_determination for equality,
-                // so keeping them matched is what makes every line
-                // this helper seeds "current" by default -- the same
-                // invariant the old synthetic shorthand pair
-                // maintained, just now with real regulatory content.
-                determination: determinationFrom(
-                  recordA,
-                ),
-                steps: [],
-                embedded_emissions_tco2e: emission,
-                calculated_by_user_id: ownerAId,
-              },
-            );
+        // 2026-09-03 (P14.1). This used to INSERT directly as
+        // clientOwnerA. That grant is gone -- 20260903190000 revoked
+        // INSERT on calculation_results from `authenticated`, because
+        // an RLS policy cannot tell a real emissions figure from a
+        // forged one. Fixtures now go through the same trusted channel
+        // the application uses, called with the service role, so what
+        // this helper seeds is shaped exactly like a row the product
+        // would really produce -- including the RPC's own bindings,
+        // which means a fixture that drifts out of agreement with its
+        // line now fails here instead of seeding a state the product
+        // could never reach.
+        const { data: recordData, error: resultError } =
+          await serviceClient.rpc(
+            "record_calculation_result",
+            {
+              p_org_id: orgAId,
+              p_line_id: line.id,
+              p_calculated_by_user_id: ownerAId,
+              p_engine_version: "1.1.0",
+              p_parameter_datasets: [],
+              p_quantity: "10",
+              p_quantity_unit: "TONNES",
+              // Deliberately BYTE-IDENTICAL to the line's own
+              // emission_determination above (both determinationFrom(recordA)).
+              // The P13 stale-calculation gate (20260829470000) compares
+              // this column against shipment_lines.emission_determination
+              // for equality, so keeping them matched is what makes every
+              // line this helper seeds "current" by default -- and since
+              // P14.1 the write channel itself enforces the same equality,
+              // so the two can no longer silently diverge.
+              p_determination: determinationFrom(
+                recordA,
+              ),
+              p_steps: [],
+              p_embedded_emissions_tco2e: emission,
+              p_correlation_id: null,
+            },
+          );
 
-        if (resultError) {
+        const recordStatus =
+          (recordData as { result_status: string }[] | null)?.[0]?.result_status;
+
+        if (resultError || recordStatus !== "OK") {
           throw new Error(
-            `Failed to create calculation result for ${reference}: ${resultError.message}`,
+            `Failed to create calculation result for ${reference}: ${resultError?.message ?? recordStatus}`,
           );
         }
       }
@@ -1808,10 +1819,49 @@ describe.skipIf(!localSupabaseReachable)(
               },
             );
 
-        // It really is insertable. If this ever starts failing, the
-        // insert policy changed and this test's premise needs revisiting
-        // rather than the assertion being relaxed.
-        expect(forgeError).toBeNull();
+        // 2026-09-03 (P14.1). This assertion was `toBeNull()`, with a
+        // comment saying that if it ever started failing the insert
+        // policy had changed and the premise needed revisiting rather
+        // than the assertion being relaxed. It started failing, and the
+        // premise did change: 20260903190000 revoked INSERT on
+        // calculation_results from `authenticated` outright, so a member
+        // can no longer put a forged row in front of the filing gate at
+        // all. The first wall now holds before the second one is even
+        // reached.
+        expect(forgeError).not.toBeNull();
+
+        expect(forgeError?.message).toContain(
+          "permission denied",
+        );
+
+        // The filing gate is still tested, because defence in depth is
+        // only defence if each layer is verified separately. The row is
+        // planted with the service role writing DIRECTLY to the table --
+        // deliberately bypassing record_calculation_result, which would
+        // reject this quantity itself -- so that what is being measured
+        // here is record_declaration_filed's own refusal and nothing
+        // else.
+        const { error: plantError } =
+          await serviceClient
+            .from("calculation_results")
+            .insert(
+              {
+                org_id: orgAId,
+                line_id: line.id,
+                shipment_id: shipmentId,
+                engine_version: "1.1.0",
+                quantity: "1",
+                quantity_unit: "TONNES",
+                determination: determinationFrom(
+                  recordA,
+                ),
+                steps: [],
+                embedded_emissions_tco2e: "0.5",
+                calculated_by_user_id: ownerAId,
+              },
+            );
+
+        expect(plantError).toBeNull();
 
         const { data } =
           await clientOwnerA.rpc(
@@ -1905,7 +1955,39 @@ describe.skipIf(!localSupabaseReachable)(
               },
             );
 
-        expect(forgeError).toBeNull();
+        // See the preceding test: a member can no longer insert a
+        // calculation result at all (20260903190000), so the wrong-basis
+        // forgery is refused a layer earlier than it used to be.
+        expect(forgeError).not.toBeNull();
+
+        expect(forgeError?.message).toContain(
+          "permission denied",
+        );
+
+        // Planted with the service role, writing directly to the table
+        // rather than through record_calculation_result, so that this
+        // test keeps measuring record_declaration_filed's own refusal.
+        const { error: plantError } =
+          await serviceClient
+            .from("calculation_results")
+            .insert(
+              {
+                org_id: orgAId,
+                line_id: lineId,
+                shipment_id: shipmentId,
+                engine_version: "1.1.0",
+                quantity: "10",
+                quantity_unit: "MWH",
+                determination: determinationFrom(
+                  recordA,
+                ),
+                steps: [],
+                embedded_emissions_tco2e: "5",
+                calculated_by_user_id: ownerAId,
+              },
+            );
+
+        expect(plantError).toBeNull();
 
         const { data } =
           await clientOwnerA.rpc(

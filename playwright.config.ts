@@ -212,8 +212,11 @@ export default defineConfig(
         ...resolvedEnv,
         // Two keys as of 2026-08-31, see rate-limiter.ts. This one is
         // read at BUILD time (Next inlines NEXT_PUBLIC_* as literals),
-        // and `command` above is "pnpm build && pnpm start", so this env
-        // block covers the build too -- which is the point. A production
+        // and `command` above runs `pnpm build` before booting the
+        // server, so this env block covers the build too -- which is the
+        // point. Since 2026-09-03 that build lands in `.next-e2e`
+        // rather than `.next`, so a bypassing artifact can no longer be
+        // left where the Dockerfile would copy it. A production
         // image built without it has the bypass compiled out entirely,
         // so the runtime key below cannot re-enable it there no matter
         // who sets it.

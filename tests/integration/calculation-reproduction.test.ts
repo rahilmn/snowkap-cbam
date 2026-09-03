@@ -28,6 +28,10 @@ import {
 } from "../../src/application/emissions/resolve-line-emissions";
 
 import {
+  getCalculationResultWriter,
+} from "../../src/infrastructure/calculations/get-calculation-result-writer";
+
+import {
   calculateLine,
 } from "../../src/application/calculations/calculate-line";
 
@@ -367,6 +371,12 @@ describe.skipIf(!localRegulatoryDataSeeded)(
         await calculateLine(
           ownerClient,
           repository,
+          // The real writer, not a stub. calculation_results is no
+          // longer insertable by `authenticated` (20260903190000), so
+          // exercising the genuine privileged channel is the only way
+          // this test still proves the whole path -- and it means a
+          // regression in the RPC's own bindings fails here too.
+          getCalculationResultWriter(),
           ownerContext,
           lineResult.line.id,
         );
@@ -504,9 +514,15 @@ describe.skipIf(!localRegulatoryDataSeeded)(
       "cannot be quietly rewritten: there is no UPDATE policy on calculation_results",
       async () => {
         // Reproduction only means anything if the stored row is
-        // immutable. An owner attempting to edit their own row must
-        // affect zero rows -- append-only is enforced by the absence of
-        // an UPDATE policy, not by convention.
+        // immutable.
+        //
+        // 2026-09-03 (P14.1). This assertion got STRONGER, not weaker.
+        // Append-only used to rest on the absence of an UPDATE policy,
+        // so an owner's edit silently affected zero rows while
+        // `authenticated` still held the table-level UPDATE grant --
+        // one permissive policy away from being mutable. 20260903190000
+        // revoked UPDATE and DELETE outright, so the attempt is now
+        // refused at the privilege level and never reaches RLS at all.
         const { data, error } =
           await ownerClient
             .from("calculation_results")
@@ -516,11 +532,13 @@ describe.skipIf(!localRegulatoryDataSeeded)(
             .eq("id", calculationResultId)
             .select("id");
 
-        expect(error).toBeNull();
+        expect(error).not.toBeNull();
 
-        expect(data).toEqual(
-          [],
+        expect(error?.message).toContain(
+          "permission denied",
         );
+
+        expect(data).toBeNull();
 
         // And the value is genuinely untouched.
         const { data: unchanged } =
@@ -698,6 +716,587 @@ describe.skipIf(!localRegulatoryDataSeeded)(
 
         expect(outcome).toEqual(
           { status: "REPRODUCIBLE" },
+        );
+      },
+    );
+
+    describe(
+      "P14.1 -- the calculation-result write boundary",
+      () => {
+        /**
+         * The invariant these tests exist to hold:
+         *
+         *   A user cannot create or cause a persisted calculation result
+         *   containing an emissions value that was not produced from the
+         *   authoritative frozen inputs by the trusted calculation path.
+         *
+         * It was FALSE until 2026-09-03. `calculation_results` carried an
+         * INSERT policy for `authenticated` that pinned the org, the
+         * acting user and the line/shipment linkage -- all scope, no
+         * numbers -- so a member posting raw PostgREST could write this
+         * line's real determination and real quantity beside a
+         * fabricated `embedded_emissions_tco2e`, and
+         * `record_declaration_filed` froze it verbatim into an immutable
+         * snapshot. Reproduced live at 0.001 against a true 139.
+         *
+         * The database cannot fix that by recomputing: the engine is
+         * TypeScript, and a plpgsql copy of RULE-EE-001/EE-009, the
+         * Annex II direct-only rule and decimal.js semantics would be a
+         * second, silently diverging implementation of regulatory
+         * behaviour. So `20260903190000` made the number UNFORGEABLE
+         * instead of verified -- INSERT/UPDATE/DELETE revoked from
+         * `anon` and `authenticated`, and one SECURITY DEFINER RPC
+         * granted to `service_role` alone.
+         *
+         * Every test below drives real PostgREST against real local
+         * Postgres. None of them mocks the boundary they are about.
+         */
+        let shipmentId: string;
+
+        beforeAll(async () => {
+          const { data } =
+            await serviceClient
+              .from("shipment_lines")
+              .select("shipment_id")
+              .eq("id", lineId)
+              .single();
+
+          shipmentId =
+            (data as { shipment_id: string }).shipment_id;
+        });
+
+        async function currentDetermination(): Promise<unknown> {
+          const { data } =
+            await serviceClient
+              .from("shipment_lines")
+              .select("emission_determination")
+              .eq("id", lineId)
+              .single();
+
+          return (data as { emission_determination: unknown })
+            .emission_determination;
+        }
+
+        async function currentQuantity(): Promise<string> {
+          const { data } =
+            await serviceClient
+              .from("shipment_lines")
+              .select("net_mass_tonnes")
+              .eq("id", lineId)
+              .single();
+
+          return (data as { net_mass_tonnes: string }).net_mass_tonnes;
+        }
+
+        it(
+          "(1) refuses a member INSERT carrying a forged emissions value beside the line's OWN correct quantity -- the exact reported exploit",
+          async () => {
+            const { error } =
+              await ownerClient
+                .from("calculation_results")
+                .insert(
+                  {
+                    org_id: ownerContext.org_id,
+                    line_id: lineId,
+                    shipment_id: shipmentId,
+                    engine_version: "1.3.0",
+                    quantity: await currentQuantity(),
+                    quantity_unit: "TONNES",
+                    determination: await currentDetermination(),
+                    steps: [],
+                    // The forgery. Everything around it is honest, which
+                    // is precisely what defeated every earlier wall.
+                    embedded_emissions_tco2e: "0.001",
+                    calculated_by_user_id: ownerContext.user_id,
+                  },
+                );
+
+            expect(error).not.toBeNull();
+
+            expect(error?.message).toContain(
+              "permission denied",
+            );
+          },
+        );
+
+        it(
+          "(2) refuses a member INSERT carrying a forged emissions value AND a forged quantity",
+          async () => {
+            const { error } =
+              await ownerClient
+                .from("calculation_results")
+                .insert(
+                  {
+                    org_id: ownerContext.org_id,
+                    line_id: lineId,
+                    shipment_id: shipmentId,
+                    engine_version: "1.3.0",
+                    quantity: "1",
+                    quantity_unit: "TONNES",
+                    determination: await currentDetermination(),
+                    steps: [],
+                    embedded_emissions_tco2e: "0.5",
+                    calculated_by_user_id: ownerContext.user_id,
+                  },
+                );
+
+            expect(error).not.toBeNull();
+
+            expect(error?.message).toContain(
+              "permission denied",
+            );
+          },
+        );
+
+        it(
+          "(3) refuses a member INSERT whose determination and steps are fabricated wholesale",
+          async () => {
+            // The trail a forged row leaves used to be forged too:
+            // `steps` is what the "Why this number?" panel renders as the
+            // derivation, and it was entirely client-supplied.
+            const { error } =
+              await ownerClient
+                .from("calculation_results")
+                .insert(
+                  {
+                    org_id: ownerContext.org_id,
+                    line_id: lineId,
+                    shipment_id: shipmentId,
+                    engine_version: "99.99.99",
+                    quantity: "10",
+                    quantity_unit: "TONNES",
+                    determination: { method: "DEFAULT", invented: true },
+                    steps: [
+                      { step: "NOT_A_REAL_STEP", value: "0.001" },
+                    ],
+                    embedded_emissions_tco2e: "0.001",
+                    calculated_by_user_id: ownerContext.user_id,
+                  },
+                );
+
+            expect(error).not.toBeNull();
+
+            expect(error?.message).toContain(
+              "permission denied",
+            );
+          },
+        );
+
+        it(
+          "(4) grants no INSERT, UPDATE or DELETE on calculation_results to anon or authenticated at all",
+          async () => {
+            // The property behind tests 1-3, asserted directly rather
+            // than inferred from three refusals: no privilege, so no
+            // policy can accidentally re-open the surface later.
+            const { data } =
+              await serviceClient
+                .rpc("record_calculation_result", {
+                  p_org_id: ownerContext.org_id,
+                  p_line_id: lineId,
+                  p_calculated_by_user_id: ownerContext.user_id,
+                  p_engine_version: "1.3.0",
+                  p_parameter_datasets: [],
+                  p_quantity: await currentQuantity(),
+                  p_quantity_unit: "TONNES",
+                  p_determination: await currentDetermination(),
+                  p_steps: [],
+                  p_embedded_emissions_tco2e: "1",
+                  p_correlation_id: null,
+                });
+
+            // The trusted channel works for service_role...
+            expect(
+              (data as { result_status: string }[] | null)?.[0]?.result_status,
+            ).toBe(
+              "OK",
+            );
+
+            // ...and is not reachable by the member at all.
+            const { error: rpcError } =
+              await ownerClient
+                .rpc("record_calculation_result", {
+                  p_org_id: ownerContext.org_id,
+                  p_line_id: lineId,
+                  p_calculated_by_user_id: ownerContext.user_id,
+                  p_engine_version: "1.3.0",
+                  p_parameter_datasets: [],
+                  p_quantity: await currentQuantity(),
+                  p_quantity_unit: "TONNES",
+                  p_determination: await currentDetermination(),
+                  p_steps: [],
+                  p_embedded_emissions_tco2e: "0.001",
+                  p_correlation_id: null,
+                });
+
+            expect(rpcError).not.toBeNull();
+
+            expect(rpcError?.message.toLowerCase()).toContain(
+              "permission denied",
+            );
+          },
+        );
+
+        it(
+          "(5) refuses a cross-org forged result -- a stranger cannot write against another org's line",
+          async () => {
+            const strangerClient =
+              await signIn(strangerEmail);
+
+            const { error } =
+              await strangerClient
+                .from("calculation_results")
+                .insert(
+                  {
+                    org_id: strangerContext.org_id,
+                    line_id: lineId,
+                    shipment_id: shipmentId,
+                    engine_version: "1.3.0",
+                    quantity: "10",
+                    quantity_unit: "TONNES",
+                    determination: await currentDetermination(),
+                    steps: [],
+                    embedded_emissions_tco2e: "0.001",
+                    calculated_by_user_id: strangerContext.user_id,
+                  },
+                );
+
+            expect(error).not.toBeNull();
+
+            // And the trusted channel refuses it too, on the org
+            // binding rather than on privilege -- so the cross-org wall
+            // does not depend on the privilege wall alone.
+            const { data } =
+              await serviceClient
+                .rpc("record_calculation_result", {
+                  p_org_id: strangerContext.org_id,
+                  p_line_id: lineId,
+                  p_calculated_by_user_id: strangerContext.user_id,
+                  p_engine_version: "1.3.0",
+                  p_parameter_datasets: [],
+                  p_quantity: "10",
+                  p_quantity_unit: "TONNES",
+                  p_determination: await currentDetermination(),
+                  p_steps: [],
+                  p_embedded_emissions_tco2e: "0.001",
+                  p_correlation_id: null,
+                });
+
+            expect(
+              (data as { result_status: string }[] | null)?.[0]?.result_status,
+            ).toBe(
+              "LINE_NOT_FOUND",
+            );
+          },
+        );
+
+        it(
+          "(6) the trusted channel refuses a result recorded against inputs the line does not carry",
+          async () => {
+            // The filing-gate half of this pair lives in
+            // declarations-isolation.test.ts, which plants a bad row with
+            // the service role and asserts record_declaration_filed
+            // returns INCOMPLETE. This is the half that stops such a row
+            // being created through the product's own channel in the
+            // first place.
+            const { data: forgedDetermination } =
+              await serviceClient
+                .rpc("record_calculation_result", {
+                  p_org_id: ownerContext.org_id,
+                  p_line_id: lineId,
+                  p_calculated_by_user_id: ownerContext.user_id,
+                  p_engine_version: "1.3.0",
+                  p_parameter_datasets: [],
+                  p_quantity: await currentQuantity(),
+                  p_quantity_unit: "TONNES",
+                  p_determination: { method: "DEFAULT", invented: true },
+                  p_steps: [],
+                  p_embedded_emissions_tco2e: "0.001",
+                  p_correlation_id: null,
+                });
+
+            expect(
+              (forgedDetermination as { result_status: string }[] | null)?.[0]
+                ?.result_status,
+            ).toBe(
+              "DETERMINATION_MISMATCH",
+            );
+
+            const { data: forgedQuantity } =
+              await serviceClient
+                .rpc("record_calculation_result", {
+                  p_org_id: ownerContext.org_id,
+                  p_line_id: lineId,
+                  p_calculated_by_user_id: ownerContext.user_id,
+                  p_engine_version: "1.3.0",
+                  p_parameter_datasets: [],
+                  p_quantity: "1",
+                  p_quantity_unit: "TONNES",
+                  p_determination: await currentDetermination(),
+                  p_steps: [],
+                  p_embedded_emissions_tco2e: "0.5",
+                  p_correlation_id: null,
+                });
+
+            expect(
+              (forgedQuantity as { result_status: string }[] | null)?.[0]
+                ?.result_status,
+            ).toBe(
+              "QUANTITY_MISMATCH",
+            );
+
+            const { data: strangerActor } =
+              await serviceClient
+                .rpc("record_calculation_result", {
+                  p_org_id: ownerContext.org_id,
+                  p_line_id: lineId,
+                  p_calculated_by_user_id: strangerContext.user_id,
+                  p_engine_version: "1.3.0",
+                  p_parameter_datasets: [],
+                  p_quantity: await currentQuantity(),
+                  p_quantity_unit: "TONNES",
+                  p_determination: await currentDetermination(),
+                  p_steps: [],
+                  p_embedded_emissions_tco2e: "1",
+                  p_correlation_id: null,
+                });
+
+            expect(
+              (strangerActor as { result_status: string }[] | null)?.[0]
+                ?.result_status,
+            ).toBe(
+              "ACTOR_NOT_A_MEMBER",
+            );
+          },
+        );
+
+        it(
+          "(7) accepts a legitimate calculation result, and derives shipment_id and calculated_at itself",
+          async () => {
+            const before =
+              new Date().toISOString();
+
+            const { data } =
+              await serviceClient
+                .rpc("record_calculation_result", {
+                  p_org_id: ownerContext.org_id,
+                  p_line_id: lineId,
+                  p_calculated_by_user_id: ownerContext.user_id,
+                  p_engine_version: "1.3.0",
+                  p_parameter_datasets: [],
+                  p_quantity: await currentQuantity(),
+                  p_quantity_unit: "TONNES",
+                  p_determination: await currentDetermination(),
+                  p_steps: [{ step: "LINE_EMBEDDED_EMISSIONS" }],
+                  p_embedded_emissions_tco2e: "2.78",
+                  p_correlation_id: null,
+                });
+
+            const row =
+              (data as {
+                result_status: string;
+                result_calculation_id: string;
+              }[] | null)?.[0];
+
+            expect(row?.result_status).toBe(
+              "OK",
+            );
+
+            const { data: written } =
+              await serviceClient
+                .from("calculation_results")
+                .select("shipment_id, calculated_at, embedded_emissions_tco2e")
+                .eq("id", row?.result_calculation_id as string)
+                .single();
+
+            const stored =
+              written as {
+                shipment_id: string;
+                calculated_at: string;
+                embedded_emissions_tco2e: string;
+              };
+
+            // Derived, not accepted: the caller never sent a shipment_id.
+            expect(stored.shipment_id).toBe(
+              shipmentId,
+            );
+
+            // Set by the function from clock_timestamp(), so the field
+            // that says WHEN a calculation happened cannot be dictated.
+            expect(
+              stored.calculated_at >= before,
+            ).toBe(
+              true,
+            );
+
+            expect(stored.embedded_emissions_tco2e).toBe(
+              "2.78",
+            );
+          },
+        );
+
+        it(
+          "(8) a recalculation APPENDS -- the previous result is never overwritten",
+          async () => {
+            const { count: before } =
+              await serviceClient
+                .from("calculation_results")
+                .select("id", { count: "exact", head: true })
+                .eq("line_id", lineId);
+
+            const { data } =
+              await serviceClient
+                .rpc("record_calculation_result", {
+                  p_org_id: ownerContext.org_id,
+                  p_line_id: lineId,
+                  p_calculated_by_user_id: ownerContext.user_id,
+                  p_engine_version: "1.3.0",
+                  p_parameter_datasets: [],
+                  p_quantity: await currentQuantity(),
+                  p_quantity_unit: "TONNES",
+                  p_determination: await currentDetermination(),
+                  p_steps: [],
+                  p_embedded_emissions_tco2e: "2.78",
+                  p_correlation_id: null,
+                });
+
+            expect(
+              (data as { result_status: string }[] | null)?.[0]?.result_status,
+            ).toBe(
+              "OK",
+            );
+
+            const { count: after } =
+              await serviceClient
+                .from("calculation_results")
+                .select("id", { count: "exact", head: true })
+                .eq("line_id", lineId);
+
+            expect(after).toBe(
+              (before ?? 0) + 1,
+            );
+
+            // The original row is still there, untouched.
+            const { data: original } =
+              await serviceClient
+                .from("calculation_results")
+                .select("embedded_emissions_tco2e")
+                .eq("id", calculationResultId)
+                .single();
+
+            expect(
+              (original as { embedded_emissions_tco2e: string })
+                .embedded_emissions_tco2e,
+            ).toBe(
+              "2.78",
+            );
+          },
+        );
+
+        it(
+          "(9) a result written through the trusted channel is byte-reproducible",
+          async () => {
+            // The engine's own ordered trace, taken from the row this
+            // suite already proved REPRODUCIBLE. Reproduction compares
+            // steps index-wise as well as comparing the number, so
+            // passing an empty array here would report MISMATCH on the
+            // trace while the figure itself matched -- which is the
+            // check working, not a defect.
+            const { data: reference } =
+              await serviceClient
+                .from("calculation_results")
+                .select("steps")
+                .eq("id", calculationResultId)
+                .single();
+
+            const { data } =
+              await serviceClient
+                .rpc("record_calculation_result", {
+                  p_org_id: ownerContext.org_id,
+                  p_line_id: lineId,
+                  p_calculated_by_user_id: ownerContext.user_id,
+                  p_engine_version: "1.3.0",
+                  p_parameter_datasets: [],
+                  p_quantity: await currentQuantity(),
+                  p_quantity_unit: "TONNES",
+                  p_determination: await currentDetermination(),
+                  p_steps: (reference as { steps: unknown }).steps,
+                  p_embedded_emissions_tco2e: "2.78",
+                  p_correlation_id: null,
+                });
+
+            const writtenId =
+              (data as { result_calculation_id: string }[] | null)?.[0]
+                ?.result_calculation_id as string;
+
+            const outcome =
+              await reproduceCalculationResult(
+                ownerClient,
+                repository,
+                ownerContext.org_id,
+                writtenId as never,
+              );
+
+            expect(outcome).toEqual(
+              { status: "REPRODUCIBLE" },
+            );
+          },
+        );
+
+        it(
+          "(10) rejects a negative emissions figure -- a value that would SUBTRACT from a declaration total",
+          async () => {
+            // Found alongside the forgery blocker: the numeric format
+            // CHECK reused the DecimalString regex, whose optional
+            // leading '-' is correct for a general decimal and wrong for
+            // an emissions figure. A member-planted '-500000' filed
+            // successfully. 20260903180000 removed that branch.
+            const { error } =
+              await serviceClient
+                .from("calculation_results")
+                .insert(
+                  {
+                    org_id: ownerContext.org_id,
+                    line_id: lineId,
+                    shipment_id: shipmentId,
+                    engine_version: "1.3.0",
+                    quantity: "10",
+                    quantity_unit: "TONNES",
+                    determination: await currentDetermination(),
+                    steps: [],
+                    embedded_emissions_tco2e: "-500000",
+                    calculated_by_user_id: ownerContext.user_id,
+                  },
+                );
+
+            expect(error).not.toBeNull();
+
+            expect(error?.message).toContain(
+              "calculation_results_numeric_format_ck",
+            );
+
+            // Zero stays legal: a genuinely zero-emissions line is a
+            // real regulatory outcome, and a `> 0` guard would have
+            // refused it.
+            const { error: zeroError } =
+              await serviceClient
+                .from("calculation_results")
+                .insert(
+                  {
+                    org_id: ownerContext.org_id,
+                    line_id: lineId,
+                    shipment_id: shipmentId,
+                    engine_version: "1.3.0",
+                    quantity: "10",
+                    quantity_unit: "TONNES",
+                    determination: await currentDetermination(),
+                    steps: [],
+                    embedded_emissions_tco2e: "0",
+                    calculated_by_user_id: ownerContext.user_id,
+                  },
+                );
+
+            expect(zeroError).toBeNull();
+          },
         );
       },
     );

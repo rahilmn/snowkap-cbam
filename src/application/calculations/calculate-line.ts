@@ -40,6 +40,10 @@ import {
   recordAuditEvent,
 } from "../audit/record-audit-event";
 
+import type {
+  CalculationResultWriter,
+} from "./calculation-result-writer";
+
 export type CalculateLineRejectionReason =
   | "LINE_NOT_FOUND"
   | "FETCH_FAILED"
@@ -52,7 +56,20 @@ export type CalculateLineRejectionReason =
   // (P10/P11 capability-matrix hardening pass -- see
   // docs/architecture/AUTHORIZATION_MATRIX.md's "Capability
   // enforcement" section).
-  | "CAPABILITY_NOT_HELD";
+  | "CAPABILITY_NOT_HELD"
+  // The line's determination or quantity changed between this function
+  // reading it and the trusted write channel checking it again. Only
+  // reachable under a concurrent edit: this service reads the line,
+  // computes from that line, and writes the same values back within one
+  // request. Surfaced as its own reason rather than folded into
+  // PERSIST_FAILED because the user's next step is different -- reload
+  // and recalculate, not "try again."
+  | "CALCULATION_INPUTS_CHANGED"
+  // The acting user is no longer a live member of the owning
+  // organization. The RPC re-checks this because, writing under the
+  // service role, `auth.uid()` is null and attribution arrives as a
+  // parameter -- a claim, which gets re-authorized rather than believed.
+  | "ACTOR_NO_LONGER_A_MEMBER";
 
 export type CalculateLineResult =
   | { status: "OK"; calculation: LineEmissionsCalculation }
@@ -145,6 +162,7 @@ export async function resolveGoodSectorForActualLine(
 export async function calculateLine(
   supabase: SupabaseClient,
   repository: RegulatoryRepository,
+  writer: CalculationResultWriter,
   context: OrgContext,
   lineId: ShipmentLineId,
 ): Promise<CalculateLineResult> {
@@ -222,51 +240,88 @@ export async function calculateLine(
   }
 
   // Shared between this row and its audit event so the two can be
-  // cross-checked later (e.g. a future reproduction check flagging any
-  // calculation_results row with no matching audit event as
-  // suspect -- calculation_results is writable by any authenticated
-  // member of the line's own org per its RLS policy, which constrains
-  // scope/ownership but not the correctness of the numbers themselves;
-  // found in the mandatory P6 review and tracked as a P11 hardening
-  // item rather than redesigned here, since the real fix -- routing
-  // writes through a SECURITY DEFINER RPC that recomputes and
-  // compares, or removing direct INSERT entirely -- is a materially
-  // larger change than this review-fix pass).
+  // cross-checked later.
+  //
+  // 2026-09-03 (P14.1). This used to be a direct
+  // `supabase.from("calculation_results").insert(...)` as the signed-in
+  // member, and the comment here used to say the real fix -- "routing
+  // writes through a SECURITY DEFINER RPC that recomputes and compares,
+  // or removing direct INSERT entirely" -- was a materially larger
+  // change than that pass could take. It was, and it has now been
+  // taken, because the class it described turned out to be reachable
+  // all the way into a filed declaration: a member posting raw
+  // PostgREST could write this line's real determination and real
+  // quantity beside a fabricated embedded_emissions_tco2e, and
+  // record_declaration_filed froze it into an immutable snapshot.
+  // Reproduced live at 0.001 against a true 139.
+  //
+  // Of the two options that comment named, "recomputes and compares" is
+  // not available: the engine is this file's own
+  // calculateLineEmissions, and a plpgsql copy of RULE-EE-001/EE-009,
+  // the Annex II direct-only rule and decimal.js semantics would be a
+  // second, silently diverging implementation of regulatory behaviour.
+  // So the other one was taken -- `20260903190000` revoked INSERT from
+  // anon and authenticated outright, and the only write channel left is
+  // record_calculation_result, granted to service_role alone.
   const correlationId =
     randomUUID();
 
-  const { error: insertError } =
-    await supabase
-      .from("calculation_results")
-      .insert(
-        {
-          org_id: orgId,
-          line_id: lineId,
-          shipment_id: line.shipment_id,
-          engine_version: calculation.engine_version,
-          parameter_datasets: [],
-          ...quantityInput(
-            line,
-          ),
-          determination: line.emission_determination,
-          steps: calculation.steps,
-          embedded_emissions_tco2e: calculation.embedded_emissions_tco2e,
-          calculated_by_user_id: actorUserId,
-          correlation_id: correlationId,
-        },
-      );
-
-  if (insertError) {
-    // Unlike an UPDATE/DELETE excluded by RLS (which silently affects
-    // 0 rows), an INSERT whose WITH CHECK fails raises 42501 --
-    // calculation_results_insert_own_org_as_self rejects a LOCKED/VOID
-    // shipment's line the same way shipment_lines' own policies do
-    // (20260829200000_p6_calculation_results_hardening.sql, found in
-    // the mandatory P6 review: master plan §22 says recalculation is
-    // "allowed until LOCKED," which nothing enforced before this).
+  if (line.emission_determination === null) {
+    // Unreachable through the engine: calculateLineEmissions returns
+    // INPUT_UNRESOLVED, never COMPUTED, for a line carrying no
+    // determination, and only a COMPUTED result reaches this point. It
+    // is checked anyway because the port's type says a determination is
+    // required and this is the one place that claim is made -- the old
+    // direct INSERT passed the nullable value straight through into an
+    // untyped insert, where nothing ever asked the question.
     return {
       status: "REJECTED",
-      reason: insertError.code === "42501" ? "SHIPMENT_NOT_EDITABLE" : "PERSIST_FAILED",
+      reason: "CALCULATION_INPUTS_CHANGED",
+    };
+  }
+
+  const persisted =
+    await writer.recordCalculationResult(
+      {
+        org_id: orgId,
+        line_id: lineId,
+        calculated_by_user_id: actorUserId,
+        engine_version: calculation.engine_version,
+        parameter_datasets: [],
+        ...quantityInput(
+          line,
+        ),
+        determination: line.emission_determination,
+        steps: calculation.steps,
+        embedded_emissions_tco2e: calculation.embedded_emissions_tco2e,
+        correlation_id: correlationId,
+      },
+    );
+
+  if (persisted.status === "FAILED") {
+    return {
+      status: "REJECTED",
+      reason: "PERSIST_FAILED",
+    };
+  }
+
+  if (persisted.status === "REJECTED") {
+    return {
+      status: "REJECTED",
+      reason:
+        persisted.reason === "SHIPMENT_NOT_EDITABLE"
+          ? "SHIPMENT_NOT_EDITABLE"
+          : persisted.reason === "LINE_NOT_FOUND"
+            ? "LINE_NOT_FOUND"
+            : persisted.reason === "ACTOR_NOT_A_MEMBER"
+              ? "ACTOR_NO_LONGER_A_MEMBER"
+              : persisted.reason === "CAPABILITY_NOT_HELD"
+                ? "CAPABILITY_NOT_HELD"
+              // DETERMINATION_MISMATCH / QUANTITY_MISMATCH /
+              // LINE_HAS_NO_QUANTITY. All three mean the same thing to
+              // the person at the screen: what was calculated is not
+              // what the line says now.
+              : "CALCULATION_INPUTS_CHANGED",
     };
   }
 

@@ -4,6 +4,11 @@ import {
   it,
 } from "vitest";
 
+import type {
+  CalculationResultWriter,
+  RecordCalculationResultOutcome,
+} from "./calculation-result-writer";
+
 import {
   calculateLine,
 } from "./calculate-line";
@@ -153,14 +158,10 @@ function mockSupabase(
       data: { release_date: "2026-01-01" },
       error: null,
     },
-    insertResult = { error: null },
-    insertPayloads = [] as unknown[],
   }: {
     lineFetchResult?: { data: unknown; error: unknown };
     shipmentFetchResult?: { data: unknown; error: unknown };
-    insertResult?: { error: unknown };
-    insertPayloads?: unknown[];
-  },
+  } = {},
 ) {
   return {
     from: (
@@ -176,19 +177,18 @@ function mockSupabase(
       }
 
       if (table === "calculation_results") {
-        return {
-          insert: (
-            payload: unknown,
-          ) => {
-            insertPayloads.push(
-              payload,
-            );
-
-            return Promise.resolve(
-              insertResult,
-            );
-          },
-        };
+        // 2026-09-03 (P14.1). This branch used to record the payload of
+        // a direct INSERT. It now throws, because a direct INSERT is
+        // precisely the defect that was fixed: 20260903190000 revoked
+        // that grant from `authenticated`, and writes go through the
+        // CalculationResultWriter port. If this ever fires again, some
+        // change has reintroduced the write path that let a member
+        // forge an emissions figure into a filed declaration -- and it
+        // should fail here loudly rather than pass against a mock that
+        // is more permissive than the database.
+        throw new Error(
+          "calculateLine must not write calculation_results directly -- use the CalculationResultWriter port",
+        );
       }
 
       if (table === "shipments") {
@@ -226,6 +226,52 @@ function mockSupabase(
   } as never;
 }
 
+/**
+ * The trusted write channel, faked.
+ *
+ * 2026-09-03 (P14.1). calculateLine no longer INSERTs into
+ * calculation_results with the caller's own client. 20260903190000
+ * revoked that grant from `authenticated` outright, because a
+ * row-level-security policy can pin who is writing and about which
+ * line, and cannot tell a real emissions figure from a forged one --
+ * the engine that produces it is TypeScript. Writes go through the
+ * CalculationResultWriter port instead.
+ *
+ * The payload assertions below are unchanged in strength: they still
+ * capture exactly what would be persisted and still assert on it. The
+ * one field that left them is `shipment_id`, because the RPC now
+ * DERIVES it from the line rather than accepting it from the caller --
+ * a stronger guarantee than asserting the caller passed the right one,
+ * and one proved on the database side in
+ * tests/integration/calculation-result-write-boundary.test.ts.
+ */
+function mockWriter(
+  {
+    payloads = [] as unknown[],
+    outcome = {
+      status: "OK",
+      calculation_id: "calc-1",
+    } as RecordCalculationResultOutcome,
+  }: {
+    payloads?: unknown[];
+    outcome?: RecordCalculationResultOutcome;
+  } = {},
+): CalculationResultWriter {
+  return {
+    recordCalculationResult: (
+      input,
+    ) => {
+      payloads.push(
+        input,
+      );
+
+      return Promise.resolve(
+        outcome,
+      );
+    },
+  };
+}
+
 describe(
   "calculateLine",
   () => {
@@ -237,10 +283,11 @@ describe(
 
         const result =
           await calculateLine(
-            mockSupabase(
-              { insertPayloads },
-            ),
+            mockSupabase(),
             mockRepository(),
+            mockWriter(
+              { payloads: insertPayloads },
+            ),
             memberContext(),
             lineId,
           );
@@ -259,15 +306,26 @@ describe(
           1,
         );
 
+        // `shipment_id` is deliberately absent: record_calculation_result
+        // derives it from the line rather than accepting it, so there is
+        // no longer a caller-supplied value to assert. Everything the
+        // caller DOES supply is asserted here, which is more than the
+        // previous version checked -- the actor and the engine version
+        // used to travel unexamined.
         expect(insertPayloads[0]).toMatchObject(
           {
             org_id: "org-1",
             line_id: "line-1",
-            shipment_id: "ship-1",
+            calculated_by_user_id: "user-1",
+            engine_version: "1.3.0",
             quantity: "10.5",
             quantity_unit: "TONNES",
             embedded_emissions_tco2e: "14.595",
           },
+        );
+
+        expect(insertPayloads[0]).not.toHaveProperty(
+          "shipment_id",
         );
       },
     );
@@ -292,10 +350,12 @@ describe(
                   },
                   error: null,
                 },
-                insertPayloads,
               },
             ),
             mockRepository(),
+            mockWriter(
+              { payloads: insertPayloads },
+            ),
             memberContext(),
             lineId,
           );
@@ -325,6 +385,7 @@ describe(
               { lineFetchResult: { data: null, error: null } },
             ),
             mockRepository(),
+            mockWriter(),
             memberContext(),
             lineId,
           );
@@ -355,10 +416,12 @@ describe(
                   },
                   error: null,
                 },
-                insertPayloads,
               },
             ),
             mockRepository(),
+            mockWriter(
+              { payloads: insertPayloads },
+            ),
             memberContext(),
             lineId,
           );
@@ -378,10 +441,16 @@ describe(
       async () => {
         const result =
           await calculateLine(
-            mockSupabase(
-              { insertResult: { error: { message: "db error" } } },
-            ),
+            mockSupabase(),
             mockRepository(),
+            mockWriter(
+              {
+                outcome: {
+                  status: "FAILED",
+                  message: "db error",
+                },
+              },
+            ),
             memberContext(),
             lineId,
           );
@@ -397,10 +466,16 @@ describe(
       async () => {
         const result =
           await calculateLine(
-            mockSupabase(
-              { insertResult: { error: { code: "42501", message: "denied" } } },
-            ),
+            mockSupabase(),
             mockRepository(),
+            mockWriter(
+              {
+                outcome: {
+                  status: "REJECTED",
+                  reason: "SHIPMENT_NOT_EDITABLE",
+                },
+              },
+            ),
             memberContext(),
             lineId,
           );
@@ -432,11 +507,13 @@ describe(
                   },
                   error: null,
                 },
-                insertPayloads,
               },
             ),
             mockRepository(
               "IRON_STEEL",
+            ),
+            mockWriter(
+              { payloads: insertPayloads },
             ),
             memberContext(),
             lineId,
@@ -505,11 +582,13 @@ describe(
                   },
                   error: null,
                 },
-                insertPayloads,
               },
             ),
             mockRepository(
               "CEMENT",
+            ),
+            mockWriter(
+              { payloads: insertPayloads },
             ),
             memberContext(),
             lineId,
@@ -563,10 +642,9 @@ describe(
 
         const result =
           await calculateLine(
-            mockSupabase(
-              {},
-            ),
+            mockSupabase(),
             repository,
+            mockWriter(),
             memberContext(),
             lineId,
           );
@@ -602,6 +680,7 @@ describe(
               await calculateLine(
                 supabase,
                 mockRepository(),
+                mockWriter(),
                 memberContext(["PRODUCER_OPERATOR"]),
                 lineId,
               );
@@ -617,10 +696,9 @@ describe(
           async () => {
             const result =
               await calculateLine(
-                mockSupabase(
-                  {},
-                ),
+                mockSupabase(),
                 mockRepository(),
+                mockWriter(),
                 memberContext(["IMPORTER_DECLARANT"]),
                 lineId,
               );

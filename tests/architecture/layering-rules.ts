@@ -223,6 +223,26 @@ const UI_ALLOWED_INFRASTRUCTURE_IMPORTS = [
   "src/infrastructure/supabase/admin-client",
   "src/infrastructure/regulatory/get-regulatory-repository",
   "src/infrastructure/rate-limit/rate-limiter",
+  // 2026-09-03 (P14.1). A narrow factory, exactly parallel to
+  // get-regulatory-repository above: it returns an object implementing
+  // an application-layer port and can perform precisely one operation.
+  //
+  // It exists because 20260903190000 revoked INSERT on
+  // calculation_results from anon and authenticated -- an RLS policy
+  // can pin who is writing and about which line, but cannot tell a real
+  // emissions figure from a forged one, because the engine that
+  // produces it is TypeScript. The remaining write channel is a
+  // SECURITY DEFINER RPC granted to service_role, so the write is
+  // privileged and has to be composed by the layer that owns
+  // composition rather than built inside src/application/**.
+  //
+  // Added to this list rather than to
+  // APPLICATION_GRANDFATHERED_INFRASTRUCTURE_IMPORT deliberately: the
+  // application layer sees only the port
+  // (src/application/calculations/calculation-result-writer.ts) and
+  // never the adapter, which is the arrangement this rule exists to
+  // produce.
+  "src/infrastructure/calculations/get-calculation-result-writer",
 ];
 
 /**
