@@ -1990,3 +1990,268 @@ adversarial review itself.
 **This is a self-audit written by the agent that implemented the work.
 It is not the independent adversarial review, and it is not an
 approval.**
+
+---
+
+## 21. P14.2 (continued) — the hosted gates, executed
+
+Appended. §20 recorded gates 1–5 as blocked or not run, which was true
+when it was written. The owner then verified the Railway configuration
+and authorised a throwaway hosted project, and four of those five gates
+have now executed. §20 is left as written rather than edited.
+
+Nothing was deployed. `main` and `feature/full-product-build` are
+untouched. Production still serves `95c95bb`. The CLI stayed linked to
+production throughout; `supabase config push` was directed at the
+throwaway with `--project-ref` and never at the linked project.
+
+### A. Gate 1 — Railway topology: CLOSED, by owner verification
+
+Confirmed by the owner directly in the Railway dashboard, not inferred
+by this agent:
+
+| | |
+|---|---|
+| Production deploy branch | `feature/full-product-build` |
+| Auto-deploy on push | **OFF** |
+
+Consequence recorded as instructed: `phase14/release-hardening` may be
+pushed for CI without triggering a production deployment through this
+service configuration. The deploy branch must not be changed, auto-deploy
+must not be enabled, and nothing may be pushed or merged into the deploy
+branch.
+
+### B. Gate 2 — CI on the exact SHA: STILL NOT RUN
+
+Not blocked by Railway any more. `git push` is refused by **this
+session's own permission classifier**, and the refusal instruction is
+explicit that it must not be worked around. The push is safe on the
+owner's confirmed configuration; it simply cannot be issued from here.
+
+**Owner action:** allow `git push` for this session, or run
+
+```
+git push -u origin phase14/release-hardening
+```
+
+CI then runs on the candidate SHA. Recorded as not run — not as passed.
+
+### C. Gate 3 — Storage-backed actual-data E2E: **EXECUTED AND PASSED**
+
+The workflow that had never run anywhere now has:
+
+```
+1 passed (1.1m)
+tests/e2e/actual-data-determination.spec.ts [chromium]
+against https://ymtngtjhixfokswaewwe.supabase.co (throwaway, since deleted)
+```
+
+installation → emission data → evidence upload → verification →
+activation → sharing → importer acceptance → actual determination →
+calculation → "Why this number?" → reproducibility → revocation →
+provenance survives.
+
+Corroborated from the database rather than taken from the reporter:
+
+| Fact | Value |
+|---|---|
+| Objects actually written to the hosted `evidence` bucket | **5** |
+| `evidence_files` rows | 13 |
+| ACTUAL determinations on shipment lines | 6 |
+| Frozen snapshot still present after revocation | **true** |
+| `sharing_counterparty_org_names()` as the importer | returns the producer's name |
+
+#### C.1 Getting there found three defects — all in the test, none in the product
+
+This spec guards the product's most important workflow and had **never
+executed past its own setup in any environment**: Storage-gated, so it
+skipped on every developer host, and CI has not run on this branch. It
+could not have passed as written.
+
+1. **It clicked a navigation landmark that the page does not render.**
+   After acceptance the importer is on `/accept-invitation`, which is a
+   standalone centred card with no app shell — no `navigation "Primary"`
+   exists — so the click waited until the test timed out. Confirmed three
+   ways: the Playwright trace showed exactly two unfinished actions, both
+   that click; `app/accept-invitation/page.tsx` imports no `AppShell`;
+   and the database showed the grant accepted with **zero** shipments
+   created.
+2. **Two assertions matched by substring against text the dataset
+   `<select>` also carries.** The option reads
+   `Installation X (DE) — 2026 — 1.85 tCO2e/t`, so `Shared by {org}` and
+   `{direct} {unit}` each resolved to two elements and failed strict
+   mode. **The product was rendering both preview rows correctly the
+   whole time** — Playwright's own error output named the preview's
+   `<dd>` as the second match. Made exact.
+3. **The 30 s default timeout is not enough against a remote backend.**
+   Passed on the command line rather than changed in the file: the value
+   depends on where Supabase is, not on the test.
+
+No assertion was weakened or removed. The changes let the spec reach
+assertions it already had.
+
+#### C.2 The evidence-bucket controls, attacked for the first time
+
+§2 of this audit certified these on a column read, and the four
+migrations that create the `storage.objects` policies had only ever been
+`migration repair`-ed locally — "shim-verified only", in this repo's own
+words. Nothing had tried to break them. **7/7 now behave correctly
+against real hosted Storage:**
+
+| Probe | Result |
+|---|---|
+| member uploads under their OWN org prefix | accepted |
+| member uploads under ANOTHER org's prefix | refused — `new row violates row-level security policy` |
+| member downloads another org's evidence | refused — `Object not found` |
+| member deletes another org's evidence | 0 objects removed |
+| MIME outside the allowlist (`application/x-msdownload`) | refused — `mime type ... is not supported` |
+| 21 MiB file against the 20 MiB limit | refused — `The object exceeded the maximum allowed size` |
+| anonymous read | refused — `Object not found` |
+
+#### C.3 A local-Storage diagnosis, corrected again
+
+§20 C reported the local storage container crash-looping. That stands.
+Worth adding: `[storage] enabled = false` is not the only obstacle —
+four storage-touching migrations are marked applied via
+`supabase migration repair`, so enabling Storage locally would still not
+produce a working evidence flow without applying their storage sections
+by hand. The hosted run needed exactly that, and the statements were
+copied from the migrations that own them rather than invented.
+
+### D. Gate 4 — Hosted restore: **EXECUTED**, with three findings
+
+Restored the corrected-procedure dump (privileges retained) into the
+throwaway project, then compared with
+`scripts/ops/compare-database-posture.mjs`.
+
+**Zero `schema "auth" does not exist` errors** — the defect that cost the
+local drill 5 policies and 10 foreign keys does not occur on a real
+project, which is exactly what §19 predicted.
+
+Errors on restore: 12 × `permission denied to change default privileges`
+(the `supabase_admin` lines, expected and documented) and 9 × foreign-key
+violations.
+
+#### D.1 The finding that matters: **revokes do not survive a restore**
+
+| Check | After restore | After remedies |
+|---|---|---|
+| `policy_definitions` | **55/55 match** | 55/55 |
+| `constraints` | 156 vs 165 — 9 FKs missing | **165/165 match** |
+| TRUNCATE grants for `anon`/`authenticated` | **44 present** | **0** |
+| `calculation_results` write grants for `anon`/`authenticated` | **6 present** | **0** |
+
+A dump records the grants that exist; it cannot record the *absence* of
+a grant. So every security control implemented as a `REVOKE` is lost on
+restore, while every control implemented as a policy survives.
+
+That distinction decides how bad each loss is, and it was tested rather
+than assumed:
+
+- **TRUNCATE was genuinely lost.** RLS does not govern TRUNCATE, so
+  nothing backstopped it. Re-applying `20260903170000` removed all 44
+  grants and a live `truncate` as `authenticated` was then refused.
+- **The calculation-write revoke was also lost — but the forgery stayed
+  blocked.** The dropped INSERT policy is absent from the dump too, so
+  RLS refused the forged insert: probed non-vacuously with a real JWT,
+  the user could see the line (1 row) and the insert failed with
+  `new row violates row-level security policy`. Re-applying
+  `20260903190000` restored the grant layer as well.
+
+#### D.2 The `auth.users` limitation, and its remedy, both proven
+
+Nine foreign keys could not be created because `auth.users` was empty.
+Seeding it with the 657 user ids the product data references let all nine
+be added, taking constraints to **165/165**. That is the proposed
+recovery design — the logical dump is a supplement to the provider's
+backup, which is what carries `auth.users` — tested rather than asserted.
+
+#### D.3 Residual differences, characterised
+
+- **Schemas 13 vs 10**: `_realtime`, `supabase_functions` and
+  `supabase_migrations` absent. The last matters — a restored project has
+  no migration ledger, so `supabase migration list` would show every
+  migration as pending. The recovery procedure must re-establish it.
+- **Grants 503 vs 566**: `anon` regains INSERT/UPDATE/DELETE on seven
+  tables (including the regulatory reference tables and `audit_events`).
+  Every one is still blocked by RLS — no write policy exists for `anon` —
+  so this is a lost defence-in-depth layer, not a breach.
+
+**Required post-restore steps**, now evidenced rather than theorised:
+re-apply every revoke-bearing migration (or re-run the migration set
+instead of restoring schema from a dump), restore `auth.users` from the
+provider backup, and re-establish the migration ledger.
+
+**Production recovery is still not proven.** This drill restored the
+local database, deliberately: no customer data was copied into a new
+project. What is proven is the procedure, the two remedies, and the
+measured scope of what the artifact does and does not carry.
+
+### E. Gate 5 — Hosted Auth: assumption **U1 is TRUE**, verified
+
+The single riskiest unverified assumption in the Auth workstream. The
+plan staged the entire template paste around the possibility that it was
+false, because if it were, the Recovery template would break password
+reset for every user.
+
+Settled without needing SMTP: GoTrue stores the value it interpolates
+into `{{ .TokenHash }}`, so it can be read exactly as a recipient would
+read it from their email.
+
+**The exact scenario** — recovery initiated the way the application does
+it, from a PKCE client, then verified from a different client that never
+held the code verifier:
+
+```
+token_type   recovery_token
+token_hash   pkce_ecf4117843093f1a29d667009c01171daa76b553e61d3b7852fb30b6
+prefix       pkce_          <- exactly as U1 predicted
+length       61
+
+verifyOtp({token_hash, type:'recovery'}) from a second client
+  -> SESSION ISSUED, access_token present
+  -> password changed from that second device
+```
+
+Replay of the same token was refused (`Email link is invalid or has
+expired`), so single-use holds.
+
+A contrast worth recording: an **admin**-generated recovery link
+(`auth.admin.generateLink`) carries **no** `pkce_` prefix (56 chars) and
+also verifies. Both paths work; only the app-initiated one is prefixed.
+
+**Cross-device password recovery works on hosted GoTrue.** What remains
+for owner UAT is delivery — the four templates were pushed to the
+throwaway project and read back, but no real mailbox received one, and
+production's templates are still not live.
+
+### F. Gate 7 (re-check) and the comparator's own defect
+
+While running the hosted drill, the comparator reported `[OK]` for
+`auth_user_foreign_keys_present` against a **completely empty** Supabase
+project. It counted every foreign key referencing `auth.users`, and a
+bare project already has several from `auth.identities` and
+`auth.sessions` — so the check could never fail.
+
+That is the same vacuous pass this file exists to prevent, occurring in
+the file written to prevent it. Scoped to foreign keys whose own table
+lives in `public` or `app`, and verified both ways: the empty project now
+fails it, the healthy database still passes. Commit `aa394ba`.
+
+### G. Status
+
+Gates 1, 3, 4, 6, 7, 8, 9 complete. Gate 5's load-bearing assumption
+verified, its delivery leg outstanding. Gate 2 blocked only by a session
+permission control.
+
+Still not closed, and not claimed:
+
+1. **CI on the candidate SHA** — one `git push` away.
+2. **Production recovery** — the procedure is proven, a production-sourced
+   restore is not.
+3. **Hosted Auth delivery** — production templates not live; no real
+   mailbox has received one.
+4. **Owner UAT** — six of the nineteen findings need it.
+5. **The independent adversarial review.**
+
+This remains a self-audit by the agent that implemented the work.
