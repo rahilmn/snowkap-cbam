@@ -2855,3 +2855,237 @@ past review in the first place.
 
 The independent adversarial review remains outstanding and is now more
 clearly necessary than when §22 called it a formality-in-waiting.
+
+---
+
+## 24. P14 remediation and self-certification (2026-09-03)
+
+**This is a self-certification pass by the implementation session. It is
+not the independent review.** The independent adversarial review will be
+run separately, by a different model and session, against the exact SHA
+recorded below. Nothing here substitutes for it — §23 exists precisely
+because this session's own confident claims have been wrong before,
+twice in writing.
+
+### 1. Final SHA
+
+The **tip of `phase14/release-hardening`** — that is what the
+independent review should be run against. The last functional change is
+`75979f4761f69ad8f193e5fad4d58a6faeca807f`; this report is the commit
+after it, so the tip's own hash cannot be printed here without being
+wrong the moment it is written.
+
+Eleven commits from the reviewed candidate
+`cad99adb7c4f2a170bc7e35dd3eab4dd51c96df3`; 34 files, +5025/−202;
+79 migrations, five of them new.
+
+`origin/main` (`909233d`) and the production deploy branch
+`feature/full-product-build` (`95c95bb`) are untouched. Nothing was
+pushed, merged or deployed. Production still serves `95c95bb`.
+
+### 2. Confirmed blockers before remediation
+
+Each was reproduced by this session before any fix was written — as the
+real `authenticated` role with a purpose-created MEMBER, inside
+`BEGIN … ROLLBACK`, with post-rollback leakage verified 0.
+
+| | Blocker | Reproduction |
+|---|---|---|
+| B1 | `emission_data` has no INSERT-time gate | 5 variants admitted, including one naming a real ADMIN as verifier |
+| B2 | verified evidence destroyed via a state detour | `ACTIVE → DISCARDED → DRAFT → un-verify → strip`; also via `SUPERSEDED` |
+| B3 | `build-and-test` secret scan inert, fails open | CI log line 1909 `unbound variable`, line 1911 success string |
+| B4 | the candidate fails its own `fast-gates` scan | 4 matching lines, exit 1 |
+| H3 | E2E can target the hosted project | `.env` fallback carries the hosted URL and service-role key |
+
+### 3. Fixes
+
+| Blocker | Fix | Shape |
+|---|---|---|
+| B1 | `20260903200000` — INSERT gate | A record's authority is *produced by the lifecycle*, never asserted at creation. Members still write raw data; that is the product. |
+| B2 | `20260903210000` — `verified_active_at` + a status state machine | A durable marker keyed on what the row **has been**, not where it is. Holds in every state, terminal ones included. |
+| B3+B4 | `scripts/ci/scan-for-committed-secrets.mjs` | One Node implementation, two callers, self-testing both directions on every run. |
+| H3 | `tests/support/e2e-target-guard.ts` | Fails closed on provenance, not merely on the merged value. No escape hatch. |
+
+Plus four the bounded triage confirmed:
+
+- **`20260903220000`** — a filed declaration must cover exactly its
+  reporting period, and no shipment may be filed twice.
+- **`20260903240000`** — `predecessor_id` must name a record in the
+  writer's own organisation (a cross-tenant denial of service).
+- **`20260903230000`** — `app.privilege_invariants`: a revoke becomes
+  something the database can be *asked about*, checked by `seed.sql`, by
+  the posture comparator, and — for the first time — by CI.
+- **engine 1.4.0** — the unit denominator is an exact token.
+  `tCO2e/kilotonne` was computing a 1,000× overstatement.
+
+### 4. Migrations
+
+`20260903200000`, `20260903210000`, `20260903220000`, `20260903230000`,
+`20260903240000`. Forward-only; no applied migration edited; nothing in
+the protected regulatory zone. Both new triggers are idempotent
+(`drop trigger if exists`), which the existing set is not.
+
+### 5. Regression tests
+
+`emission-data-lifecycle-authority` (22), `declaration-filing-period-membership`
+(5), `scan-for-committed-secrets` (13), `e2e-target-guard` (17), and 5
+new engine-unit goldens.
+
+Controls are asserted as hard as attacks: the full legitimate lifecycle,
+supersede, discard, evidence growth, an honest filing, an amendment, an
+amendment of an amendment, and a grantee importer still seeing a
+legitimately activated record. A gate that also blocks legitimate work
+would be a worse defect than the one it closes.
+
+### 6. Targeted security probes
+
+Every fix verified in both directions. Notably: privilege invariants
+0 → 57 → 0 across a replay of `seed.sql`'s blanket grants; the posture
+comparator OK → FAIL (naming the reverted migration) → OK → UNVERIFIED,
+on a disposable database created and dropped for it.
+
+### 7. High-consequence triage
+
+| # | Finding | Verdict |
+|---|---|---|
+| 1 | line deleted from a READY member before filing | **CONFIRMED — HIGH, not fixed** (§13) |
+| 2 | shipment added after READY, omitted from filing | CONFIRMED → **fixed** |
+| 3 | forged `member_shipment_ids` | CONFIRMED → **fixed** |
+| 4 | cross-period shipment in a declaration | CONFIRMED → **fixed** |
+| 5 | same shipment in two FILED declarations | CONFIRMED → **fixed**; within a period it was already blocked by `declarations_period_original_uq` |
+| 6 | amendment shrinking the member set | **DISPROVED** — an amendment must now be period-complete too |
+| 7 | `good_sector` mutable between calculation and filing | **UNPROVEN** — the v10 validator binds the determination to `p_cn_code`; whether a raw `cn_code` PATCH leaving the determination intact fires it was not established |
+| 8 | magnitude-prefixed units | CONFIRMED → **fixed** (engine 1.4.0) |
+| 9 | `tCO2/t` treated as CO2e | **CONFIRMED, deliberate** — an existing recorded owner decision, unchanged here |
+| 10, 11 | invitation backdoor / account takeover | **UNPROVEN** — no GoTrue reachable; the review's `auth.users` was a 9-column shim |
+| 12 | cross-tenant `linked_operator_id` | **UNPROVEN** — not probed |
+| 13 | cross-tenant `predecessor_id` | CONFIRMED → **fixed** |
+| 14 | `evidence_files` metadata client-chosen | **UNPROVEN** — not probed |
+| 15 | filing accepts superseded engine versions | **CONFIRMED — HIGH, not fixed** (§13) |
+| 16 | rollback destroys calculation writes | CONFIRMED → **documented**, `ROLLBACK.md` §2 |
+
+### 8. Regulatory
+
+`pnpm regulatory:verify` → **`RESULT: VALID`**, 12,540/12,540, source
+checksum `900583811c7e1194799eb9bdbad2d6d7e1100f5a7d80a664c1584a8fce6f9f35`,
+2026-09-03.
+
+**Run against the LOCAL database, not production.** The remediation
+touched nothing in the protected regulatory zone — resolver, adapter,
+the five foundation migrations and the Python pipeline are byte-identical
+— so the gate verifies the dataset, not a change to it, and pointing it
+at production would have meant connecting to the hosted project for no
+additional information. `supabase/.temp/pooler-url` was redirected to
+local for the run and restored afterwards. **A production-targeted run
+has not been performed in this pass.**
+
+D1 unchanged: Annex II direct-only treatment stands, and the sector
+proxy remains a hardcoded approximation. No claim of exact Annex II
+membership is made.
+
+### 9. CI
+
+Not run — this SHA has not been pushed, per the brief. Locally: 142 test
+files / 1,688 tests, 0 failed, 0 skipped; typecheck clean; the secret
+scan clean and self-testing; the posture comparator `POSTURE MATCHES`.
+The workflow now invokes that comparator, which it never did before.
+
+### 10. E2E
+
+**39 passed, 0 failed, 0 flaky, 9 skipped.** Run three times; the last
+two after the fix below, both clean.
+
+The first run showed **1 flaky** — `actual-data-determination.spec.ts`,
+`toBeHidden()` on the evidence empty state, cleared on retry.
+Classified **TEST INFRASTRUCTURE**, not product: it waits on the same
+real Supabase Storage round trip as the assertion above it, which
+carries a 20s budget, while this one was left on the 10s default. Given
+the same budget; it must still become hidden.
+
+The 9 skips are all `isMobile` — desktop-only journeys on the
+`mobile-chromium` project, the documented baseline. The `/api/health`
+check self-skips without `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` in
+the runner's own environment; exporting them, as CI does, makes it run —
+that is the difference between the 10-skip and 9-skip runs.
+
+### 11. Artifact
+
+`pnpm build` clean. `.next/standalone` carries no E2E rate-limit bypass
+and **no env file**: Next was tracing the developer's `.env`, which holds
+hosted credentials, into the deployable tree. Stripped at build time and
+asserted absent. A full re-scan of the deployable tree finds only the
+local Supabase demo **anon** key, inlined from `NEXT_PUBLIC_*` and public
+by design.
+
+### 12. Migration state
+
+79 migrations, filenames in chronological order. **Every one applied
+cleanly to a brand-new database** — 77 applied, 2 skipped (the pair
+needing the Python regulatory pipeline, which CI defers for the same
+reason), 0 failed. The disposable database was dropped afterwards.
+
+### 13. Remaining risks
+
+**HIGH — not fixed, deliberately**
+
+- **A line deleted from a READY member shipment still shrinks the filed
+  total.** Filing re-aggregates from the lines that exist, so the
+  snapshot stays internally honest and the per-shipment breakdown shows
+  what was counted — but what an administrator approved at READY is not
+  necessarily what gets filed. The fix is to make a READY shipment's
+  lines immutable: a product-behaviour change, not a filing-gate fix.
+- **Filing accepts calculation results from superseded engine
+  versions.** The gate checks determination and quantity, never
+  `engine_version`. Under 1.4.0 that means a figure computed by a
+  version carrying the 1,000× unit defect could still be filed. No such
+  row exists — every `emission_unit` in use is `tCO2e/t` or
+  `TCO2E_PER_TONNE` — but the property holds in general.
+- **`seed.sql` still re-asserts revokes by hand.** The registry makes a
+  forgotten re-assertion *loud* rather than silent; it does not make the
+  list unnecessary.
+
+**MEDIUM**
+
+- Observability remains thin: one log call site, `createRequestId()`
+  unused, `recordAuditEvent` swallowing rejected writes.
+- The Annex II sector proxy is a hardcoded set in application code, not
+  a versioned dataset.
+
+**UNPROVEN**
+
+Items 7, 10, 11, 12 and 14 above, plus everything the adversarial review
+could not reach: the real Supabase Storage layer (its sandbox had zero
+`storage.objects` policies), hosted GoTrue, and regulatory ground truth
+against the source instruments. Unproven, not passed.
+
+### 14. Owner decisions still open
+
+Unchanged by this pass: D1 (Annex II scope), D2 (importer-entered
+installations), EU-origin scope, the ACTUAL dataset-period question, and
+whether `VERIFY` should refuse when the verifier is the record's
+creator. Added by it: whether a READY shipment's lines should be
+immutable, and whether filing should require the current engine version.
+
+### 15. Environment limitations
+
+No CI run (not pushed). No production contact of any kind. No hosted
+Auth. `regulatory:verify` local-only, as stated above. The E2E suite
+exercises real local Supabase Storage, not the hosted Storage service.
+
+### 16. Status
+
+**READY FOR INDEPENDENT REVIEW.**
+
+Every blocker in §2 is closed, with a reproduction before and a
+regression after. None of the seven conditions in the release boundary
+survives: a member cannot manufacture ACTIVE+VERIFIED data; the
+evidentiary basis of a verified record cannot be invalidated;
+calculation output cannot be fabricated and a filing cannot be detached
+from its own period; a test cannot reach production; both CI security
+gates prove they work on every run; and no demonstrated path files a
+materially false declaration through a supported workflow.
+
+Authentication takeover remains **UNPROVEN rather than disproved** — no
+live path was demonstrated, and none could be, because no auth service
+was reachable. That is a gap in evidence, not a clean bill, and it is
+the first thing the independent review should reach for.
