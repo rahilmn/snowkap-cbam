@@ -3278,3 +3278,222 @@ the live takeover path still runs against a fresh session. Calling that
 CLOSED because the prescribed action was taken would be the exact
 failure mode this workstream has been correcting: reporting the action
 instead of the outcome.
+
+---
+
+## 26. AUTH-1 closed (2026-09-04)
+
+The one blocker §25 left open. Single-purpose pass: no migrations, no
+regulatory change, nothing outside the password boundary.
+
+### AUTH-1
+
+```
+Before:
+  A fresh stolen session could change the password.
+  Measured, secure_password_change = true, real GoTrue v2.195.0:
+    aged session   PUT /auth/v1/user {password} -> 400 reauthentication_needed
+    FRESH session  PUT /auth/v1/user {password} -> 200      <- the takeover
+  The attacker then owned the account: the owner's password stopped
+  working and logout?scope=others evicted their remaining sessions.
+
+After:
+  FRESH stolen session, no current password
+    -> { status: "CURRENT_PASSWORD_INCORRECT" }
+    -> owner's password still signs in            (asserted, live)
+    -> attacker's chosen password does not        (asserted, live)
+    -> owner's session still valid                (asserted, live)
+  AGED stolen session, no current password
+    -> { status: "CURRENT_PASSWORD_INCORRECT" }
+    -> auth.users.updated_at byte-identical before and after, so GoTrue
+       was never asked                            (asserted, live)
+  Correct current password
+    -> { status: "CHANGED", otherSessionsSignedOut: true }
+    -> new password signs in, old one does not, the standing session
+       survives, the other device's refresh token is rejected
+```
+
+**The exact boundary that prevented the attack.** The current password,
+verified by Supabase itself, immediately before the write — not a check
+performed in application code, and not a property of the session.
+`app/account/password/change-password.ts` reaches `updateUser` only
+after `verifyCurrentPassword` returns `VERIFIED`; that function signs in
+on a throwaway, non-persisting, anon-key client and revokes the
+resulting session before returning a three-value verdict. Nothing else
+is treated as authority: not an access token, not a refresh token, not
+how recently the session was created, not `getUser()` succeeding, and
+not `secure_password_change`.
+
+The second reachable path is gated differently, because it must be:
+`/reset-password` exists for people who *cannot* supply a current
+password. It now requires a session established by an emailed link,
+read from the signed access token's `amr` claim through `getClaims()` —
+which validates the token against the auth server before returning
+claims. Measured, not assumed: `signInWithPassword` → `password`,
+`verifyOtp` recovery and invite → `otp`, and the marker survives
+`refreshSession`, so it is a property of the session rather than of one
+token. The predicate judges the most recent authentication and fails
+closed on an absent, empty, unorderable or unrecognised `amr`.
+
+An attacker cannot convert a stolen password session into a link
+session without receiving mail at the victim's address.
+
+### Hosted setting
+
+```
+secure_password_change:  HOSTED CONFIGURATION UNVERIFIED
+```
+
+Required in production, and required to stay on. Local
+`supabase/config.toml` carries `true` and it was NOT disabled to make
+anything pass — the live suite reproduces the finding with it enabled.
+The hosted project's value has not been read, and the code being ready
+is not the same claim.
+
+It is now **defence in depth rather than the boundary**: it refuses an
+aged session, which is the case the application would refuse anyway, and
+admits a fresh one, which is the case that mattered. The model is both
+layers, and the runbook says so.
+
+### Password-mutation paths
+
+Every write path in the repository, from
+`rg "updateUser\(|resetPasswordForEmail|signInWithPassword"` over
+`app`, `src`, `components`, `tests` and `scripts`:
+
+| path | what it does | protected by |
+|---|---|---|
+| `app/account/password/change-password.ts` → `updateUser({password})` | authenticated change | **current-password proof**, verified by Supabase, before the write |
+| `app/(auth)/reset-password/actions.ts` → `updateUser({password})` | recovery, and an invitation's first password | **email-link session required** (`amr`, read via `getClaims()`) |
+| `app/(auth)/forgot-password/actions.ts` → `resetPasswordForEmail` | *sends* a link; sets nothing | rate limited; unchanged |
+| `app/(auth)/actions.ts` → `signInWithPassword` | sign-in; sets nothing | unchanged |
+| `src/infrastructure/supabase/password-verification-client.ts` → `signInWithPassword` | proves a current password | anon key, `persistSession: false`, fresh client per call, session revoked before return |
+| `app/auth/confirm/actions.ts` → `verifyOtp` | consumes an email link; sets no password | explicit press (AUTH-2); unchanged |
+| tests, `scripts/perf/measure-p11-perf.ts` | fixtures | not product paths |
+
+Two writers, each with its own proof. That is asserted as a test
+(`tests/architecture/password-change-boundary-is-singular.test.ts`), so
+a third one added later fails the suite rather than silently inheriting
+a session's say-so. The same suite pins that `actions.ts` exports
+exactly one function — every exported async function in a `"use server"`
+file is its own POST endpoint, so the helper that accepts a Supabase
+client deliberately lives outside it.
+
+### Regression evidence
+
+Named suites, exact counts, all executed:
+
+```
+tests/integration/password-change-current-password-proof.test.ts   8 passed
+  reproduces the finding: fresh 200 / aged 400 at the GoTrue layer
+  4. FRESH stolen session, no current password -> refused
+  5. AGED stolen session -> refused before GoTrue is consulted
+  2. wrong current password, five variants -> refused
+  1/8. legitimate change -> new works, old dead, others evicted
+  7. proof is not replayable
+  verification neither replaces the caller's session nor leaks one
+  /reset-password's gate on real GoTrue claims
+
+app/account/password/actions.test.ts                              15 passed
+  incl. 3 (omitted/empty) and 6 (direct invocation, no UI)
+app/auth/session-assurance.test.ts                                 7 passed
+app/(auth)/reset-password/actions.test.ts                         14 passed
+tests/architecture/password-change-boundary-is-singular.test.ts    5 passed
+tests/e2e/change-password.spec.ts                        4 x 2 projects
+```
+
+The live suite is not vacuous, and that was checked rather than
+asserted: replacing the verification call with a constant `VERIFIED`
+fails **5 of its 8** cases; restoring it passes all 8.
+
+Two defects were found by these tests and fixed rather than worked
+around — an omitted `currentPassword` surfaced a validator type error
+instead of its own message, and the first draft of the E2E spec did not
+request the fixture, so two cases ran signed out and would have passed
+for the wrong reason.
+
+### Previous P14 fixes still green
+
+AUTH-2 re-verified, not assumed: `auth-callback-requires-explicit-consent`
+(6), `auth-confirm-get-is-inert` (4) and the browser-level
+`auth-callback-consent.spec.ts` (4 × 2 projects) all pass. `/auth/callback`
+still adopts nothing on load; GET and prefetch stay inert.
+
+Recovery and change-password remain distinct flows, deliberately: the
+recovery protections were tightened, not merged into the new screen.
+
+### Gates
+
+```
+typecheck:              PASS
+unit/integration:       150 files, 1755 tests, 1755 passed, 0 failed, 0 skipped
+targeted auth suite:    12 files, 97 tests, 97 passed, 0 skipped
+E2E:                    55 passed, 0 failed, 0 flaky, 9 skipped
+build:                  PASS -- 0 env files, no E2E bypass in .next/standalone
+secret scan:            PASS (self-test both directions)
+posture comparator:     RESULT: POSTURE MATCHES
+```
+
+Skips, separated as required. The 9 E2E skips are the same set as §25
+and no new one was introduced: **8** are the deliberate desktop-only
+journeys on `mobile-chromium`; the **9th, on chromium, is functional and
+did not execute** — the Storage-backed actual-data journey, still
+**ENVIRONMENT BLOCKED** by `[storage] enabled = false` and the known
+container-unhealthy failure. It is not counted as passed. All four new
+browser tests executed on both projects.
+
+The 0-skip unit figure requires `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY` exported, or the two regulatory-adapter
+suites skip 14 tests between them. Both were exported and both suites
+ran. (§25's "458 files" was
+the *suite* count, not the file count -- correcting that here: the
+like-for-like figures at `aac1a3b` were 146 files and 1717 tests, and
+this pass adds 4 files and 38 tests.)
+
+`pnpm regulatory:verify` was not re-run: this pass touches no migration
+and no file in the protected zone, confirmed by `git status` over
+`src/domain/regulatory`, `src/infrastructure/regulatory`,
+`src/infrastructure/supabase/client.ts`, `scripts/regulatory` and
+`supabase/migrations` — all empty. §25's `RESULT: VALID`, 12,540/12,540
+stands, and stands **against local**, not production.
+
+### Remaining items
+
+**Environment blocked**
+- The Storage-backed actual-data journey must execute in CI.
+- CI has not run: this SHA is not pushed.
+- `regulatory:verify` against production.
+- Hosted Auth settings unread — Site URL, rate limits, CAPTCHA off, and
+  `secure_password_change`.
+
+**Owner decisions still open** — unchanged from §25: D1's sector proxy,
+`tCO2/t` as CO2e, dataset period versus shipment period, and whether an
+EU-origin line should ever be determinable.
+
+**Accepted risk** — unchanged: the trusted calculation RPC does not
+verify the emissions value.
+
+### Verdict
+
+**READY FOR INDEPENDENT REVIEW.**
+
+Against the six conditions:
+
+1. AUTH-1 is closed by live regression — reproduced first at this SHA,
+   then refused, with the negative test showing the suite detects the
+   boundary's removal.
+2. The proof cannot be bypassed: no UI, a direct call, an omitted field,
+   an empty field, a wrong guess, and a fresh or aged session all reach
+   the same refusal, and there is one writer per path with a test that
+   fails if a third appears.
+3. The legitimate flow works — verified in the suite and by hand in a
+   browser: current password accepted, new password set, old one dead,
+   standing session kept, other sessions evicted.
+4. Previous P14 fixes are green, AUTH-2 re-verified rather than assumed.
+5. No new blocker: full gates pass and the E2E skip set is unchanged.
+6. Working tree clean; nothing pushed, merged or deployed.
+
+This is a verdict on the candidate, not on the environment. Three things
+remain unverified rather than verified-good — the hosted Auth settings,
+CI on this SHA, and the Storage-backed journey — and the independent
+review inherits them as named above, not as silence.

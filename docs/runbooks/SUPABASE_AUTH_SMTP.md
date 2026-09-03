@@ -184,10 +184,23 @@ it does not break either. `supabase/config.toml` now carries `true` as
 well, so a developer's local behaviour matches the required hosted
 behaviour instead of being quietly laxer than production.
 
-**Residual, stated plainly.** Fresh-session password change remains
-open. Closing it needs a current-password prompt on the change-password
-screen, which is an application change and is recorded as an owner
-decision rather than smuggled into this pass.
+**Residual — CLOSED in the application, 2026-09-04.** Fresh-session
+password change is no longer reachable. The application now requires the
+current password, proved against Supabase, immediately before any
+password change (`/account/password`), and `/reset-password` accepts
+only a session established by an emailed link. This setting remains a
+REQUIRED prerequisite and keeps its own job — refusing an aged session —
+but it is defence in depth, not the boundary. The final security model
+is both:
+
+```
+application current-password proof   (the boundary)
++
+hosted secure-password-change        (defence in depth)
+```
+
+Do not disable it. Do not treat it as sufficient on its own: measured,
+it admits a fresh session, and a stolen cookie is fresh.
 
 ### 2. Site URL — REQUIRED to equal the production origin exactly
 
@@ -218,5 +231,9 @@ configured: yes | no | not read
 read by: <who, when>
 ```
 
-Anything other than `configured: yes` on item 1 leaves AUTH-1 open, and
-the verdict has to say so.
+Item 1 is a REQUIRED prerequisite. Since 2026-09-04 it is no longer
+the thing standing between a stolen session and a password change — the
+application is — so `configured: no` or `not read` no longer leaves
+AUTH-1 open on its own. It does leave a required control unverified,
+and the report must say `HOSTED CONFIGURATION UNVERIFIED` rather than
+implying the hosted project is known to be set.
