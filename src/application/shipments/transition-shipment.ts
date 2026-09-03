@@ -93,7 +93,22 @@ export async function transitionShipmentStatus(
   shipmentId: ShipmentId,
   action: ShipmentTransitionAction,
 ): Promise<TransitionShipmentActionResult> {
-  if (action === "LOCK" && !hasAdminAccess(context)) {
+  // 2026-09-04 (P14). REOPEN joins LOCK as an administrative act.
+  //
+  // Reproduced before this: an ADMIN approved a shipment of two lines
+  // totalling 4110 tCO2e, a plain MEMBER set it back to DRAFT -- through
+  // this very function, which gated only LOCK -- deleted a line, marked
+  // it ready again, and the ADMIN's filing recorded 2740. A 33%
+  // under-report with no refusal anywhere.
+  //
+  // READY is not a workflow stage, it is an approval. Undoing an
+  // approval is the administrator's decision, and the database now says
+  // so too (20260905110000); this is the same rule where the user meets
+  // it, so they get a clear refusal instead of an opaque RLS zero-rows.
+  if (
+    (action === "LOCK" || action === "REOPEN") &&
+    !hasAdminAccess(context)
+  ) {
     return {
       status: "REJECTED",
       reason: "PERMISSION_DENIED",

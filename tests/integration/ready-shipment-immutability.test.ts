@@ -497,5 +497,138 @@ describe.skipIf(!localSupabaseReachable)(
         expect(count).toBe(2);
       });
     });
+
+    // ----------------------------------------------------------------
+    // 2026-09-04 (P14). The door the first fix left open.
+    //
+    // The cases above prove a READY shipment's lines cannot be edited.
+    // They all condition on the status being READY -- and nothing stopped
+    // a plain MEMBER changing that status. Reproduced through the real
+    // REST API with a member's own JWT: reopen to DRAFT, delete an
+    // approved line, mark READY again, and the administrator's filing
+    // recorded 2740 tCO2e against an approved 4110.
+    //
+    // A guard conditioned on a value the attacker controls is not a
+    // guard, which is why the fix is in two places: the status itself is
+    // administrative territory, and filing independently re-checks the
+    // population.
+    // ----------------------------------------------------------------
+    describe("READY is administrative territory", () => {
+      it("a MEMBER cannot reopen a READY shipment", async () => {
+        const { shipmentId } = await seedDraftShipment();
+        await setStatus(shipmentId, "READY");
+
+        const { data, error } =
+          await memberClient
+            .from("shipments")
+            .update({ status: "DRAFT" })
+            .eq("id", shipmentId)
+            .select("status");
+
+        // RLS filters rather than raising, so "no rows" is the refusal.
+        expect(error).toBeNull();
+        expect(data ?? []).toEqual([]);
+
+        const { data: still } =
+          await serviceClient
+            .from("shipments")
+            .select("status")
+            .eq("id", shipmentId)
+            .single();
+
+        expect(still?.status).toBe("READY");
+      });
+
+      it("a MEMBER cannot change anything else on a READY shipment either", async () => {
+        const { shipmentId } = await seedDraftShipment();
+        await setStatus(shipmentId, "READY");
+
+        await memberClient
+          .from("shipments")
+          .update({ reference: "MEMBER-RENAMED" })
+          .eq("id", shipmentId);
+
+        const { data: still } =
+          await serviceClient
+            .from("shipments")
+            .select("reference")
+            .eq("id", shipmentId)
+            .single();
+
+        expect(still?.reference).not.toBe("MEMBER-RENAMED");
+      });
+
+      it("the whole reproduction now fails at its first step", async () => {
+        const { shipmentId, lineId } = await seedDraftShipment();
+        await setStatus(shipmentId, "READY");
+
+        // 1. reopen
+        await memberClient
+          .from("shipments")
+          .update({ status: "DRAFT" })
+          .eq("id", shipmentId);
+
+        // 2. delete the approved line
+        await memberClient
+          .from("shipment_lines")
+          .delete()
+          .eq("id", lineId);
+
+        // 3. re-approve
+        await memberClient
+          .from("shipments")
+          .update({ status: "READY" })
+          .eq("id", shipmentId);
+
+        const { count } =
+          await serviceClient
+            .from("shipment_lines")
+            .select("id", { count: "exact", head: true })
+            .eq("shipment_id", shipmentId);
+
+        expect(count).toBe(1);
+
+        const { data: shipment } =
+          await serviceClient
+            .from("shipments")
+            .select("status")
+            .eq("id", shipmentId)
+            .single();
+
+        expect(shipment?.status).toBe("READY");
+      });
+
+      it("an ADMIN can still reopen -- the legitimate workflow is preserved", async () => {
+        const { shipmentId, lineId } = await seedDraftShipment();
+        await setStatus(shipmentId, "READY");
+
+        const { data: reopened } =
+          await adminClient
+            .from("shipments")
+            .update({ status: "DRAFT" })
+            .eq("id", shipmentId)
+            .select("status");
+
+        expect(reopened).toEqual([{ status: "DRAFT" }]);
+
+        // ...and the lines are editable again once it is DRAFT.
+        const { error: deleteError } =
+          await adminClient
+            .from("shipment_lines")
+            .delete()
+            .eq("id", lineId);
+
+        expect(deleteError).toBeNull();
+
+        const { data: reapproved } =
+          await adminClient
+            .from("shipments")
+            .update({ status: "READY" })
+            .eq("id", shipmentId)
+            .select("status");
+
+        expect(reapproved).toEqual([{ status: "READY" }]);
+      });
+    });
   },
 );

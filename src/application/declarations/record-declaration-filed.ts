@@ -45,6 +45,8 @@ export type RecordDeclarationFiledResult =
         // set omits. Both were live-reproducible and both file a
         // declaration that does not describe its own period.
         | "MEMBERS_NOT_PERIOD_COMPLETE"
+        | "POPULATION_CHANGED_SINCE_READY"
+        | "APPROVED_POPULATION_UNKNOWN"
         // One of the member shipments is already frozen into another
         // FILED_RECORDED declaration that this one does not amend.
         | "SHIPMENT_ALREADY_FILED"
@@ -218,6 +220,15 @@ export async function recordDeclarationFiled(
 
     case "MEMBERS_NOT_PERIOD_COMPLETE":
       return { status: "REJECTED", reason: "MEMBERS_NOT_PERIOD_COMPLETE" };
+
+    // 2026-09-04 (P14). The lines present now are not the lines that
+    // were approved -- see 20260905120000 for the under-report this
+    // refuses.
+    case "POPULATION_CHANGED_SINCE_READY":
+      return { status: "REJECTED", reason: "POPULATION_CHANGED_SINCE_READY" };
+
+    case "APPROVED_POPULATION_UNKNOWN":
+      return { status: "REJECTED", reason: "APPROVED_POPULATION_UNKNOWN" };
 
     case "SHIPMENT_ALREADY_FILED":
       return { status: "REJECTED", reason: "SHIPMENT_ALREADY_FILED" };

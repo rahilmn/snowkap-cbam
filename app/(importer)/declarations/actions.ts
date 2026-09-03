@@ -252,6 +252,15 @@ function filedMessageFor(
     case "CALCULATION_ENGINE_OUTDATED":
       return "One or more lines were calculated by an earlier version of the calculation engine. Recalculate those lines, then record the filing -- the earlier results are kept for provenance.";
 
+    // 2026-09-04 (P14). The lines are not the ones this declaration was
+    // approved over. Recoverable, and the message says how: re-approving
+    // the declaration is what records the new population as approved.
+    case "POPULATION_CHANGED_SINCE_READY":
+      return "The lines in this declaration's shipments have changed since it was marked ready, so filing it now would record a different population than the one approved. Reopen the declaration, check the lines, and mark it ready again.";
+
+    case "APPROVED_POPULATION_UNKNOWN":
+      return "This declaration has no record of the line population it was approved over, so filing cannot confirm the two match. Reopen it and mark it ready again.";
+
     default:
       return "Something went wrong recording this filing. Please try again.";
   }

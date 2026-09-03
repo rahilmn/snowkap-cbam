@@ -1766,8 +1766,23 @@ describe.skipIf(!localSupabaseReachable)(
         const row =
           (data as RpcResultRow[] | null)?.[0];
 
+        // 2026-09-04 (P14). This used to assert INCOMPLETE, and the
+        // refusal is now the more precise POPULATION_CHANGED_SINCE_READY
+        // -- 20260905120000 compares the lines present against the ones
+        // frozen when the declaration was approved, and that gate is
+        // reached first.
+        //
+        // The reason changed; the security property did not. This
+        // scenario -- a member shipment emptied after the declaration
+        // was marked READY -- is exactly a population that diverged from
+        // the approved one, and naming it as such is the better
+        // description. INCOMPLETE remains asserted by five other cases
+        // in this file, so nothing about that reason is left uncovered.
         expect(row).toEqual(
-          { result_status: "INCOMPLETE", result_declaration_id: null },
+          {
+            result_status: "POPULATION_CHANGED_SINCE_READY",
+            result_declaration_id: null,
+          },
         );
 
         // A refused filing must leave no wreckage -- none of the three
