@@ -598,8 +598,16 @@ describe.skipIf(!localSupabaseReachable)(
 
         expect(error).not.toBeNull();
 
+        // 2026-09-03 (P14 remediation, 20260903210000). Still refused;
+        // the refusal now comes from verified_active_at -- the durable
+        // marker that says this record HAS BEEN active and verified --
+        // rather than from a rule keyed on where its status happens to
+        // be. Same guarantee, stated once and holding in every state,
+        // so the message changed. The assertion is deliberately still
+        // on the specific sentence rather than loosened to "some
+        // error": what is being pinned is WHY the write was refused.
         expect(error?.message).toContain(
-          "cannot be un-verified",
+          "verification is permanent",
         );
 
         const { data: after } =
@@ -655,8 +663,13 @@ describe.skipIf(!localSupabaseReachable)(
 
         expect(error).not.toBeNull();
 
+        // 2026-09-03 (P14 remediation). Now refused one step earlier,
+        // by the status state machine: ACTIVE -> DRAFT is not a
+        // transition at all, so the statement never reaches the
+        // un-verify rule. Both walls are real and both are asserted --
+        // this one here, the un-verify rule in the test above.
         expect(error?.message).toContain(
-          "cannot be un-verified",
+          "not a lifecycle transition",
         );
       },
     );
@@ -688,8 +701,14 @@ describe.skipIf(!localSupabaseReachable)(
 
         expect(error).not.toBeNull();
 
+        // 2026-09-03 (P14 remediation, 20260903210000). Same refusal,
+        // now expressed as one entry missing from an allowlist of the
+        // five real transitions rather than as a rule about DRAFT
+        // specifically -- which is what closed the DISCARDED and
+        // SUPERSEDED detours the earlier, denylist-shaped version left
+        // open.
         expect(error?.message).toContain(
-          "cannot return to DRAFT",
+          "not a lifecycle transition",
         );
       },
     );
