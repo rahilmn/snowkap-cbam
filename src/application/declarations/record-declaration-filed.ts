@@ -38,6 +38,16 @@ export type RecordDeclarationFiledResult =
         | "NOT_READY"
         | "NO_MEMBER_SHIPMENTS"
         | "SHIPMENTS_NOT_LOCKABLE"
+        // 2026-09-03 (P14 remediation, 20260903220000). The member set
+        // is not exactly the shipments the declaration's reporting
+        // period contains -- either it names one that belongs to a
+        // different period, or the period holds a non-VOID shipment the
+        // set omits. Both were live-reproducible and both file a
+        // declaration that does not describe its own period.
+        | "MEMBERS_NOT_PERIOD_COMPLETE"
+        // One of the member shipments is already frozen into another
+        // FILED_RECORDED declaration that this one does not amend.
+        | "SHIPMENT_ALREADY_FILED"
         | "INCOMPLETE"
         // The RPC call itself errored, or returned no row at all
         // (network/transport failure -- distinct from every named
@@ -200,6 +210,12 @@ export async function recordDeclarationFiled(
 
     case "SHIPMENTS_NOT_LOCKABLE":
       return { status: "REJECTED", reason: "SHIPMENTS_NOT_LOCKABLE" };
+
+    case "MEMBERS_NOT_PERIOD_COMPLETE":
+      return { status: "REJECTED", reason: "MEMBERS_NOT_PERIOD_COMPLETE" };
+
+    case "SHIPMENT_ALREADY_FILED":
+      return { status: "REJECTED", reason: "SHIPMENT_ALREADY_FILED" };
 
     case "INCOMPLETE":
       return { status: "REJECTED", reason: "INCOMPLETE" };

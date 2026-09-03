@@ -237,6 +237,15 @@ function filedMessageFor(
     case "INCOMPLETE":
       return "A fresh re-check at filing time found a member line with no calculation result -- refresh the draft and re-check ready.";
 
+    // 2026-09-03 (P14 remediation, 20260903220000). Both messages name
+    // the concrete next action, because both are recoverable states an
+    // ordinary period edit can produce -- not errors.
+    case "MEMBERS_NOT_PERIOD_COMPLETE":
+      return "The shipments in this declaration are no longer exactly the shipments in its reporting period -- one has moved period, or a new one has been added. Refresh the draft and re-check ready.";
+
+    case "SHIPMENT_ALREADY_FILED":
+      return "One or more member shipments have already been recorded as filed on another declaration. If this is a correction, create an amendment of that declaration instead.";
+
     default:
       return "Something went wrong recording this filing. Please try again.";
   }

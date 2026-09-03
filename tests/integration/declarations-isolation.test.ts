@@ -656,6 +656,15 @@ describe.skipIf(!localSupabaseReachable)(
         await seedShipment(
           `DECL-ISO-UNCALC-${runId}`,
           [],
+          // 2026-09-03 (P14 remediation, 20260903220000). Was the
+          // suite's default 2026, which made TWO declarations
+          // incoherent with their own reporting period once filing
+          // began checking: declarationMain (2026) named only
+          // shipmentOne and shipmentTwo while this third 2026 shipment
+          // existed, and declarationIncomplete (2024) named a 2026
+          // shipment. 2024 is this shipment's own declaration's year,
+          // so both are now exactly their period.
+          2024,
         );
 
       declarationMainId =
@@ -1522,14 +1531,21 @@ describe.skipIf(!localSupabaseReachable)(
           await seedShipment(
             `DECL-ISO-VOID-LIVE-${runId}`,
             ["10"],
-            2021,
+            // 2026-09-03 (P14 remediation, 20260903220000). Moved off
+            // 2021, which the forged-quantity test below also uses --
+            // this test's own comment says it wants a period "with
+            // nothing else contending", and it had not actually got one.
+            // Harmless until filing began checking that a declaration's
+            // members are exactly its period; then the two tests
+            // contaminated each other.
+            2018,
           );
 
         const shipmentToVoidId =
           await seedShipment(
             `DECL-ISO-VOID-CANCELLED-${runId}`,
             ["999"],
-            2021,
+            2018,
           );
 
         const { error: voidError } =
@@ -1553,7 +1569,7 @@ describe.skipIf(!localSupabaseReachable)(
         // else in this suite), so this is purely "what does the org's
         // 2021 period look like right now" with nothing else contending.
         const period =
-          { kind: "ANNUAL", year: 2021 } as never;
+          { kind: "ANNUAL", year: 2018 } as never;
 
         const facts =
           await computeDeclarationDraftFacts(
@@ -1635,7 +1651,13 @@ describe.skipIf(!localSupabaseReachable)(
 
         const declarationEmptiedId =
           await createDeclaration(
-            2020,
+            // 2026-09-03 (P14 remediation, 20260903220000). Was 2020,
+            // while all three member shipments are seeded above in
+            // 2019 -- so this declaration never described its own
+            // reporting period, and filing now says so. The test is
+            // about a member emptied of its only line, which is
+            // unaffected.
+            2019,
             [shipmentAId, shipmentBId, shipmentCId],
             "READY",
           );
