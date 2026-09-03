@@ -87,6 +87,33 @@ async function signUpAndOnboard(
   );
 }
 
+/**
+ * A generous per-test timeout, matching cross-org-sharing-journey.spec.ts,
+ * which this journey is shaped exactly like: two full organisation
+ * journeys in two browser contexts -- sign-up, onboarding, installation,
+ * emission data, evidence upload, verification, activation, sharing,
+ * acceptance, determination and calculation -- against a real dev server
+ * and a real Supabase.
+ *
+ * 2026-09-03 (P14.3). It had no timeout declaration at all and therefore
+ * inherited Playwright's 30s default, which is nowhere near enough. That
+ * went unnoticed because this spec is Storage-gated: it skipped on every
+ * developer host, and its first CI run failed at 30.1s on the initial
+ * attempt and both retries. Its two sibling journeys have carried an
+ * explicit budget from the start (importer-journey 180s,
+ * cross-org-sharing-journey 300s); this one was simply never given one,
+ * because nothing had ever run it long enough to find out.
+ *
+ * Not flakiness insurance: the same journey completes in about 66s
+ * against a remote hosted project, so the budget is roughly 4x headroom
+ * rather than a way to absorb a real hang.
+ */
+test.describe.configure(
+  {
+    timeout: 300_000,
+  },
+);
+
 test.describe(
   "actual-data determination: verified producer data -> shared -> used on a real shipment line",
   () => {

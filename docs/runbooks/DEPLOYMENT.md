@@ -556,7 +556,26 @@ exists only in CI is a recipe nobody can follow during an incident.
 4. Re-apply `seed.sql`. The deferred-migration dance drops base-table
    grants that the seed restores; skipping this leaves a database that
    passes migrations and fails every query.
+
+   Note the ordering, which is load-bearing rather than incidental:
+   `seed.sql` runs LAST and its blanket `grant all` would otherwise undo
+   every deliberate `revoke` the migrations made. On 2026-09-03 that is
+   exactly what it did -- CI caught seven security tests failing because
+   the seed had handed back write access to `calculation_results`,
+   EXECUTE on `record_calculation_result`, and TRUNCATE on every public
+   table. `seed.sql` now re-asserts those revokes at its end, so it
+   states the final intended posture rather than only the bootstrap. If
+   a future migration adds another revoke-based control, it has to be
+   added there too.
 5. `pnpm regulatory:verify` must report `RESULT: VALID`.
+6. Verify the security posture survived, rather than assuming it:
+
+   ```bash
+   node scripts/ops/compare-database-posture.mjs --check "<dsn>"
+   ```
+
+   `truncate_granted_to_api_roles` and `tables_without_insert_policy`
+   are the two checks that catch a re-granted surface.
 
 ## Related documents
 
