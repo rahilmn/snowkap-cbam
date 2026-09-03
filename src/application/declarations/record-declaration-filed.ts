@@ -48,6 +48,11 @@ export type RecordDeclarationFiledResult =
         // One of the member shipments is already frozen into another
         // FILED_RECORDED declaration that this one does not amend.
         | "SHIPMENT_ALREADY_FILED"
+        // 2026-09-04 (P14 owner decision 2, 20260904100000). A member
+        // line's newest calculation was produced by a superseded engine.
+        // Distinct from INCOMPLETE on purpose: the line HAS a result,
+        // and the remedy is to recalculate rather than to calculate.
+        | "CALCULATION_ENGINE_OUTDATED"
         | "INCOMPLETE"
         // The RPC call itself errored, or returned no row at all
         // (network/transport failure -- distinct from every named
@@ -216,6 +221,9 @@ export async function recordDeclarationFiled(
 
     case "SHIPMENT_ALREADY_FILED":
       return { status: "REJECTED", reason: "SHIPMENT_ALREADY_FILED" };
+
+    case "CALCULATION_ENGINE_OUTDATED":
+      return { status: "REJECTED", reason: "CALCULATION_ENGINE_OUTDATED" };
 
     case "INCOMPLETE":
       return { status: "REJECTED", reason: "INCOMPLETE" };

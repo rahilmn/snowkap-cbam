@@ -100,7 +100,12 @@ describe.skipIf(!localSupabaseReachable)(
             release_date: `${year}-06-01`,
             reporting_period_kind: "ANNUAL",
             reporting_period_year: year,
-            status: "READY",
+            // 2026-09-04 (P14 owner decision 1). Seeded DRAFT and
+            // promoted below, once the line exists: a READY shipment's
+            // lines are no longer editable, and a fixture that seeds
+            // the end state directly is asserting against a shape the
+            // product cannot produce.
+            status: "DRAFT",
           })
           .select("id")
           .single();
@@ -147,6 +152,16 @@ describe.skipIf(!localSupabaseReachable)(
 
       if (resultError) {
         throw new Error(`seed calculation failed: ${resultError.message}`);
+      }
+
+      const ready =
+        await serviceClient
+          .from("shipments")
+          .update({ status: "READY" })
+          .eq("id", shipment.id);
+
+      if (ready.error) {
+        throw new Error(`mark ready failed: ${ready.error.message}`);
       }
 
       return shipment.id as string;

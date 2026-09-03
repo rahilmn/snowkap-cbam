@@ -246,6 +246,12 @@ function filedMessageFor(
     case "SHIPMENT_ALREADY_FILED":
       return "One or more member shipments have already been recorded as filed on another declaration. If this is a correction, create an amendment of that declaration instead.";
 
+    // 2026-09-04 (P14 owner decision 2). Names the action, because this
+    // is a state ordinary work reaches -- a line calculated before an
+    // engine release and filed after it -- not an error.
+    case "CALCULATION_ENGINE_OUTDATED":
+      return "One or more lines were calculated by an earlier version of the calculation engine. Recalculate those lines, then record the filing -- the earlier results are kept for provenance.";
+
     default:
       return "Something went wrong recording this filing. Please try again.";
   }

@@ -11,6 +11,15 @@ import {
   type SupabaseClient,
 } from "@supabase/supabase-js";
 
+// 2026-09-04 (P14 owner decision 2). These fixtures used to hardcode
+// "1.1.0". Filing now refuses any calculation produced by a
+// superseded engine, so a hardcoded version silently turned every
+// filing assertion in this file into an assertion about the gate
+// instead. Bound to the constant: a bump moves the fixtures with it.
+import {
+  ENGINE_VERSION,
+} from "../../src/domain/calculations/types";
+
 import {
   computeDeclarationDraftFacts,
 } from "../../src/application/declarations/compute-declaration-draft-facts";
@@ -364,7 +373,7 @@ describe.skipIf(!localSupabaseReachable)(
               p_org_id: orgAId,
               p_line_id: line.id,
               p_calculated_by_user_id: ownerAId,
-              p_engine_version: "1.1.0",
+              p_engine_version: ENGINE_VERSION,
               p_parameter_datasets: [],
               p_quantity: "10",
               p_quantity_unit: "TONNES",
@@ -1242,8 +1251,12 @@ describe.skipIf(!localSupabaseReachable)(
           false,
         );
 
+        // Bound to the constant for the same reason the fixtures above
+        // are: this asserts that the snapshot records WHICH engine
+        // produced the results it froze, not that the engine is
+        // permanently at one version.
         expect(snapshot.provenance.engine_versions).toEqual(
-          ["1.1.0"],
+          [ENGINE_VERSION],
         );
 
         expect(snapshot.provenance.determination_methods).toEqual(
@@ -1682,18 +1695,62 @@ describe.skipIf(!localSupabaseReachable)(
         // (20260828150000) only excludes LOCKED/VOID parents, and
         // shipment C is still READY, so this is a genuinely permitted
         // action, not a privilege escalation.
-        const { error: deleteError } =
-          await clientMemberA
-            .from("shipment_lines")
-            .delete()
-            .eq(
-              "id",
-              cLines[0]?.id,
-            );
+        // 2026-09-04 (P14 owner decision 1). A READY shipment's lines
+        // are no longer editable, so this setup performs the audited
+        // reopen the product requires. The state it builds is still
+        // reachable -- an administrator may reopen a shipment, change
+        // it and mark it ready again -- and reaching it this way is
+        // what keeps this test about the FILING-time re-check rather
+        // than about the mutation wall, which
+        // tests/integration/ready-shipment-immutability.test.ts covers.
+        async function withShipmentReopened(
+          shipmentId: string,
+          mutate: () => Promise<void>,
+        ): Promise<void> {
+          const reopen =
+            await serviceClient
+              .from("shipments")
+              .update({ status: "DRAFT" })
+              .eq("id", shipmentId);
+
+          if (reopen.error) {
+            throw new Error(`reopen failed: ${reopen.error.message}`);
+          }
+
+          await mutate();
+
+          const reready =
+            await serviceClient
+              .from("shipments")
+              .update({ status: "READY" })
+              .eq("id", shipmentId);
+
+          if (reready.error) {
+            throw new Error(`re-ready failed: ${reready.error.message}`);
+          }
+        }
+
+        let deleteError: { message: string } | null = null;
+
+        await withShipmentReopened(
+          shipmentCId,
+          async () => {
+            const result =
+              await clientMemberA
+                .from("shipment_lines")
+                .delete()
+                .eq(
+                  "id",
+                  cLines[0]?.id,
+                );
+
+            deleteError = result.error;
+          },
+        );
 
         if (deleteError) {
           throw new Error(
-            `Failed to delete shipment C's own line: ${deleteError.message}`,
+            `Failed to delete shipment C's own line: ${(deleteError as { message: string }).message}`,
           );
         }
 
@@ -1826,7 +1883,7 @@ describe.skipIf(!localSupabaseReachable)(
                 org_id: orgAId,
                 line_id: line.id,
                 shipment_id: shipmentId,
-                engine_version: "1.1.0",
+                engine_version: ENGINE_VERSION,
                 // The forgery: one tonne, not ten.
                 quantity: "1",
                 quantity_unit: "TONNES",
@@ -1871,7 +1928,7 @@ describe.skipIf(!localSupabaseReachable)(
                 org_id: orgAId,
                 line_id: line.id,
                 shipment_id: shipmentId,
-                engine_version: "1.1.0",
+                engine_version: ENGINE_VERSION,
                 quantity: "1",
                 quantity_unit: "TONNES",
                 determination: determinationFrom(
@@ -1965,7 +2022,7 @@ describe.skipIf(!localSupabaseReachable)(
                 org_id: orgAId,
                 line_id: lineId,
                 shipment_id: shipmentId,
-                engine_version: "1.1.0",
+                engine_version: ENGINE_VERSION,
                 quantity: "10",
                 quantity_unit: "MWH",
                 determination: determinationFrom(
@@ -1997,7 +2054,7 @@ describe.skipIf(!localSupabaseReachable)(
                 org_id: orgAId,
                 line_id: lineId,
                 shipment_id: shipmentId,
-                engine_version: "1.1.0",
+                engine_version: ENGINE_VERSION,
                 quantity: "10",
                 quantity_unit: "MWH",
                 determination: determinationFrom(
@@ -2085,6 +2142,23 @@ describe.skipIf(!localSupabaseReachable)(
         // re-determined" scenario) rather than attaching recordB's
         // record to a line still declaring recordA's classification,
         // which the new check correctly refuses as a mismatch.
+        // 2026-09-04 (P14 owner decision 1). Wrapped in the audited
+        // reopen: a READY shipment's lines are no longer editable, so
+        // this setup does what the product now requires of a user who
+        // wants to change an approved shipment. The end state is
+        // identical and still reachable, and this test stays about the
+        // FILING-time re-check rather than about the mutation wall
+        // (tests/integration/ready-shipment-immutability.test.ts).
+        const reopenA =
+          await serviceClient
+            .from("shipments")
+            .update({ status: "DRAFT" })
+            .eq("id", shipmentId);
+
+        if (reopenA.error) {
+          throw new Error(`reopen failed: ${reopenA.error.message}`);
+        }
+
         const { error: redetermineError } =
           await clientOwnerA
             .from("shipment_lines")
@@ -2110,6 +2184,16 @@ describe.skipIf(!localSupabaseReachable)(
           throw new Error(
             `Failed to redetermine the line: ${redetermineError.message}`,
           );
+        }
+
+        const rereadyA =
+          await serviceClient
+            .from("shipments")
+            .update({ status: "READY" })
+            .eq("id", shipmentId);
+
+        if (rereadyA.error) {
+          throw new Error(`re-ready failed: ${rereadyA.error.message}`);
         }
 
         const { data } =
@@ -2207,6 +2291,23 @@ describe.skipIf(!localSupabaseReachable)(
         // regulatory classification round-trip), the same way the
         // "emptied member" test above manipulates shipment_lines
         // directly rather than going through removeLine.
+        // 2026-09-04 (P14 owner decision 1). Wrapped in the audited
+        // reopen: a READY shipment's lines are no longer editable, so
+        // this setup does what the product now requires of a user who
+        // wants to change an approved shipment. The end state is
+        // identical and still reachable, and this test stays about the
+        // FILING-time re-check rather than about the mutation wall
+        // (tests/integration/ready-shipment-immutability.test.ts).
+        const reopenB =
+          await serviceClient
+            .from("shipments")
+            .update({ status: "DRAFT" })
+            .eq("id", shipmentId);
+
+        if (reopenB.error) {
+          throw new Error(`reopen failed: ${reopenB.error.message}`);
+        }
+
         const { error: editError } =
           await clientOwnerA
             .from("shipment_lines")
@@ -2225,6 +2326,16 @@ describe.skipIf(!localSupabaseReachable)(
           throw new Error(
             `Failed to edit the line: ${editError.message}`,
           );
+        }
+
+        const rereadyB =
+          await serviceClient
+            .from("shipments")
+            .update({ status: "READY" })
+            .eq("id", shipmentId);
+
+        if (rereadyB.error) {
+          throw new Error(`re-ready failed: ${rereadyB.error.message}`);
         }
 
         const { data } =
