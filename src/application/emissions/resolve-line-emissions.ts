@@ -1,3 +1,7 @@
+import {
+  originScopeIsUnresolved,
+} from "../../domain/emissions/origin-scope";
+
 import type {
   SupabaseClient,
 } from "@supabase/supabase-js";
@@ -69,7 +73,14 @@ export type ResolveLineEmissionsRejectionReason =
   // hasAdminAccess gate elsewhere in this codebase (P10/P11 capability-
   // matrix hardening pass -- see docs/architecture/AUTHORIZATION_MATRIX.md's
   // "Capability enforcement" section).
-  | "CAPABILITY_NOT_HELD";
+  | "CAPABILITY_NOT_HELD"
+  // 2026-09-04 (owner decision 5). CBAM's territorial scope for this
+  // declared origin is not settled in this repository, so no value is
+  // produced for it. See src/domain/emissions/origin-scope.ts: this is
+  // a refusal, never a claim that CBAM does not apply. Fails closed, in
+  // the same direction as every other "no value is not a value of zero"
+  // rule here.
+  | "ORIGIN_SCOPE_UNRESOLVED";
 
 export type ResolveLineEmissionsResult =
   | { status: "DETERMINED"; line: ShipmentLine; resolution: DefaultValueResolutionResult }
@@ -197,6 +208,28 @@ async function performResolution(
     return {
       status: "REJECTED",
       reason: "ALREADY_DETERMINED",
+    };
+  }
+
+  // 2026-09-04 (owner decision 5). Checked here, between reading the
+  // line and asking the regulatory resolver for anything, because the
+  // question is whether this origin is IN SCOPE at all -- which is
+  // upstream of which value applies to it.
+  //
+  // Without this, an EU member state has no row in the dataset's
+  // country table, maps to UNLISTED, and R7 clause 1 resolves UNLISTED
+  // through the "_Other Countries and Territorie" row: the line gets a
+  // number, indistinguishable from an unlisted third country's. Whether
+  // that is correct is the open question, and producing a filable
+  // figure while it is open is the thing being stopped.
+  //
+  // The protected resolver is untouched. This is an application-layer
+  // precondition, exactly where docs/plans' own §5.7 said such a gate
+  // belongs.
+  if (originScopeIsUnresolved(line.origin_country)) {
+    return {
+      status: "REJECTED",
+      reason: "ORIGIN_SCOPE_UNRESOLVED",
     };
   }
 

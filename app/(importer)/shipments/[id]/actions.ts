@@ -116,6 +116,13 @@ function lineMessageFor(
     case "CAPABILITY_NOT_HELD":
       return "Your organization is not set up as a CBAM importer/declarant.";
 
+    // 2026-09-04 (owner decision 5). Says what is true and nothing
+    // more: the treatment is unresolved. It does NOT say CBAM does not
+    // apply -- that would be an exemption this repository has no source
+    // for, and inventing one is the same error as inventing a value.
+    case "ORIGIN_SCOPE_UNRESOLVED":
+      return "How CBAM applies to goods originating in the EU is not yet settled in this system, so no emissions value can be determined for this line and it cannot be included in a filing. Nothing about this line is wrong -- the scope rule is pending. Contact your administrator if you believe this origin is correct.";
+
     default:
       return "Something went wrong. Please try again.";
   }
@@ -133,6 +140,13 @@ function resolveEmissionsRejectionMessageFor(
 
     case "CAPABILITY_NOT_HELD":
       return "Your organization is not set up as a CBAM importer/declarant.";
+
+    // 2026-09-04 (owner decision 5). Says what is true and nothing
+    // more: the treatment is unresolved. It does NOT say CBAM does not
+    // apply -- that would be an exemption this repository has no source
+    // for, and inventing one is the same error as inventing a value.
+    case "ORIGIN_SCOPE_UNRESOLVED":
+      return "How CBAM applies to goods originating in the EU is not yet settled in this system, so no emissions value can be determined for this line and it cannot be included in a filing. Nothing about this line is wrong -- the scope rule is pending. Contact your administrator if you believe this origin is correct.";
 
     default:
       return "Something went wrong. Please try again.";

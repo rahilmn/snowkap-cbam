@@ -1,3 +1,7 @@
+import {
+  originScopeIsUnresolved,
+} from "../../domain/emissions/origin-scope";
+
 import type {
   SupabaseClient,
 } from "@supabase/supabase-js";
@@ -78,6 +82,13 @@ export type DetermineFromActualDataRejectionReason =
   // v10 validator has come to reject, and would suppress the grantor's
   // consumption audit event under a re-issued grant.
   | "ALREADY_DETERMINED_FROM_THIS_DATASET"
+  // 2026-09-04 (owner decision 5). CBAM's territorial scope for this
+  // declared origin is not settled in this repository, so no value is
+  // produced for it. See src/domain/emissions/origin-scope.ts: this is
+  // a refusal, never a claim that CBAM does not apply. Fails closed, in
+  // the same direction as every other "no value is not a value of zero"
+  // rule here.
+  | "ORIGIN_SCOPE_UNRESOLVED"
   | "EMISSION_DATA_NOT_FOUND"
   | "DATA_INTEGRITY_ERROR"
   | "SHIPMENT_NOT_EDITABLE"
@@ -126,6 +137,9 @@ export type DetermineFromActualDataResult =
 interface LineForDetermination {
   org_id: string;
   cn_code: string;
+  // 2026-09-04 (owner decision 5). Read solely so the scope gate below
+  // can refuse; the ACTUAL computation itself never consults origin.
+  origin_country: string;
   emission_determination: EmissionDetermination | null;
 }
 
@@ -165,7 +179,7 @@ async function fetchLineForDetermination(
     await supabase
       .from("shipment_lines")
       .select(
-        "org_id, cn_code, emission_determination",
+        "org_id, cn_code, origin_country, emission_determination",
       )
       .eq("id", lineId)
       .maybeSingle();
@@ -191,6 +205,23 @@ async function fetchLineForDetermination(
     return {
       status: "REJECTED",
       reason: "LINE_NOT_FOUND",
+    };
+  }
+
+  // 2026-09-04 (owner decision 5). The ACTUAL path never reads the
+  // line's origin when it computes -- an actual figure comes from the
+  // operator's own measurement, not from a country table -- which is
+  // exactly why this gate has to be stated here as well as on the
+  // DEFAULT path. Otherwise an origin whose scope treatment is
+  // unresolved would simply be determined the other way and filed.
+  //
+  // Scope is a question about whether the good is in the regime at all.
+  // It does not become settled by choosing a different method of
+  // valuing it.
+  if (originScopeIsUnresolved(line.origin_country)) {
+    return {
+      status: "REJECTED",
+      reason: "ORIGIN_SCOPE_UNRESOLVED",
     };
   }
 
@@ -601,6 +632,12 @@ async function performDetermination(
       evidence_file_ids: record.evidence_file_ids,
       sharing_grant_id: sharingGrantId,
       record_provenance: installationProvenance,
+
+      // 2026-09-04 (owner decision 7). The period this emissions data
+      // covers, frozen with it -- so the calculation can still say what
+      // it was computed from after the record is superseded, discarded,
+      // or read through a grant that is later revoked.
+      dataset_reporting_period: record.period,
     };
 
   const determination: EmissionDetermination =

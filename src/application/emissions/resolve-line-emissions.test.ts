@@ -296,7 +296,10 @@ describe(
     );
 
     it(
-      "resolves via the fallback territory for an UNLISTED (e.g. EU) origin country",
+      "resolves via the fallback territory for a genuinely UNLISTED third " +
+        "country (Kiribati) -- R7 clause 1, unchanged by owner decision 5, " +
+        "which narrows only which ORIGINS reach the resolver and not what " +
+        "the resolver does with the ones that do",
       async () => {
         const fallbackRecord =
           record(
@@ -314,7 +317,7 @@ describe(
             cn_code: "25232100",
             cn_code_level: "CN8",
             goods_description: null,
-            origin_country: "DE",
+            origin_country: "KI",
             net_mass_tonnes: "10.5",
             quantity_mwh: null,
             production_route_name: null,
@@ -327,7 +330,7 @@ describe(
             mockSupabase(
               {
                 lineFetchResult: {
-                  data: { ...lineRow, origin_country: "DE" },
+                  data: { ...lineRow, origin_country: "KI" },
                   error: null,
                 },
                 updateResult: { data: updatedRow, error: null },
@@ -351,6 +354,53 @@ describe(
           result.status === "DETERMINED" ? result.resolution.reason : null,
         ).toBe(
           "OTHER_COUNTRIES_FALLBACK",
+        );
+      },
+    );
+
+    it(
+      "refuses an EU-origin line outright rather than resolving it through " +
+        "the fallback (owner decision 5) -- before this, an EU member state " +
+        "had no row in the country table, mapped to UNLISTED, and R7 clause 1 " +
+        "produced a number indistinguishable from an unlisted third " +
+        "country's, which was then persistable and filable",
+      async () => {
+        const fallbackRecord =
+          record(
+            {
+              origin_country_name: "_Other Countries and Territorie",
+            },
+          );
+
+        const result =
+          await determineLineEmissions(
+            mockSupabase(
+              {
+                lineFetchResult: {
+                  data: { ...lineRow, origin_country: "DE" },
+                  error: null,
+                },
+                updateResult: { data: null, error: null },
+              },
+            ),
+            mockRepository(
+              [fallbackRecord],
+            ),
+            mockMapper(
+              { status: "UNLISTED" },
+            ),
+            memberContext(),
+            lineId,
+          );
+
+        expect(result.status).toBe(
+          "REJECTED",
+        );
+
+        expect(
+          result.status === "REJECTED" ? result.reason : null,
+        ).toBe(
+          "ORIGIN_SCOPE_UNRESOLVED",
         );
       },
     );
