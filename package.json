@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "postbuild": "node scripts/build/copy-standalone-assets.mjs",
+    "postbuild": "node scripts/build/copy-standalone-assets.mjs && node scripts/build/assert-clean-production-artifact.mjs",
     "start": "node .next/standalone/server.js",
     "test": "vitest run",
     "test:watch": "vitest",

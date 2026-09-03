@@ -12,8 +12,25 @@ import {
   existsSync,
 } from "node:fs";
 
+import {
+  resolveDistDir,
+} from "./dist-dir.mjs";
+
+// 2026-09-03 (P14). Resolved, not hardcoded: a build carrying the E2E
+// rate-limit bypass writes .next-e2e (see dist-dir.mjs).
+//
+// BOTH paths below depend on it, and that is easy to get wrong. Next
+// names the INNER directory of the standalone tree after distDir too --
+// the emitted server.js resolves its assets at
+// <distDir>/standalone/<distDir>/static. Parameterising only the outer
+// directory would leave every chunk, stylesheet and font 404ing under
+// the E2E server, which surfaces as an unstyled, non-hydrating page and
+// reads like flake rather than a build error.
+const DIST_DIR =
+  resolveDistDir();
+
 const STANDALONE_DIR =
-  ".next/standalone";
+  `${DIST_DIR}/standalone`;
 
 if (!existsSync(STANDALONE_DIR)) {
   throw new Error(
@@ -22,8 +39,8 @@ if (!existsSync(STANDALONE_DIR)) {
 }
 
 cpSync(
-  ".next/static",
-  `${STANDALONE_DIR}/.next/static`,
+  `${DIST_DIR}/static`,
+  `${STANDALONE_DIR}/${DIST_DIR}/static`,
   { recursive: true },
 );
 
@@ -36,6 +53,6 @@ if (existsSync("public")) {
 }
 
 console.log(
-  "Copied .next/static (and public/, if present) into " +
+  `Copied ${DIST_DIR}/static (and public/, if present) into ` +
     STANDALONE_DIR,
 );

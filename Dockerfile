@@ -45,6 +45,14 @@ ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
 RUN pnpm build
 
+# 2026-09-03 (P14). postbuild already runs this; --require-artifact
+# additionally refuses to pass when .next/standalone does not exist, so
+# the image can never be built from a build that produced nothing
+# deployable -- which is exactly what a build carrying the E2E
+# rate-limit bypass produces, since next.config.ts sends it to
+# .next-e2e instead.
+RUN node scripts/build/assert-clean-production-artifact.mjs --require-artifact
+
 # ---- run: minimal runtime image --------------------------------------------
 FROM node:${NODE_VERSION}-slim AS run
 WORKDIR /app
@@ -60,6 +68,11 @@ RUN groupadd --system --gid 1001 nodejs \
 # scripts/build/copy-standalone-assets.mjs (run as part of `pnpm build`
 # via the postbuild script), matching Next's documented standalone
 # deployment pattern.
+# The path here is deliberately HARDCODED to .next and must not be
+# resolved from scripts/build/dist-dir.mjs. A build made with the E2E
+# rate-limit bypass writes .next-e2e, so this COPY fails outright rather
+# than quietly shipping a server with rate limiting disabled. That
+# fail-closed behaviour is the point; do not "tidy" it away.
 COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 
 USER nextjs

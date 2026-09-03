@@ -4,6 +4,10 @@ node_modules/
 # Build output
 dist/
 .next/
+# Playwright's own build output. next.config.ts redirects a build
+# carrying the E2E rate-limit bypass here so it can never land in the
+# deployable .next -- see scripts/build/dist-dir.mjs.
+.next-e2e/
 next-env.d.ts
 *.tsbuildinfo
 

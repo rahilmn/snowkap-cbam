@@ -8,6 +8,10 @@ import {
   devices,
 } from "@playwright/test";
 
+import {
+  E2E_DIST_DIR,
+} from "./scripts/build/dist-dir.mjs";
+
 /**
  * Minimal, dependency-free ".env"-shape parser: KEY=VALUE per line,
  * '#'-prefixed and blank lines skipped, no interpolation/multiline
@@ -174,7 +178,18 @@ export default defineConfig(
     ],
 
     webServer: {
-      command: "pnpm build && pnpm start",
+      // 2026-09-03 (P14). Starts the artifact the build on the left of
+      // the && just produced. next.config.ts redirects a bypass build
+      // to .next-e2e, so `pnpm start` -- which stays permanently pinned
+      // to the deployable .next -- would start the wrong tree, or a
+      // stale one, or nothing at all.
+      //
+      // Deliberately NOT solved by making `pnpm start` resolve the
+      // directory from the environment: that would hand a developer who
+      // happens to have the bypass variable exported a rate-limit-free
+      // server from a plain `pnpm start`, which is the exact inversion
+      // of the invariant this change exists to create.
+      command: `pnpm build && node ${E2E_DIST_DIR}/standalone/server.js`,
       url: "http://localhost:3000",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

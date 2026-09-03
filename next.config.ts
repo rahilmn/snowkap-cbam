@@ -2,6 +2,26 @@ import type {
   NextConfig,
 } from "next";
 
+import {
+  isE2eBypassBuild,
+  resolveDistDir,
+} from "./scripts/build/dist-dir.mjs";
+
+/**
+ * 2026-09-03 (P14). Whether this build carries the E2E rate-limit
+ * bypass, decided ONCE and used twice below -- for `distDir` and for
+ * the `env` block's inlined flag.
+ *
+ * Deliberately one const rather than two copies of the same
+ * expression: two expressions that agree today are exactly how this
+ * drifts into a build that writes the deployable directory while
+ * carrying the bypass. See scripts/build/dist-dir.mjs, which also
+ * explains why the variable read here is the NEXT_PUBLIC_ one and not
+ * the key emitted below.
+ */
+const builtWithE2eRateLimitBypass =
+  isE2eBypassBuild();
+
 const isProduction =
   process.env.NODE_ENV === "production";
 
@@ -195,6 +215,14 @@ const nextConfig: NextConfig = {
   // that doesn't need the full node_modules tree at runtime.
   output: "standalone",
 
+  // 2026-09-03 (P14). A build carrying the E2E rate-limit bypass writes
+  // .next-e2e, which is never deployed and which the Dockerfile does
+  // not copy -- so a test run cannot leave a bypass-carrying artifact
+  // in the deployable directory. See scripts/build/dist-dir.mjs for the
+  // full reasoning, including the fail-closed property this gives the
+  // Dockerfile's hardcoded COPY.
+  distDir: resolveDistDir(),
+
   // GIT_SHA is baked in at build time (see Dockerfile) and surfaced on
   // the System/status screen and in structured logs for deployment
   // visibility (docs/plans/MASTER_PLAN.md §32).
@@ -234,7 +262,7 @@ const nextConfig: NextConfig = {
     // as a live `process.env` lookup in the server bundle, which would
     // have given exactly the false confidence this is meant to remove.
     E2E_RATE_LIMIT_BYPASS_BUILD:
-      process.env.NEXT_PUBLIC_E2E_RATE_LIMIT_BYPASS_BUILD === "true"
+      builtWithE2eRateLimitBypass
         ? "true"
         : "",
   },
