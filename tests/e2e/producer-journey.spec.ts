@@ -97,7 +97,10 @@ test.describe(
         // encoding one environment's limitation as the expected result.
         const storageAvailable =
           await request
-            .get("http://127.0.0.1:54321/storage/v1/bucket", { timeout: 10_000 })
+            .get(
+              `${process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "http://127.0.0.1:54321"}/storage/v1/bucket`,
+              { timeout: 10_000 },
+            )
             .then((r) => r.status() !== 503)
             .catch(() => false);
 

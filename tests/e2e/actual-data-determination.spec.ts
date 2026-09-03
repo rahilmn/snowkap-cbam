@@ -107,10 +107,23 @@ test.describe(
         // Probed live, never assumed from an env var. On the developer
         // host kong answers 503 for the storage service; in CI it
         // answers normally because the workflow enables it.
+        // 2026-09-03 (P14.2). Probes the Storage the APPLICATION is
+        // actually configured against, rather than assuming localhost.
+        // The URL was hard-coded, which silently made this a
+        // local-only probe: pointed at a Storage-capable hosted
+        // project, it would have reported Storage unavailable and taken
+        // the skip while the app underneath had working Storage all
+        // along. Default unchanged, so local and CI behave exactly as
+        // before.
+        const supabaseUrl =
+          process.env.NEXT_PUBLIC_SUPABASE_URL
+          ?? process.env.SUPABASE_URL
+          ?? "http://127.0.0.1:54321";
+
         const storageAvailable =
           await request
             .get(
-              "http://127.0.0.1:54321/storage/v1/bucket",
+              `${supabaseUrl}/storage/v1/bucket`,
               { timeout: 10_000 },
             )
             .then((response) => response.status() !== 503)
@@ -457,6 +470,26 @@ test.describe(
           await test.step(
             "importer: the shared dataset is previewed in full before it is used",
             async () => {
+              // 2026-09-03 (P14.2). This step used to click the shell
+              // nav directly, and could never have worked: the previous
+              // step leaves the importer on /accept-invitation, which
+              // renders a standalone centred card and NO app shell --
+              // so there is no navigation "Primary" landmark on the
+              // page and the click waited until the test timed out.
+              //
+              // Never caught before because this spec is Storage-gated:
+              // it skipped on every developer host and CI has not run on
+              // this branch, so it had never executed to this line in
+              // any environment. Found by running it for the first time
+              // against a Storage-capable hosted project.
+              //
+              // Returning to the app first is what a real user does --
+              // /accept-invitation's own copy points them back to the
+              // dashboard.
+              await importerPage.goto("/");
+
+              await expect(importerNav).toBeVisible();
+
               await importerNav.getByRole(
                 "link",
                 { name: "Shipments", exact: true },
@@ -528,15 +561,27 @@ test.describe(
                 importerPage.getByText("Selected dataset"),
               ).toBeVisible();
 
+              // exact: true because the option in the dataset <select>
+              // also carries the producer's name, so a substring match
+              // resolves to two elements and fails strict mode. The
+              // assertion is about the PREVIEW's Source row -- the <dd>
+              // -- which is the thing that has to be visible before the
+              // importer commits.
               await expect(
                 importerPage.getByText(
                   `Shared by ${producerOrgName}`,
+                  { exact: true },
                 ),
               ).toBeVisible();
 
+              // exact: true for the same reason as the Source row above
+              // -- the option in the dataset <select> also carries the
+              // figure, so a substring match resolves to two elements.
+              // This assertion is about the preview's Direct row.
               await expect(
                 importerPage.getByText(
                   `${directSpecific} ${emissionUnit}`,
+                  { exact: true },
                 ),
               ).toBeVisible();
 
