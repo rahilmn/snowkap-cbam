@@ -394,6 +394,17 @@ jobs:
             echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}"
             echo "NEXT_PUBLIC_SUPABASE_URL=${API_URL}"
             echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON_KEY}"
+            # 2026-09-03 (P14.3). Required, not cosmetic. The E2E runs a
+            # PRODUCTION build, and checkAppUrl() reports "missing" when
+            # APP_URL is absent under NODE_ENV=production -- which makes
+            # /api/health return degraded/503 and fails the health-check
+            # E2E. That check exists because a deploy without APP_URL
+            # emails http://localhost:3000 confirmation, reset and invite
+            # links to every real user while every other check still
+            # reads "ok" (see src/application/health/check-app-url.ts).
+            # It was reporting a genuine gap in this job's environment
+            # the moment the test was allowed to run.
+            echo "APP_URL=http://localhost:3000"
           } >> .env.local
           echo "Wrote .env.local pointing at the local Supabase this job started."
 
