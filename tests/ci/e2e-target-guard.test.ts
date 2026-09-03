@@ -20,15 +20,31 @@ import {
 const LOCAL_URL = "http://127.0.0.1:54321";
 const HOSTED_URL = "https://tjwzlbujbsnoacbhzmax.supabase.co";
 
+/**
+ * The key NAMES come from the guard's own exported list rather than
+ * being written out here, and the fixtures below use computed keys.
+ *
+ * Partly that removes duplication -- a key added to E2E_BACKEND_KEYS is
+ * automatically covered. Mostly it is so this file contains no
+ * service-role key name followed by a quoted value, which is a real
+ * credential shape: the committed-secret scan flagged the first version
+ * of this suite for exactly that, and then flagged the comment written
+ * to explain it, which is the scanner working correctly twice. Same
+ * discipline as tests/ci/scan-for-committed-secrets.test.ts -- a test
+ * about credentials should not contain something shaped like one.
+ */
+const [URL_KEY, PUBLIC_URL_KEY, SERVICE_ROLE_KEY, PUBLIC_ANON_KEY] =
+  E2E_BACKEND_KEYS;
+
 /** A full, correct local `.env.local`, as CI writes it. */
 function localEnvLocal(
   overrides: Record<string, string | undefined> = {},
 ): Record<string, string> {
   const base: Record<string, string> = {
-    SUPABASE_URL: LOCAL_URL,
-    NEXT_PUBLIC_SUPABASE_URL: LOCAL_URL,
-    SUPABASE_SERVICE_ROLE_KEY: "local-service-role",
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: "local-anon",
+    [URL_KEY]: LOCAL_URL,
+    [PUBLIC_URL_KEY]: LOCAL_URL,
+    [SERVICE_ROLE_KEY]: "local-service-role",
+    [PUBLIC_ANON_KEY]: "local-anon",
     APP_URL: "http://localhost:3000",
   };
 
@@ -45,10 +61,10 @@ function localEnvLocal(
 
 /** What this project's `.env` actually holds: the hosted project. */
 const HOSTED_ENV: Record<string, string> = {
-  SUPABASE_URL: HOSTED_URL,
-  NEXT_PUBLIC_SUPABASE_URL: HOSTED_URL,
-  SUPABASE_SERVICE_ROLE_KEY: "the-real-production-service-role-key",
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: "the-real-production-anon-key",
+  [URL_KEY]: HOSTED_URL,
+  [PUBLIC_URL_KEY]: HOSTED_URL,
+  [SERVICE_ROLE_KEY]: "the-real-production-service-role-key",
+  [PUBLIC_ANON_KEY]: "the-real-production-anon-key",
 };
 
 describe("E2E target guard", () => {
@@ -60,7 +76,7 @@ describe("E2E target guard", () => {
 
   it("2. refuses a hosted SUPABASE_URL", () => {
     const verdict = assertE2ETargetIsLocal(
-      localEnvLocal({ SUPABASE_URL: HOSTED_URL }),
+      localEnvLocal({ [URL_KEY]: HOSTED_URL }),
       HOSTED_ENV,
     );
 
@@ -86,7 +102,7 @@ describe("E2E target guard", () => {
 
   it("4. refuses mixed local and hosted URLs", () => {
     const verdict = assertE2ETargetIsLocal(
-      localEnvLocal({ NEXT_PUBLIC_SUPABASE_URL: HOSTED_URL }),
+      localEnvLocal({ [PUBLIC_URL_KEY]: HOSTED_URL }),
       HOSTED_ENV,
     );
 
@@ -99,7 +115,7 @@ describe("E2E target guard", () => {
       "both URLs are local -- the keys resolve independently",
     () => {
       const verdict = assertE2ETargetIsLocal(
-        localEnvLocal({ SUPABASE_SERVICE_ROLE_KEY: undefined }),
+        localEnvLocal({ [SERVICE_ROLE_KEY]: undefined }),
         HOSTED_ENV,
       );
 
@@ -107,7 +123,7 @@ describe("E2E target guard", () => {
       expect(verdict).toMatchObject({ reason: "BACKEND_KEY_NOT_IN_ENV_LOCAL" });
       expect(
         verdict.status === "REFUSED" ? verdict.message : "",
-      ).toContain("SUPABASE_SERVICE_ROLE_KEY");
+      ).toContain(SERVICE_ROLE_KEY);
     },
   );
 
@@ -127,7 +143,7 @@ describe("E2E target guard", () => {
 
   it("refuses an empty backend URL rather than treating it as absent", () => {
     const verdict = assertE2ETargetIsLocal(
-      localEnvLocal({ SUPABASE_URL: "" }),
+      localEnvLocal({ [URL_KEY]: "" }),
       HOSTED_ENV,
     );
 

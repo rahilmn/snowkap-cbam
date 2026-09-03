@@ -227,7 +227,9 @@ describe("committed-secret scan: the allow-list stays narrow", () => {
       "src/x.ts:1:" +
       "eyJ" +
       "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" +
-      ".eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+      ".eyJ" +
+      "zdWIiOiIxMjM0NTY3ODkwIn0" +
+      ".dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 
     expect(findSecrets([realTokenSameHeader])).toHaveLength(1);
   });

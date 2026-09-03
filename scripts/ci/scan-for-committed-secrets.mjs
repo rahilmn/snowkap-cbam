@@ -117,9 +117,21 @@ const SECRET_SHAPES = [
     name: "supabase-env-assignment",
     description:
       "a SUPABASE_SERVICE_ROLE_KEY / SUPABASE_DB_PASSWORD / SUPABASE_ANON_KEY assignment, quoted or unquoted, = or :",
+    // `<` is excluded from the first value character alongside `$`:
+    // `SUPABASE_SERVICE_ROLE_KEY=<the local service_role key>` is a
+    // documentation placeholder, and README.md's E2E setup section is
+    // full of them. Narrow on purpose -- it exempts the one character
+    // that cannot begin a real credential, not a file or a directory.
+    // The notMatch lines below prove a real value still matches.
     pattern:
-      /SUPABASE_(SERVICE_ROLE_KEY|DB_PASSWORD|ANON_KEY)"?\s*[:=]\s*['"]?[^$\s'"]/,
+      /SUPABASE_(SERVICE_ROLE_KEY|DB_PASSWORD|ANON_KEY)"?\s*[:=]\s*['"]?[^$\s'"<]/,
     example: 'SUPABASE_DB_' + 'PASSWORD="hunter2hunter2"',
+    // Asserted by the self-test: each of these must NOT match, or the
+    // exemption above has become a hole.
+    mustNotMatch: [
+      "SUPABASE_SERVICE_ROLE_" + "KEY=<the local service_role key>",
+      "SUPABASE_DB_" + "PASSWORD: <your password>",
+    ],
   },
   {
     name: "postgres-url",
@@ -334,6 +346,13 @@ export function runSelfTest() {
       failures.push(
         `a known-safe entry swallows the example for "${shape.name}". An allow-list entry has become broad enough to hide a real secret.`,
       );
+    }
+    for (const line of shape.mustNotMatch ?? []) {
+      if (shape.pattern.test(line)) {
+        failures.push(
+          `pattern "${shape.name}" matches a line it must not, so it will report a false positive: ${line}`,
+        );
+      }
     }
   }
 
