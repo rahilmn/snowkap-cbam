@@ -3497,3 +3497,278 @@ This is a verdict on the candidate, not on the environment. Three things
 remain unverified rather than verified-good — the hosted Auth settings,
 CI on this SHA, and the Storage-backed journey — and the independent
 review inherits them as named above, not as silence.
+
+---
+
+## 27. AUTH-1 closed at the credential (2026-09-04)
+
+§26 reported AUTH-1 closed. It was not. The adversarial pass that
+followed reproduced a full account takeover against that candidate, and
+this section is the remediation and the correction.
+
+### BLOCKER AUTH-1
+
+```
+Before:
+  The browser's session cookie was @supabase/ssr's own -- a base64 blob
+  that parsed straight into { access_token, refresh_token, user }.
+
+    victim signs in through the UI
+      -> cookie sb-<ref>-auth-token, httpOnly, 2635 bytes
+      -> parses to the raw provider session
+      -> PUT /auth/v1/user {"password": ...}, Bearer <access_token>
+         -> 200
+      -> victim's password no longer signs in; the attacker's does
+
+  It needed nothing else. Measured: accepted with the anon key, with NO
+  apikey header at all, and with the stolen user token used as the
+  apikey. The stolen refresh_token separately minted fresh sessions on
+  demand, so a shorter token lifetime would have mitigated nothing.
+
+  The current-password proof was never defeated. It was BYPASSED: it
+  guards this product's endpoints, and the attacker did not need them.
+
+After (measured, real browser, real stolen cookie jar):
+  cookies held            sb_app_session only -- httpOnly, 43 chars
+  access_token in them    none, under any decoding attempted
+  refresh_token in them   none
+  used as Bearer token    403 bad_jwt
+  used as Bearer, no key  403 bad_jwt
+  used as apikey          401 no_authorization
+  victim's password       still works
+  attacker's password     does not
+  VERDICT                 takeover blocked
+```
+
+### Session architecture
+
+```
+Browser        sb_app_session=<32 random bytes, base64url>
+                 httpOnly, sameSite lax, secure in production
+                 |
+                 |  opaque -- means nothing to Supabase
+                 v
+Snowkap server   public.app_sessions
+                   token_hash                 SHA-256 of the cookie
+                   user_id                    NOT NULL
+                   sealed_provider_session    AES-256-GCM ciphertext
+                   expires_at / revoked_at / last_seen_at
+                 |
+                 |  service role only
+                 v
+Supabase Auth
+```
+
+**Browser credential.** An opaque identifier and nothing else. It is not
+a JWT, carries no structure, and is not derived from anything Supabase
+issued.
+
+**Server-side credential location.** `public.app_sessions`, sealed under
+a key derived from `APP_SESSION_SECRET`, which never reaches the
+database. The cookie itself is never stored — only its SHA-256 — so a
+read of the table by any route yields nothing replayable. RLS on, zero
+policies, every privilege revoked from `anon` and `authenticated`, ten
+invariants registered so the revoke survives seed.sql's blanket grants
+and a restore.
+
+**How.** `createServerClient` reaches the browser through one interface
+— `getAll`/`setAll` — and nothing in `@supabase/ssr` requires those to
+be cookies. They are the store now, so the library works unchanged while
+the bytes it believes it is writing to a cookie never leave the server.
+Only the auth-token family is routed; the PKCE code-verifier stays in
+the browser, being useless without the one-time code that arrives in the
+user's own email.
+
+**Refresh flow.** Server-side, in middleware and in Server Actions. A
+refreshed token is written to the store, never to the browser, and the
+opaque identifier is unchanged — so a refresh sets no cookie at all. One
+behaviour improved as a side effect: a Server Component can now persist
+a refreshed token, because a store write is a database write rather than
+the cookie write Next.js forbids there.
+
+**Revocation flow.** Deleting the provider session is the revocation:
+`@supabase/ssr` expresses sign-out by asking the adapter to blank those
+cookies, and the adapter revokes the row. On the error path sign-out
+revokes on the server FIRST and clears the cookie second — the reverse
+order would leave the session alive for anyone holding a copy taken a
+moment earlier. A password change additionally ends the user's other
+*application* sessions immediately, rather than waiting up to an hour
+for the provider's refresh tokens to lapse.
+
+### Security proof — direct-auth bypass
+
+Required result: **a stolen browser credential cannot authenticate
+directly to Supabase Auth.** Proven with an actual browser cookie, not
+by source inspection:
+
+| attempt | result |
+|---|---|
+| parse cookie jar for `access_token` / `refresh_token` / any JWT | nothing, under raw, `base64-`, bare-base64 and percent-decoding |
+| `sb_app_session` as `Authorization: Bearer` + anon key | `403 bad_jwt` |
+| `sb_app_session` as `Authorization: Bearer`, no apikey | `403 bad_jwt` |
+| `sb_app_session` as `apikey` | `401 no_authorization` |
+| victim signs in with their real password afterwards | `200` |
+
+**The residual, stated rather than glossed.** A stolen opaque cookie
+still authenticates to *this application* as the user. That is inherent
+to any session cookie and is deliberately not claimed to be fixed. What
+changed is that the credential no longer works anywhere else, so the
+operations it can reach are ours to gate — which is what the
+current-password proof does.
+
+### Password change
+
+The proof is unchanged and still mandatory. Re-verified after the
+architecture change:
+
+| case | result |
+|---|---|
+| fresh stolen session, no current password | REFUSED |
+| aged stolen session, no current password | REFUSED, `auth.users.updated_at` untouched |
+| current-password field deleted from the DOM, submitted | REFUSED |
+| `/reset-password` with an ordinary session | REFUSED, form not rendered |
+| correct current password | CHANGED |
+| old password afterwards | rejected |
+| standing session afterwards | still valid |
+| other sessions | evicted at the provider and in the application |
+
+### Previous P14 controls
+
+Every one re-run at this SHA, none modified:
+
+| control | status |
+|---|---|
+| Calculation trusted-write boundary | GREEN |
+| READY immutability / filing population (FILE-1) | GREEN |
+| Current-engine-version filing gate | GREEN |
+| Evidence authority | GREEN |
+| Emission verification lifecycle | GREEN |
+| Seed privilege posture | GREEN — invariant backstop holds after blanket grants |
+| TRUNCATE posture | GREEN |
+| Posture comparator | GREEN — see below |
+| EU-origin fail-closed | GREEN |
+| D1 explicit limitation | GREEN, unchanged |
+| AUTH-2 callback consent | GREEN — source guards and browser tests |
+
+**The comparator needed work rather than a pass.** The session store
+broke two of its checks, and both were right on the evidence they had:
+`app_sessions` has RLS with zero policies and no INSERT policy, which is
+exactly the restore casualty those checks exist to catch. For this one
+table denying everything is the specification. It is excluded from both
+— and deliberately NOT given a policy to quiet them, because a policy
+would advertise a client-reachable path that must not exist. A new check
+`session_store_is_sealed_off` asserts the intended state positively and
+fails if the table is missing, has RLS off, carries any policy, or hands
+any privilege to an API role. Net coverage is higher than before, not
+lower.
+
+### Gates
+
+```
+typecheck:              PASS
+unit/integration:       151 files, 1764 tests, 1764 passed, 0 failed, 0 skipped
+targeted auth suite:    15 files, 121 tests, 121 passed, 0 skipped
+E2E:                    63 passed, 0 failed, 0 flaky, 9 skipped
+build:                  PASS -- artifact assertion OK
+posture comparator:     RESULT: POSTURE MATCHES
+secret scan:            PASS (self-test both directions)
+fresh DB + seed:        83 applied, 2 skipped (pipeline-dependent), 0 failed
+```
+
+**Artifact audit** (not a single grep for one known token):
+
+```
+env files in .next/standalone        0
+E2E bypass in .next/standalone       0
+JWT-shaped literals in .next/static  0
+APP_SESSION_SECRET in .next/static   0
+APP_SESSION_SECRET in .next/standalone  0
+service-role key in .next/static     0
+```
+
+`access_token` / `refresh_token` do appear once in browser JS, as
+parameter *names* in `/auth/callback`'s hash reader (`n.get("access_token")`)
+— pre-existing, inherent to the implicit-link flow, not values. The
+secret appears only in local turbopack build caches (`.next/cache`,
+`.next/dev/cache`), which are gitignored and not part of the deployable
+tree; confirmed absent from both `static/` and `standalone/`.
+
+**Skips, separated.** The 9 E2E skips are the same set as §25 and §26,
+with none added: **8** are the deliberate desktop-only journeys on
+`mobile-chromium`; the **9th, on chromium, is functional and did not
+execute** — the Storage-backed actual-data journey, still **ENVIRONMENT
+BLOCKED** by `[storage] enabled = false` and the known
+container-unhealthy failure. Not counted as passed.
+
+### Test integrity
+
+Every claim above is regression-tested, and the tests were shown to be
+load-bearing rather than assumed to be:
+
+- Removing the credential boundary (`isProviderSessionCookie` → always
+  false) fails **2 unit guards** and **3 of the 4 browser tests**,
+  including "the stolen session cookie cannot authenticate to Supabase
+  Auth at all". Restoring it turns them green.
+- The comparator's new check was broken three independent ways on a
+  disposable database — granting SELECT to `authenticated`, adding a
+  policy, disabling RLS — and each failed naming the exact offending
+  row; each restore passed again. The database was dropped afterwards.
+- The store suite proves sealing (the row contains neither plaintext nor
+  the cookie), immediate revocation, expiry, revoke-others sparing the
+  session in hand, secret rotation signing people out rather than
+  leaking, and that neither `anon` nor an authenticated member can read
+  or forge a row.
+
+### Hosted configuration
+
+```
+secure_password_change:  HOSTED CONFIGURATION UNVERIFIED
+```
+
+Kept as `true` locally and retained as defence in depth. It was not
+disabled to make anything pass. The hosted value has still not been
+read, and this section does not claim otherwise.
+
+### New deployment prerequisite
+
+`APP_SESSION_SECRET` is **required in every environment**, including
+local dev and CI. The application refuses to hold a session without it,
+deliberately — a silent fallback would store provider credentials in the
+clear in whichever environment happened to be missing the value.
+Documented in `.env.example` and `docs/architecture/ENVIRONMENT.md`; CI
+generates one per run. **Production must have it set before deploy, or
+sign-in fails closed.**
+
+### Remaining items
+
+**Environment blocked**
+- The Storage-backed actual-data journey must execute in CI.
+- CI has not run: this SHA is not pushed. The workflow now needs
+  `APP_SESSION_SECRET`, which is added but has not executed.
+- `regulatory:verify` against production.
+- Hosted Auth settings unread.
+
+**Owner decisions still open** — unchanged: D1's sector proxy, `tCO2/t`
+as CO2e, dataset period versus shipment period, EU-origin determinability.
+
+**Accepted risk** — unchanged: the trusted calculation RPC does not
+verify the emissions value. Newly recorded: a stolen opaque cookie
+authenticates to this application as the user until it is revoked or
+expires, which is what a session cookie is.
+
+### Verdict
+
+**READY FOR INDEPENDENT REVIEW.**
+
+The direct-auth takeover path is closed and regression-tested: the
+browser credential is not a Supabase credential, proven with a real
+cookie against real Auth, and the tests that prove it fail when the
+boundary is removed.
+
+Two cautions carried forward deliberately. §26 said "AUTH-1 closed" and
+was wrong — the measurement it relied on was in the repository and the
+inference drawn from it was not. And this remains a self-assessment: the
+reviewer who found the last blocker was the session that wrote the fix,
+which is the worst possible arrangement for catching an error of that
+shape. An independent reviewer is owed, and the three environment items
+above are unverified rather than verified-good.
