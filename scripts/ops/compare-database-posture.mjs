@@ -333,6 +333,20 @@ const SELF_CHECKS = [
       where c.relkind = 'r'
         and n.nspname = 'public'
         and c.relrowsecurity
+        -- 2026-09-04 (P14, AUTH-1). app_sessions is the one table in
+        -- this schema where "denies everything" is the specification
+        -- rather than a restore casualty: it holds the sealed provider
+        -- session for every signed-in browser, and a client that could
+        -- read it could impersonate every signed-in user. It is written
+        -- and read ONLY by the service role.
+        --
+        -- Excluded here rather than given a policy, because a policy
+        -- would advertise a client-reachable path that must not exist.
+        -- The state this exclusion asserts instead is pinned positively
+        -- by session_store_is_sealed_off below, and its grants are
+        -- pinned by privilege_invariants_hold -- so the table has MORE
+        -- coverage than the check being skipped, not less.
+        and c.relname <> 'app_sessions'
         and not exists (
           select 1 from pg_policies p
           where p.schemaname = n.nspname and p.tablename = c.relname
@@ -368,7 +382,12 @@ const SELF_CHECKS = [
           -- cannot tell a real emissions figure from a forged one,
           -- because the engine that produces it is TypeScript. See
           -- 20260903190000.
-          'organizations', 'memberships', 'calculation_results'
+          'organizations', 'memberships', 'calculation_results',
+          -- 2026-09-04 (P14, AUTH-1). Stronger than the three above:
+          -- app_sessions is written by no API role at all, through no
+          -- RPC, only by the service role holding the session store.
+          -- See rls_without_policies for the full reasoning.
+          'app_sessions'
         )
         and not exists (
           select 1 from pg_policies p
@@ -376,6 +395,49 @@ const SELF_CHECKS = [
             and p.tablename = c.relname
             and p.cmd in ('INSERT', 'ALL')
         )
+      order by 1
+    `,
+  },
+  {
+    name: "session_store_is_sealed_off",
+    why: "2026-09-04 (P14, AUTH-1). The two checks above deliberately skip app_sessions; this is what pays for that. The table holds the sealed Supabase session of every signed-in browser, so a policy, a grant, or RLS switched off on it is a complete impersonation of every user -- and a restore reopens exactly this kind of thing, because a dump records the grants that exist and never their absence",
+    sql: `
+      select issue from (
+        select 'public.app_sessions does not exist -- the session store is missing, and the application cannot hold a session safely without it' as issue
+        where to_regclass('public.app_sessions') is null
+
+        union all
+
+        select 'public.app_sessions has RLS disabled'
+        from pg_class c
+        join pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = 'public'
+          and c.relname = 'app_sessions'
+          and not c.relrowsecurity
+
+        union all
+
+        select 'public.app_sessions carries policy ' || p.policyname
+               || ' -- it must be reachable by no API role at all'
+        from pg_policies p
+        where p.schemaname = 'public'
+          and p.tablename = 'app_sessions'
+
+        union all
+
+        select 'role ' || v.role_name || ' holds ' || g.privilege
+               || ' on public.app_sessions'
+        from (values ('anon'), ('authenticated')) as v(role_name)
+        cross join (values
+          ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE')
+        ) as g(privilege)
+        where to_regclass('public.app_sessions') is not null
+          and exists (
+            select 1 from pg_roles where rolname = v.role_name
+          )
+          and has_table_privilege(
+                v.role_name, 'public.app_sessions', g.privilege)
+      ) t
       order by 1
     `,
   },
