@@ -181,6 +181,31 @@ export async function updatePasswordAction(
     // Auth response (an all-lowercase-plus-digits 24-character password
     // was rejected) -- the SAME gap sign-up-form.tsx's own minLength={8}
     // has, not introduced here, but worth not repeating in new code.
+    // 2026-09-04 (P14 owner decision 3). GoTrue returns this when
+    // secure_password_change is enabled and the session is not recent.
+    //
+    // That setting is a release prerequisite on the hosted project, and
+    // it is what stops an OLD stolen session from rewriting a password
+    // -- so this branch is the ordinary, expected outcome for someone
+    // who left a tab open for a day and then changed their password,
+    // not an error condition.
+    //
+    // Verified against a real GoTrue with the setting on: a session
+    // aged past the window returns `reauthentication_needed`, while a
+    // fresh recovery session -- the one this screen is normally reached
+    // from -- still succeeds, so the reset and invitation flows are
+    // unaffected. Without this branch that user would be told
+    // "Something went wrong", which is both untrue and unactionable.
+    if (error.code === "reauthentication_needed") {
+      return {
+        status: "error",
+        message:
+          "For your security, changing a password needs a recent sign-in. " +
+          "Sign out and sign in again, or use the link from a fresh " +
+          "password-reset email, then try once more.",
+      };
+    }
+
     if (error.code === "weak_password") {
       return {
         status: "error",

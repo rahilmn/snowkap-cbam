@@ -318,7 +318,23 @@ double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
 enable_confirmations = false
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
-secure_password_change = false
+#
+# 2026-09-04 (P14 owner decision 3). TRUE, and it is a release
+# prerequisite on the hosted project too -- see
+# docs/runbooks/AUTH_EMAIL_TEMPLATES.md.
+#
+# With this false, a live session alone rewrites the password. Proven
+# against this local GoTrue: PUT /auth/v1/user {password} with only a
+# stolen access token returned 200, the owner's original password was
+# then rejected, and POST /logout?scope=others evicted the owner's other
+# sessions -- session theft became permanent, exclusive control, and the
+# owner's normal remedy (sign out everywhere) was gone.
+#
+# Nothing in the application compensates: updatePasswordAction requires
+# a session and asks for no current password. GoTrue is the control, so
+# the setting is the control, so local matches the required hosted value
+# rather than being quietly laxer than production.
+secure_password_change = true
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
 max_frequency = "1s"
 # Number of characters used in the email OTP.

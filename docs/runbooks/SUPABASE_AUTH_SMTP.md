@@ -130,3 +130,93 @@ disable email confirmation — both would bypass the exact path under test.
 
 Record the outcome in the release report. Until step 2 succeeds against a
 real inbox, SMTP status remains **NOT VERIFIED**.
+
+---
+
+## Hosted Auth configuration prerequisites (P14, 2026-09-04)
+
+These are **release prerequisites**, not recommendations. Each is a
+dashboard setting on the hosted Supabase project; none can be set from
+this repository, and none is verified by CI. The release report must
+state, for each, whether it is **configured** or **not yet configured** —
+"the code is ready" is not the same claim and must not be written as if
+it were.
+
+### 1. `secure_password_change = true` — REQUIRED
+
+**Where:** Supabase dashboard → Authentication → Providers → Email →
+"Secure password change".
+
+**What it does, measured rather than assumed.** Tested against a real
+GoTrue v2.195.0 with the setting on:
+
+| session | `PUT /auth/v1/user {password}` | outcome |
+|---|---|---|
+| aged past the recency window | `400 reauthentication_needed` | **blocked** |
+| created moments earlier | `200` | **still succeeds** |
+
+So it is a **partial** control, and the report must say so. It stops a
+*stale* stolen session from rewriting a password. It does **not** stop a
+*fresh* one — which is the realistic theft shape, because a session
+cookie lifted from a live browser is by definition recent.
+
+**Why it is still required.** With it off, the boundary is absent
+entirely: verified live, a stolen access token alone rewrote the
+password, the owner's own password was then rejected, and
+`POST /logout?scope=others` evicted the owner's remaining sessions —
+session theft became permanent, exclusive control, and the owner's
+normal remedy (sign out everywhere) was gone with it. On is strictly
+better than off. It is not sufficient.
+
+**What the application does about it.** Nothing in the application
+compensates, and that is deliberate rather than an oversight:
+`updatePasswordAction` requires a session and asks for no current
+password, so GoTrue is the control. What the application does do is
+handle the refusal properly — `reauthentication_needed` renders a
+specific, actionable message rather than "Something went wrong."
+
+**Verified compatible.** With the setting enabled, both flows that
+reach the password screen still work end to end, tested against a real
+GoTrue: the recovery flow (`verify(recovery token_hash)` → set password
+→ sign in with it) and the invitation set-password leg
+(`verify(invite token_hash)` → set first password → sign in). Enabling
+it does not break either. `supabase/config.toml` now carries `true` as
+well, so a developer's local behaviour matches the required hosted
+behaviour instead of being quietly laxer than production.
+
+**Residual, stated plainly.** Fresh-session password change remains
+open. Closing it needs a current-password prompt on the change-password
+screen, which is an application change and is recorded as an owner
+decision rather than smuggled into this pass.
+
+### 2. Site URL — REQUIRED to equal the production origin exactly
+
+Every email link is built from `{{ .SiteURL }}`, so a wrong value sends
+working-looking links to the wrong origin. Read it and record it.
+
+### 3. Auth rate limits — record the values
+
+Token verifications, sign-in/sign-ups and emails sent are project-wide
+buckets. The application's own per-IP limiters cannot bound them,
+because every request arrives from the same platform egress address, so
+the hosted numbers are the real ceiling for every customer at once.
+Record them; raise them if the recorded values are lower than the
+product's ordinary volume.
+
+### 4. CAPTCHA — must be off
+
+`verifyOtp` takes no captcha token, so `/auth/confirm` cannot satisfy a
+CAPTCHA challenge. If it is on, every emailed link fails.
+
+### How to record the outcome
+
+In the release report, for each of the four:
+
+```
+required: <value>
+configured: yes | no | not read
+read by: <who, when>
+```
+
+Anything other than `configured: yes` on item 1 leaves AUTH-1 open, and
+the verdict has to say so.
