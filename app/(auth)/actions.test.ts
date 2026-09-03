@@ -72,6 +72,10 @@ const cookiesMock =
     async () => (
       {
         getAll: () => [],
+        get: (name: string) =>
+          name === "sb_app_session"
+            ? { value: "opaque-session-in-hand" }
+            : undefined,
         set: (...args: unknown[]) => cookieSetMock(...args),
       }
     ),
@@ -86,17 +90,21 @@ vi.mock(
   ),
 );
 
-const clearAuthCookiesAtScopesMock =
+// 2026-09-04 (P14, AUTH-1). Sign-out no longer scrubs a provider
+// cookie, because there is no provider cookie: it ends the session on
+// the SERVER and then stops the browser presenting its opaque
+// identifier.
+const revokeAppSessionMock =
   vi.fn(
     async (..._args: unknown[]) => undefined,
   );
 
 vi.mock(
-  "@supabase/ssr",
+  "../../src/infrastructure/auth/app-session-store",
   () => (
     {
-      clearAuthCookiesAtScopes: (...args: unknown[]) =>
-        clearAuthCookiesAtScopesMock(...args),
+      revokeAppSession: (...args: unknown[]) =>
+        revokeAppSessionMock(...args),
     }
   ),
 );
@@ -605,9 +613,13 @@ describe(
     );
 
     it(
-      "does NOT touch the cookies itself when signOut() succeeded",
+      "does NOT revoke or clear anything itself when signOut() succeeded",
       async () => {
-        clearAuthCookiesAtScopesMock.mockClear();
+        // The cookie adapter already ended the stored session on the
+        // way through -- auth-js asks it to delete the provider
+        // cookies, and deleting them IS the revocation now.
+        revokeAppSessionMock.mockClear();
+        cookieSetMock.mockClear();
 
         signOutMock.mockResolvedValueOnce(
           { error: null },
@@ -619,27 +631,38 @@ describe(
           REDIRECT_SENTINEL,
         );
 
-        expect(clearAuthCookiesAtScopesMock).not.toHaveBeenCalled();
+        expect(revokeAppSessionMock).not.toHaveBeenCalled();
+        expect(cookieSetMock).not.toHaveBeenCalled();
       },
     );
 
     it(
-      "clears this browser's session cookies when signOut() reports an error (P14, F1)",
+      "ends the session on the SERVER, then clears the cookie, when signOut() reports an error (P14, F1)",
       async () => {
         // auth-js's sessionError path returns BEFORE touching storage,
-        // so the cookies survive and the user lands on /sign-in still
-        // holding a live session. A second signOut() call re-enters the
-        // same path through its own refresh-failure cooldown, so the
-        // cookies have to be cleared directly.
-        clearAuthCookiesAtScopesMock.mockClear();
+        // so nothing was revoked on the way through and the browser is
+        // still holding a live opaque identifier.
+        //
+        // The order is the security property. Deleting the cookie
+        // without revoking its row would leave the session alive for
+        // anyone holding a copy taken a moment earlier -- which is the
+        // opposite of what pressing sign-out asks for.
+        revokeAppSessionMock.mockClear();
+        cookieSetMock.mockClear();
 
-        // Set so the key derivation is genuinely exercised rather than
-        // asserted against an empty environment.
-        const previousUrl =
-          process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const order: string[] = [];
 
-        process.env.NEXT_PUBLIC_SUPABASE_URL =
-          "https://abcdefghijklm.supabase.co";
+        revokeAppSessionMock.mockImplementationOnce(
+          async () => {
+            order.push("revoke");
+          },
+        );
+
+        cookieSetMock.mockImplementationOnce(
+          () => {
+            order.push("clear-cookie");
+          },
+        );
 
         signOutMock.mockResolvedValueOnce(
           { error: { message: "session missing" } },
@@ -651,33 +674,25 @@ describe(
           REDIRECT_SENTINEL,
         );
 
-        if (previousUrl === undefined) {
-          delete process.env.NEXT_PUBLIC_SUPABASE_URL;
-        } else {
-          process.env.NEXT_PUBLIC_SUPABASE_URL = previousUrl;
-        }
-
-        expect(clearAuthCookiesAtScopesMock).toHaveBeenCalledTimes(1);
-
-        const input =
-          clearAuthCookiesAtScopesMock.mock.calls[0]?.[0] as {
-            storageKey: string;
-            scopes: unknown[];
-          };
-
-        // Derived from the project URL, not hardcoded, so it cannot
-        // drift from the project this deployment points at.
-        expect(input.storageKey).toBe(
-          "sb-abcdefghijklm-auth-token",
+        expect(revokeAppSessionMock).toHaveBeenCalledWith(
+          "opaque-session-in-hand",
         );
 
-        // Cleared at the options this app writes them with AND at the
-        // bare path: a cookie written with a different
-        // secure/sameSite combination in an earlier deploy would
-        // otherwise survive its own deletion.
-        expect(input.scopes.length).toBeGreaterThan(
-          1,
+        expect(order).toEqual(
+          ["revoke", "clear-cookie"],
         );
+
+        const [name, value, options] =
+          cookieSetMock.mock.calls[0] as [
+            string,
+            string,
+            { maxAge?: number; httpOnly?: boolean },
+          ];
+
+        expect(name).toBe("sb_app_session");
+        expect(value).toBe("");
+        expect(options.maxAge).toBe(0);
+        expect(options.httpOnly).toBe(true);
       },
     );
 

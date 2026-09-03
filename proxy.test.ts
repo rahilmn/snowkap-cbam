@@ -217,13 +217,76 @@ describe(
         ] =
           getUserMock.mock.calls[0];
 
+        // 2026-09-04 (P14, AUTH-1). getAll() is async now: it consults
+        // the server-side session store, not just the request.
         expect(
-          cookiesArg.getAll(),
+          await cookiesArg.getAll(),
         ).toEqual(
           [
             { name: "sb-access-token", value: "abc123" },
           ],
         );
+      },
+    );
+
+    it(
+      "never takes the PROVIDER session from the browser, whatever the browser sends (P14, AUTH-1)",
+      async () => {
+        // The whole point of the change: a cookie named like the
+        // provider session must be ignored, not trusted. If this ever
+        // passes through again, a forged or stolen provider cookie is
+        // back to being the credential.
+        const previousUrl =
+          process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+        process.env.NEXT_PUBLIC_SUPABASE_URL =
+          "https://abcdefghijklm.supabase.co";
+
+        getUserMock.mockResolvedValueOnce(
+          {
+            data: { user: null },
+            error: null,
+          },
+        );
+
+        await proxy(
+          requestWithCookie(
+            // Deliberately not token-shaped: the assertion is about the
+            // cookie NAME being ignored, and a realistic-looking value
+            // would only be a secret-scanner false positive.
+            "sb-abcdefghijklm-auth-token=forged-provider-session; " +
+              "sb-abcdefghijklm-auth-token.0=chunked; " +
+              "other=kept",
+          ),
+        );
+
+        const [
+          cookiesArg,
+        ] =
+          getUserMock.mock.calls[0];
+
+        const names =
+          (
+            await cookiesArg.getAll()
+          ).map(
+            (cookie: { name: string }) => cookie.name,
+          );
+
+        expect(names).toContain("other");
+
+        expect(names).not.toContain(
+          "sb-abcdefghijklm-auth-token",
+        );
+
+        expect(names).not.toContain(
+          "sb-abcdefghijklm-auth-token.0",
+        );
+
+        if (previousUrl === undefined) {
+          delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+        } else {
+          process.env.NEXT_PUBLIC_SUPABASE_URL = previousUrl;
+        }
       },
     );
 

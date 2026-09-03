@@ -6,6 +6,10 @@ import {
   verifyCurrentPassword,
 } from "../../../src/infrastructure/supabase/password-verification-client";
 
+import {
+  revokeOtherAppSessions,
+} from "../../../src/infrastructure/auth/app-session-store";
+
 /**
  * The password-change decision, separated from the Server Action that
  * wraps it.
@@ -51,9 +55,20 @@ export async function changePasswordForSession(
   {
     currentPassword,
     newPassword,
+    currentAppSessionToken = null,
   }: {
     currentPassword: string;
     newPassword: string;
+
+    /**
+     * The opaque session this request arrived on, so that ending "every
+     * other session" does not end the one the user is standing in.
+     * Null in a context that has no cookie to read (the live regression
+     * suite drives this function with a Supabase client directly), in
+     * which case every session for the user is ended -- the safe
+     * direction to be wrong in.
+     */
+    currentAppSessionToken?: string | null;
   },
 ): Promise<ChangePasswordOutcome> {
   const {
@@ -119,8 +134,35 @@ export async function changePasswordForSession(
       { scope: "others" },
     );
 
+  // 2026-09-04 (P14, AUTH-1). And end this application's own other
+  // sessions, which is a separate thing from the provider's.
+  //
+  // signOut({scope:"others"}) revokes the other REFRESH tokens, so
+  // those sessions die at their next refresh -- up to an hour away.
+  // After a password change that hour is exactly the window that
+  // matters, because the person changing their password is often doing
+  // it precisely to evict someone. The opaque sessions are this
+  // application's to end, so it ends them now rather than waiting for
+  // the provider's to lapse.
+  //
+  // Failure is carried, never raised: the password has already changed.
+  let appSessionsRevoked = false;
+
+  try {
+    await revokeOtherAppSessions(
+      {
+        userId: user.id,
+        keepToken: currentAppSessionToken,
+      },
+    );
+
+    appSessionsRevoked = true;
+  } catch {
+    appSessionsRevoked = false;
+  }
+
   return {
     status: "CHANGED",
-    otherSessionsSignedOut: !othersError,
+    otherSessionsSignedOut: !othersError && appSessionsRevoked,
   };
 }

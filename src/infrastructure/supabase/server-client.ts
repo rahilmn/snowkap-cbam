@@ -8,6 +8,10 @@ import {
   cookies,
 } from "next/headers";
 
+import {
+  createOpaqueSessionCookieAdapter,
+} from "../auth/opaque-session-cookies";
+
 /**
  * The server-side, session-scoped Supabase client -- for Server
  * Components, Server Actions, and Route Handlers. Uses the anon/
@@ -83,35 +87,53 @@ export async function getServerSupabaseClient() {
         httpOnly: true,
       },
 
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
+      // 2026-09-04 (P14, AUTH-1). The provider session no longer
+      // travels in a browser cookie.
+      //
+      // Reproduced before this change: the cookie @supabase/ssr set
+      // parsed straight into { access_token, refresh_token, ... }, and
+      // that access token was accepted by PUT /auth/v1/user -- with no
+      // apikey header at all -- to change the victim's password. The
+      // application's own current-password proof was not defeated, it
+      // was bypassed, because the attacker never needed this
+      // application.
+      //
+      // createServerClient reaches the browser only through getAll/
+      // setAll, and nothing requires those to be cookies. They are the
+      // server-side session store now: the browser holds an opaque
+      // identifier, and what Supabase would accept stays here. See
+      // src/infrastructure/auth/opaque-session-cookies.ts.
+      cookies:
+        createOpaqueSessionCookieAdapter(
+          {
+            getAll() {
+              return cookieStore.getAll();
+            },
 
-        setAll(
-          cookiesToSet,
-        ) {
-          try {
-            for (
-              const {
-                name,
-                value,
-                options,
-              } of cookiesToSet
+            set(
+              name,
+              value,
+              options,
             ) {
-              cookieStore.set(
-                name,
-                value,
-                options,
-              );
-            }
-          } catch {
-            // Called from a Server Component, where cookies cannot be
-            // set -- safe to ignore because proxy.ts refreshes
-            // the session on every request regardless.
-          }
-        },
-      },
+              try {
+                cookieStore.set(
+                  name,
+                  value,
+                  options,
+                );
+              } catch {
+                // Called from a Server Component, where cookies cannot
+                // be set -- safe to ignore because proxy.ts refreshes
+                // the session on every request regardless.
+                //
+                // Note this is now only about the OPAQUE identifier.
+                // The provider session itself is written to the store,
+                // which a Server Component can do perfectly well, so a
+                // token refresh is no longer lost on this path.
+              }
+            },
+          },
+        ),
     },
   );
 }

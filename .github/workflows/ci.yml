@@ -104,6 +104,10 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-not-a-real-key
+          # 2026-09-04 (P14, AUTH-1). Required at runtime: it seals the
+          # server-side session store. A placeholder is right here --
+          # this job proves the bundle COMPILES and talks to nothing.
+          APP_SESSION_SECRET: ci-placeholder-app-session-secret-not-real
         run: pnpm build
 
       - name: Scan for committed secrets
@@ -428,6 +432,16 @@ jobs:
             # It was reporting a genuine gap in this job's environment
             # the moment the test was allowed to run.
             echo "APP_URL=http://localhost:3000"
+            # 2026-09-04 (P14, AUTH-1). Required, and required to be a
+            # real value rather than a placeholder: it is the key the
+            # server-side session store is sealed with, so without it
+            # the app refuses to hold a session at all and every
+            # authenticated journey fails at sign-in.
+            #
+            # Generated per run. Sessions do not outlive a CI job, and a
+            # per-run key means a leaked workflow log cannot open a
+            # session store from any other run.
+            echo "APP_SESSION_SECRET=$(openssl rand -hex 32)"
           } >> .env.local
           echo "Wrote .env.local pointing at the local Supabase this job started."
 

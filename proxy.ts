@@ -7,6 +7,10 @@ import {
   type NextRequest,
 } from "next/server";
 
+import {
+  createOpaqueSessionCookieAdapter,
+} from "./src/infrastructure/auth/opaque-session-cookies";
+
 /**
  * Named `proxy.ts` per Next.js 16 (the `middleware.ts` file convention
  * is deprecated as of v16.0.0 and renamed to `proxy` -- functionally
@@ -73,48 +77,45 @@ export async function proxy(
           httpOnly: true,
         },
 
-        cookies: {
-          getAll() {
-            return request.cookies.getAll();
-          },
+        // 2026-09-04 (P14, AUTH-1). Backed by the server-side session
+        // store, not by browser cookies -- see server-client.ts's
+        // matching comment and
+        // src/infrastructure/auth/opaque-session-cookies.ts. What this
+        // middleware refreshes is now the STORED provider session; the
+        // only thing it ever writes to the browser is the opaque
+        // identifier, and usually not even that.
+        cookies:
+          createOpaqueSessionCookieAdapter(
+            {
+              getAll() {
+                return request.cookies.getAll();
+              },
 
-          setAll(
-            cookiesToSet,
-          ) {
-            for (
-              const {
-                name,
-                value,
-              } of cookiesToSet
-            ) {
-              request.cookies.set(
-                name,
-                value,
-              );
-            }
-
-            response =
-              NextResponse.next(
-                {
-                  request,
-                },
-              );
-
-            for (
-              const {
+              set(
                 name,
                 value,
                 options,
-              } of cookiesToSet
-            ) {
-              response.cookies.set(
-                name,
-                value,
-                options,
-              );
-            }
-          },
-        },
+              ) {
+                request.cookies.set(
+                  name,
+                  value,
+                );
+
+                response =
+                  NextResponse.next(
+                    {
+                      request,
+                    },
+                  );
+
+                response.cookies.set(
+                  name,
+                  value,
+                  options,
+                );
+              },
+            },
+          ),
       },
     );
 

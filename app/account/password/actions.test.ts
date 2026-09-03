@@ -86,6 +86,45 @@ vi.mock(
   ),
 );
 
+// 2026-09-04 (P14, AUTH-1). The action reads the opaque session cookie
+// so that ending "every other session" spares the one in hand.
+const cookieGetMock =
+  vi.fn(
+    () => (
+      { value: "opaque-session-in-hand" }
+    ),
+  );
+
+vi.mock(
+  "next/headers",
+  () => (
+    {
+      cookies: async () => (
+        { get: cookieGetMock }
+      ),
+    }
+  ),
+);
+
+// The application's own other sessions are ended directly after a
+// proven change, rather than waiting up to an hour for the provider's
+// refresh tokens to lapse.
+const revokeOtherAppSessionsMock =
+  vi.fn(
+    async (_args: unknown) => 0,
+  );
+
+vi.mock(
+  "../../../src/infrastructure/auth/app-session-store",
+  () => (
+    {
+      revokeOtherAppSessions: (
+        args: unknown,
+      ) => revokeOtherAppSessionsMock(args),
+    }
+  ),
+);
+
 const REDIRECT_SENTINEL =
   "NEXT_REDIRECT";
 
@@ -223,6 +262,19 @@ describe(
         expect(updateUserMock).toHaveBeenCalledWith(
           { password: NEXT_PASSWORD },
         );
+
+        // The session in hand is read and carried through, so that
+        // ending the user's other sessions does not end this one.
+        expect(cookieGetMock).toHaveBeenCalledWith(
+          "sb_app_session",
+        );
+
+        expect(revokeOtherAppSessionsMock).toHaveBeenCalledWith(
+          {
+            userId: "victim-user-id",
+            keepToken: "opaque-session-in-hand",
+          },
+        );
       },
     );
 
@@ -251,6 +303,10 @@ describe(
         expect(updateUserMock).not.toHaveBeenCalled();
 
         expect(signOutMock).not.toHaveBeenCalled();
+
+        // Nobody is signed out on a refused change -- not the
+        // provider's sessions, and not this application's.
+        expect(revokeOtherAppSessionsMock).not.toHaveBeenCalled();
       },
     );
 

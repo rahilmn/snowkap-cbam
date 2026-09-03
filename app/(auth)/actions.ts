@@ -9,30 +9,14 @@ import {
 } from "next/headers";
 
 import {
-  clearAuthCookiesAtScopes,
-} from "@supabase/ssr";
+  APP_SESSION_COOKIE,
+  appSessionCookieOptions,
+} from "../../src/infrastructure/auth/opaque-session-cookies";
 
-/**
- * The cookie name @supabase/ssr derives from the project URL, which is
- * what its own storage adapter uses and therefore what has to be
- * cleared. Derived rather than hardcoded so it cannot drift from the
- * project this deployment actually points at.
- */
-function authStorageKey(): string {
-  // Parsed with a regex rather than `new URL`, which throws on a
-  // missing or malformed value. This runs on the sign-out path: an
-  // exception here would turn "we could not confirm your sign-out" into
-  // a crash, which is strictly worse. A value that cannot be parsed
-  // yields a key that simply matches no cookie, and the redirect still
-  // happens.
-  const url =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+import {
+  revokeAppSession,
+} from "../../src/infrastructure/auth/app-session-store";
 
-  const projectRef =
-    /^https?:\/\/([^./:]+)/.exec(url)?.[1] ?? "";
-
-  return `sb-${projectRef}-auth-token`;
-}
 
 import {
   getServerSupabaseClient,
@@ -341,37 +325,37 @@ export async function signOutAction(): Promise<void> {
     await supabase.auth.signOut();
 
   if (error) {
+    // 2026-09-04 (P14, AUTH-1). Since the provider session moved to the
+    // server-side store, "clear this browser" means two things, and the
+    // order matters: end the session on the server FIRST, so a copy of
+    // the opaque cookie taken a moment ago is already dead, then stop
+    // the browser presenting it.
+    //
+    // This replaces a clearAuthCookiesAtScopes() call that scrubbed the
+    // old provider cookie. There is no provider cookie now; deleting
+    // the opaque identifier without revoking its row would have left a
+    // live session behind for anyone holding a copy, which is the
+    // opposite of what someone pressing sign-out asked for.
     const cookieStore =
       await cookies();
 
-    await clearAuthCookiesAtScopes(
+    const appSessionToken =
+      cookieStore.get(
+        APP_SESSION_COOKIE,
+      )?.value;
+
+    if (appSessionToken) {
+      await revokeAppSession(
+        appSessionToken,
+      );
+    }
+
+    cookieStore.set(
+      APP_SESSION_COOKIE,
+      "",
       {
-        getAll: () => cookieStore.getAll(),
-        setAll: (cookiesToSet) => {
-          for (
-            const { name, value, options } of cookiesToSet
-          ) {
-            cookieStore.set(
-              name,
-              value,
-              options,
-            );
-          }
-        },
-        storageKey: authStorageKey(),
-        // Cleared at the same options this app writes them with, and
-        // at the bare path too: a cookie written with a different
-        // `secure`/`sameSite` combination in an earlier deploy would
-        // otherwise survive its own deletion.
-        scopes: [
-          {
-            path: "/",
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "lax",
-            httpOnly: true,
-          },
-          { path: "/" },
-        ],
+        ...appSessionCookieOptions(),
+        maxAge: 0,
       },
     );
 

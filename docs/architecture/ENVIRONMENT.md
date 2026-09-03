@@ -165,6 +165,47 @@ Supabase URL/key baked in, not a build failure.
 
 ## 2. Application runtime
 
+### `APP_SESSION_SECRET`
+
+**REQUIRED, in every environment, including local dev and CI.** The
+application refuses to hold a session without it, and that refusal is
+deliberate: the alternative is a silent fallback that would store
+provider credentials in the clear, invisibly, in whichever environment
+happened to be missing the value.
+
+Read in
+[`src/infrastructure/auth/app-session-seal.ts`](../../src/infrastructure/auth/app-session-seal.ts).
+SHA-256 of this value is the AES-256-GCM key that seals
+`public.app_sessions.sealed_provider_session`.
+
+**Why it exists.** 2026-09-04 (P14, AUTH-1). The browser's session
+cookie used to be `@supabase/ssr`'s own — a base64 blob containing the
+raw Supabase `access_token` and `refresh_token`. Reproduced end to end:
+a stolen cookie parsed into those tokens, and `PUT /auth/v1/user` with
+that bearer token changed the account's password and locked the owner
+out. It needed no API key, and the stolen refresh token minted fresh
+sessions on demand. The browser now holds only an opaque identifier
+(`sb_app_session`); the provider session lives server-side, sealed with
+this key.
+
+Minimum 32 characters, enforced. Generate with:
+
+```
+openssl rand -base64 48
+```
+
+**Differs by environment**: must differ. It is a secret, and sharing one
+across environments means a leak in the least protected one opens the
+session store of the most protected one.
+
+**Rotation** invalidates every existing browser session — each becomes
+unopenable and is treated as signed out. That is the intended behaviour
+and the right lever to pull if the value is ever exposed; it signs
+everyone out, it does not leak anything.
+
+**Never logged.** The seal module reads it and derives a key; nothing
+prints it, and the sealed rows contain neither it nor the plaintext.
+
 ### `APP_URL`
 
 Read once, in

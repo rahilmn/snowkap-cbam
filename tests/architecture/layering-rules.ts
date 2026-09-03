@@ -261,6 +261,22 @@ const UI_ALLOWED_INFRASTRUCTURE_IMPORTS = [
   // service role, so it cannot become a general RLS-bypass escape hatch
   // if it is ever imported somewhere new.
   "src/infrastructure/supabase/password-verification-client",
+  // 2026-09-04 (P14, AUTH-1). The session integration itself, which is
+  // the category the first three entries on this list already are: this
+  // is what @supabase/ssr's cookie adapter now talks to instead of
+  // browser cookies, because a cookie carrying the provider's access
+  // and refresh tokens turned session theft into permanent account
+  // takeover.
+  //
+  // Reached from app/** in exactly three places, all of them session
+  // lifecycle rather than business logic: sign-out (revoke this
+  // session), password change (revoke the user's OTHER sessions), and
+  // the cookie name/options shared with both. There is no adapter to
+  // swap and no application service to route through -- the thing being
+  // integrated with is the caller's own authentication, same as
+  // server-client above.
+  "src/infrastructure/auth/opaque-session-cookies",
+  "src/infrastructure/auth/app-session-store",
 ];
 
 /**

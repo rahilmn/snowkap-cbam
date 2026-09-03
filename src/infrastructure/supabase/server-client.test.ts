@@ -226,25 +226,57 @@ describe(
     }
 
     it(
-      "options.cookies.getAll() forwards to the real cookie store's getAll()",
+      "options.cookies.getAll() reads the real cookie store, and never hands back a provider-session cookie the browser sent (P14, AUTH-1)",
       async () => {
+        // 2026-09-04. The adapter is backed by the server-side session
+        // store now, so getAll() is async and filters the provider
+        // session out of whatever the browser supplied -- a cookie
+        // named like the provider session must be ignored rather than
+        // trusted, or a forged one is the credential again.
+        const previousUrl =
+          process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+        process.env.NEXT_PUBLIC_SUPABASE_URL =
+          "https://abcdefghijklm.supabase.co";
+
         const storedCookies =
           [
-            { name: "sb-access-token", value: "token-1" },
-            { name: "sb-refresh-token", value: "token-2" },
+            { name: "unrelated-cookie", value: "kept" },
+            {
+              name: "sb-abcdefghijklm-auth-token",
+              value: "forged-provider-session",
+            },
+            {
+              name: "sb-abcdefghijklm-auth-token.0",
+              value: "forged-chunk",
+            },
           ];
 
-        cookieStoreGetAllMock.mockReturnValueOnce(storedCookies);
+        cookieStoreGetAllMock.mockReturnValue(storedCookies);
 
         const cookies =
           await capturedCookiesAdapter();
 
         const result =
-          cookies.getAll();
+          await cookies.getAll();
 
-        expect(cookieStoreGetAllMock).toHaveBeenCalledTimes(1);
+        expect(cookieStoreGetAllMock).toHaveBeenCalled();
 
-        expect(result).toBe(storedCookies);
+        expect(
+          result.map(
+            (cookie: { name: string }) => cookie.name,
+          ),
+        ).toEqual(
+          ["unrelated-cookie"],
+        );
+
+        cookieStoreGetAllMock.mockReturnValue([]);
+
+        if (previousUrl === undefined) {
+          delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+        } else {
+          process.env.NEXT_PUBLIC_SUPABASE_URL = previousUrl;
+        }
       },
     );
 

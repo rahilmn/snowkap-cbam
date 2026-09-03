@@ -5,12 +5,20 @@ import { z } from "zod";
 import { redirect } from "next/navigation";
 
 import {
+  cookies,
+} from "next/headers";
+
+import {
   getServerSupabaseClient,
 } from "../../../src/infrastructure/supabase/server-client";
 
 import {
   changePasswordForSession,
 } from "./change-password";
+
+import {
+  APP_SESSION_COOKIE,
+} from "../../../src/infrastructure/auth/opaque-session-cookies";
 
 import {
   createInMemoryRateLimiter,
@@ -184,6 +192,12 @@ export async function changePasswordAction(
       {
         currentPassword: parsed.data.currentPassword,
         newPassword: parsed.data.password,
+
+        // So that "sign out every other session" spares this one.
+        currentAppSessionToken:
+          (await cookies()).get(
+            APP_SESSION_COOKIE,
+          )?.value ?? null,
       },
     );
 
