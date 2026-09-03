@@ -572,6 +572,50 @@ first drill checked are exactly the four things this failure does not
 touch.** A database that can be read but never written looks perfectly
 healthy to a table-existence check.
 
+### Finding 4 — what a restore must not quietly reopen (P14, 2026-09-04)
+
+Three controls added during P14 are exactly the shape this runbook's own
+lesson describes: a dump records the objects and grants that exist, and
+never the ones deliberately absent. A restore that recreates the tables
+and stops there looks healthy and is not.
+
+**`public.app_sessions` — the session store.** It holds the sealed
+Supabase session of every signed-in browser. A restore must leave it
+with RLS on, **zero policies**, **zero privileges for `anon` and
+`authenticated`**, and the
+`app_sessions_ownership_is_immutable` trigger present. Any one of those
+missing is a complete impersonation of every user: the first two make
+the store readable, the third lets a session be reassigned from one
+identity to another.
+
+`compare-database-posture.mjs --check` asserts all four as
+`session_store_is_sealed_off`, and fails naming the exact one that is
+missing. That check is why the two generic "RLS with no policies" checks
+skip this table rather than being weakened to accommodate it.
+
+**`declarations.approved_line_ids` and its two triggers.** The column
+records the line population a declaration was approved over, and
+`record_declaration_filed` refuses to file a population that no longer
+matches it. It is written by `declarations_freeze_approved_lines_trg`
+and protected by `declarations_prevent_fact_change_trg`. A restore that
+loses either trigger leaves the column writable by whatever writes the
+row — which is the thing it exists to prevent.
+
+**The `shipments` UPDATE policy.** It carries the clause that makes a
+READY shipment administrative territory. A restore that reinstates an
+older policy definition reopens the reproduction P14 closed: a member
+reopens an approved shipment, deletes a line, re-approves it, and the
+filing records a smaller figure than the one approved.
+
+**Session rows do not travel.** `app_sessions.sealed_provider_session`
+is encrypted under a key derived from `APP_SESSION_SECRET`, which is
+environment-specific and never in the database. Restored into an
+environment with a different secret, every row is unopenable and every
+affected browser is simply signed out. That is correct and safe — it
+leaks nothing — but it means **a restore is never a session migration**,
+and anyone reading row counts should not expect these to be meaningful
+in the target.
+
 ### Finding 3 — `auth.users` rows, not just the `auth` schema
 
 Re-running the restore with privileges retained and the `auth` schema
