@@ -1061,3 +1061,514 @@ written by the agent that implemented the work it assesses, including the
 defect in **I.1(1)** that this same agent introduced earlier the same day
 in this same document's name. The independent adversarial review and the
 owner's UAT remain separate, and both remain outstanding.
+
+---
+
+## 19. P14.1 — security / recovery blocker remediation (2026-09-03)
+
+Appended. §§1–18 stand as written, including where this section
+supersedes them: §18's **N.1** carried the filed-snapshot forgery class
+as HIGH RISK with the fix deferred. It was reclassified as a release
+blocker and is now closed. §18 is not edited to pretend it always said
+so.
+
+Nothing was deployed. `main` untouched, the deploy branch untouched, no
+migration promoted, no production data modified by any probe.
+
+| Commit | Change |
+|---|---|
+| `acdb439` | negative quantities, emissions, certificates and liability refused |
+| `a80e94c` | the trusted write model — the blocker |
+| `06cea94` | restore posture: the comparator and the runbook correction |
+
+Branch `phase14/release-hardening`, still unpushed. Migrations
+`20260903180000` and `20260903190000` are applied to local Postgres and
+pending against production, taking the pending count from 9 to 11.
+
+### A. BLOCKER 1 — calculation-result output forgery
+
+#### A.1 The original exploit
+
+Reproduced live as an ordinary `authenticated` member of the line's own
+organisation, inside a real `BEGIN … ROLLBACK` transaction with state
+verified before and after:
+
+```sql
+insert into public.calculation_results (
+    org_id, line_id, shipment_id, engine_version, parameter_datasets,
+    quantity, quantity_unit, determination, steps,
+    embedded_emissions_tco2e, calculated_by_user_id)
+select sl.org_id, sl.id, sl.shipment_id, '1.2.0', '[]',
+       sl.net_mass_tonnes, 'TONNES', sl.emission_determination, '[]',
+       '0.001', auth.uid()
+from public.shipment_lines sl where sl.id = '…';
+-- INSERT 0 1
+
+select * from public.record_declaration_filed('…', 'EU-REF-FORGED-1');
+-- OK
+-- filed_snapshot total: 0.001      (true value: 139)
+-- shipment: FILED_RECORDED
+```
+
+The adversarial re-check found the class is wider than the reported
+case. Every field that carries meaning was client-supplied:
+
+| Field | Consequence of forging it |
+|---|---|
+| `embedded_emissions_tco2e` | the filed figure itself |
+| `quantity` / `quantity_unit` | closed at filing by `20260903110000`, not at write |
+| `determination` | compared at filing, not at write |
+| `steps` | the derivation the "Why this number?" panel renders — a forged number could be given a plausible-looking trace |
+| `engine_version` | **blinds the only detective control**: `reproduce-calculation-result.ts` returns `ENGINE_VERSION_CHANGED` *before* recomputing, so any value but the running one turns a MISMATCH into a benign-looking status |
+| `parameter_datasets` | fabricated regulatory provenance |
+| `certificates_due`, `liability_amount` | never written by the engine at all |
+| `calculated_at` | when the calculation claims to have happened |
+
+#### A.2 Root cause
+
+`calculation_results_insert_own_org_as_self` (`20260829200000`) pinned
+`org_id`, `calculated_by_user_id = auth.uid()` and the line→shipment
+linkage, and refused a LOCKED/VOID shipment. All correct, and all about
+**scope**. Nothing in it — or in any CHECK constraint — concerned the
+**numbers**.
+
+Every downstream wall passed the forgery for a defensible reason:
+
+- the determination comparison in `20260829470000` passes, because the
+  forged row carries the line's real determination;
+- the quantity clause in `20260903110000` passes, because it carries the
+  line's real quantity;
+- `reproduceCalculationResult` passes, because it recomputes from the
+  row's **own** frozen inputs — it can prove a stored number follows
+  from the inputs stored beside it, and cannot prove those inputs came
+  from the engine.
+
+#### A.3 Why the database cannot simply recompute
+
+The obvious fix is unavailable and was not faked. The engine is
+TypeScript (`calculate-line-emissions.ts`, ENGINE_VERSION 1.3.0):
+RULE-EE-001/EE-009, the Annex II direct-only rule from owner decision
+D1, unit-basis matching, decimal.js at 40 digits ROUND_HALF_UP. A
+plpgsql reimplementation would be a second, silently diverging copy of
+regulatory semantics — precisely what the facts-as-datasets rule and the
+protected regulatory zone exist to prevent, and worse than no check,
+because a disagreement would surface as refusing to file a *correct*
+declaration.
+
+So the number was made **unforgeable** rather than verified.
+
+#### A.4 The exact fix
+
+`supabase/migrations/20260903190000_p141_calculation_results_trusted_write_only.sql`
+
+1. `calculation_results_insert_own_org_as_self` dropped.
+2. `revoke insert, update, delete … from anon, authenticated`. Append-only
+   previously rested on the *absence* of UPDATE/DELETE policies while
+   the grants were still held — one permissive policy away from mutable.
+3. `public.record_calculation_result(...)`, SECURITY DEFINER,
+   `set search_path = public`, **granted to `service_role` alone**.
+
+Granting it to `authenticated` would have closed nothing: the member
+would pass the forged number to the function instead of to the table,
+and the function cannot tell. The trust boundary has to sit where the
+engine runs.
+
+The RPC re-imposes in SQL everything the dropped policy enforced — org
+ownership, line/shipment linkage, editable shipment status — and adds
+five bindings it never had:
+
+| Binding | Refusal |
+|---|---|
+| determination must equal the line's current one, byte-for-byte | `DETERMINATION_MISMATCH` |
+| quantity + unit must equal the line's own, by the same rule the app uses | `QUANTITY_MISMATCH` |
+| actor must be a live, non-deactivated member of the org | `ACTOR_NOT_A_MEMBER` |
+| org must hold `IMPORTER_DECLARANT` | `CAPABILITY_NOT_HELD` |
+| `shipment_id` derived, `calculated_at` set from `clock_timestamp()` | — not accepted at all |
+
+The capability re-check was added after an adversarial reviewer pointed
+out its absence: under the service role RLS is not standing behind the
+write, so an application-layer gate would have been the only thing
+enforcing an importer-only workflow — and the premise of the whole
+change is that a compliance record should not rest on one.
+
+**Application side.** `calculateLine` no longer touches the table. It
+takes a `CalculationResultWriter` port
+(`src/application/calculations/calculation-result-writer.ts`); the
+adapter (`src/infrastructure/calculations/get-calculation-result-writer.ts`,
+`server-only`) holds a private service-role client and can do exactly
+one thing. The Server Action composes it, as it already does for
+`getRegulatoryRepository()`.
+
+Deliberately **not** `admin-client.ts`: that module's own doc comment
+makes its narrowness load-bearing ("without opening a general RLS-bypass
+escape hatch to the rest of the schema"), and reusing it would have made
+that sentence false for every existing caller. Deliberately **not** a
+raw `SupabaseClient` parameter into `src/application/**` — three of the
+reviewed designs proposed that, and it would have handed the application
+layer a general RLS-bypassing client while technically passing the
+layering test.
+
+#### A.5 Live verification
+
+Nine probes, real psql, every mutation rolled back:
+
+| # | Probe | Result |
+|---|---|---|
+| 1 | direct INSERT as `authenticated` (the original exploit) | `permission denied for table calculation_results` |
+| 2 | the RPC called as `authenticated` | `permission denied for function record_calculation_result` |
+| 3 | forged determination via `service_role` | `DETERMINATION_MISMATCH` |
+| 4 | forged quantity | `QUANTITY_MISMATCH` |
+| 5 | non-member actor | `ACTOR_NOT_A_MEMBER` |
+| 6 | cross-org | `LINE_NOT_FOUND` |
+| 7 | legitimate write | `OK` + row id |
+| 8 | UPDATE / DELETE as `authenticated` | `permission denied` (both) |
+| 9 | SELECT as a member | still works — read surface intact |
+
+Resulting grants: `authenticated` and `anon` hold `SELECT` (plus
+`REFERENCES`/`TRIGGER`) and nothing else. One policy remains,
+`calculation_results_select_own_org`. Function ACL:
+`postgres=X/postgres service_role=X/postgres`.
+
+#### A.6 Regression tests
+
+`tests/integration/calculation-reproduction.test.ts` gains
+**"P14.1 — the calculation-result write boundary"**, ten cases against
+real Postgres, mapping one-to-one onto the ten the brief required:
+
+1. forged emissions beside the line's own correct quantity — refused
+2. forged emissions **and** forged quantity — refused
+3. fabricated determination and steps — refused
+4. no INSERT/UPDATE/DELETE privilege at all; RPC unreachable by the member, works for `service_role`
+5. cross-org forgery — refused twice over (privilege, then the org binding)
+6. the trusted channel refuses inputs the line does not carry (all three bindings)
+7. a legitimate result is accepted, and `shipment_id`/`calculated_at` are derived, not accepted
+8. a recalculation **appends**; the prior row is untouched
+9. a result written through the trusted channel is byte-reproducible
+10. a negative figure is refused; **zero is still accepted**
+
+Two existing tests in `declarations-isolation.test.ts` asserted
+`expect(forgeError).toBeNull()` — they positively required that a member
+*could* insert a forged row. Their own comment said that if this ever
+started failing, "the insert policy changed and this test's premise
+needs revisiting rather than the assertion being relaxed." It did. Both
+now assert the insert is **refused**, and each then plants the same row
+with the service role writing directly to the table — deliberately
+bypassing the RPC, which would reject it — so `record_declaration_filed`'s
+own INCOMPLETE refusal is still measured. Neither assertion was weakened;
+each test now covers two walls instead of one.
+
+`calculate-line.test.ts`: the supabase mock's `calculation_results`
+branch now **throws**. A mock that accepted a direct insert would be
+more permissive than the database and would let the defect back in
+silently.
+
+`calculation-reproduction.test.ts`'s append-only test got stronger: the
+UPDATE used to affect zero rows via RLS; it is now refused at the
+privilege level and never reaches RLS.
+
+#### A.7 Final status — **CLOSED**
+
+The invariant now holds: no `anon` or `authenticated` caller can write a
+calculation result by any route — not the table, not the function.
+
+**Bounded honestly:** `service_role` retains its direct table grant.
+This does not constrain the service role, which is the trusted boundary
+by definition and whose key is server-only. One reviewed design proposed
+a trigger binding `service_role` too, so that a leaked key could not
+mint a fileable row. It was considered and **rejected for now**: as
+specified it would also have broken the deliberately-tampered fixture
+that is the only automated proof `reproduceCalculationResult` detects a
+MISMATCH, the two filing-gate tests above, and the perf seed script.
+Recorded as a follow-up, not as done.
+
+### B. Defect found alongside — negative magnitudes accepted
+
+**Exploit.** A member-planted row with
+`embedded_emissions_tco2e = '-500000'` filed successfully. A negative
+does not understate one line; it **subtracts** from the declaration
+total, so one forged line can cancel several honest ones while the
+snapshot still adds up internally.
+
+**Root cause.** `calculation_results_numeric_format_ck` reused the
+DecimalString shape `^-?[0-9]+(\.[0-9]+)?$`. That is correct for
+`src/domain/shared/decimal.ts`, a general decimal type, and wrong for
+four columns that are a mass, an emissions figure, a certificate count
+and a money amount owed.
+
+**Fix.** `20260903180000_p141_calculation_results_forbid_negative_magnitudes.sql`
+removes the optional leading minus. Verified beforehand that all 21
+existing local rows are non-negative, so it validates against existing
+data.
+
+**Deliberately not `> 0`.** Two of the reviewed designs proposed
+rejecting `<= 0`, and both were caught by adversarial review: a
+genuinely zero-emissions line is a real regulatory outcome, and a
+positive-only guard would refuse it. Test (10) asserts `0` is still
+accepted.
+
+**Live verification.** `-500000` → `violates check constraint
+calculation_results_numeric_format_ck`; `139.5` → accepted; `0` →
+accepted.
+
+**Status — CLOSED.**
+
+### C. BLOCKER 2 — restore / security-posture loss
+
+#### C.1 Root cause, measured rather than inferred
+
+The dump was
+`pg_dump --schema=public --schema=app --no-privileges`. Restoring it
+into a throwaway database reproduced the reported symptom exactly and
+then went further.
+
+**Cause 1 — `--no-privileges` carried no grants at all.**
+
+| | with the flag | without |
+|---|---|---|
+| `GRANT`/`REVOKE` statements in the dump | **0** | 116 |
+| API-role table grants in the restored database | **154 of 506** | 506 of 506 |
+
+The flag's stated rationale was that the target's roles "already exist
+with their real grants from the applied migrations" — true only if the
+target has had migrations applied, which is not the recovery this
+artifact exists for. Nobody had ever looked at grants.
+
+**Cause 2 — the `auth` schema.** 15 × `ERROR: schema "auth" does not
+exist`, losing **5 of 56 policies, every one an INSERT policy**:
+`audit_events_insert_own_org_as_self`,
+`calculation_results_insert_own_org_as_self`,
+`declarations_insert_own_org`, `import_batches_insert_own_org`,
+`organization_invitations_insert_admin_or_owner` — each naming
+`auth.uid()` directly in its own text, which is why these five failed
+and the other 51 did not. Also **10 foreign keys to `auth.users`**.
+
+Tables, columns, RLS flags, functions, triggers and indexes all matched
+throughout. **The four things the original drill checked are exactly the
+four things this failure does not touch.**
+
+**Cause 3, and the one that matters most — `auth.users` rows.**
+Re-running with privileges retained and the `auth` schema present
+brought policies to 56/56 and grants to 506/506. Nine of the ten foreign
+keys still could not be created:
+
+```
+ERROR: insert or update on table "memberships" violates foreign key
+       constraint "memberships_user_id_fkey"
+```
+
+Those are `ADD CONSTRAINT` failures, not row failures — product rows
+loaded fine, row counts matched source exactly across all twelve tables
+checked. The constraints cannot be added because `auth.users` is empty,
+and it is empty because it is not in this dump and never was.
+
+**So the honest conclusion is stronger than "nobody can sign in": a
+restore from this artifact alone cannot re-establish referential
+integrity.** The logical dump is a supplement to the provider's backup,
+never a replacement.
+
+**Cause 4.** 12 × `ERROR: permission denied to change default
+privileges`, from `ALTER DEFAULT PRIVILEGES … FOR ROLE supabase_admin`
+statements the dump captures. `postgres` is neither a superuser nor a
+member of `supabase_admin` (verified against `pg_auth_members`), so it
+cannot replay them. Benign for the restored objects, but a zero-`ERROR`
+restore is not achievable from this artifact and must not be presented
+as the pass criterion.
+
+#### C.2 The fix
+
+- `--no-privileges` removed from the dump command, and the paragraph
+  that justified it corrected in place rather than quietly deleted.
+- `docs/runbooks/BACKUP_RESTORE.md` gains a **"Re-drill 2026-09-03"**
+  section carrying all four findings with their measurements, an
+  explicit contains/does-not-contain table, and the prerequisites a
+  restore target must provide (verified by experiment: the `auth` schema
+  with `uid`/`role`/`jwt`/`users`, the three API roles, `pgcrypto`,
+  `uuid-ossp` — i.e. a fresh Supabase project, not a bare Postgres).
+- **The acceptance test is no longer a checklist a human reads.**
+  `scripts/ops/compare-database-posture.mjs` compares two databases
+  object by object and exits non-zero on any difference: schemas,
+  tables, columns, RLS flags, **full policy definitions including
+  USING/WITH CHECK text**, **effective table grants**, schema USAGE
+  grants, functions (with `prosecdef`, `proconfig` and a body hash),
+  function grants, triggers, constraints, indexes, sequences,
+  extensions — plus nine self-consistency checks that need only one
+  database.
+
+#### C.3 The tool was itself caught failing, and fixed
+
+Its first version of the self-checks **passed on the broken restore** —
+the exact failure mode it exists to prevent. `policy_references_resolve`
+asked "is any policy referencing a missing `auth` schema?", which is
+vacuously true when those policies are the ones that failed to restore;
+`truncate_granted_to_api_roles` passed because a database with no grants
+at all has no TRUNCATE grants either.
+
+Rewritten as **positive** assertions: the `auth` schema and its four
+objects must be present; foreign keys to `auth.users` must exist; every
+RLS-enabled public table must have an INSERT policy (with an explicit
+allowlist for the regulatory reference tables and the three tables
+written only through SECURITY DEFINER RPCs); the API roles must hold a
+non-empty grant set.
+
+Result on the broken restore: **4 critical failures**, naming all five
+lost INSERT policies. Result on the healthy database: all nine OK.
+
+#### C.4 Final status — **PARTIALLY CLOSED, and named as such**
+
+Closed: the two procedure defects, the acceptance test, and the measured
+scope of the artifact.
+
+**Not closed:** an actual restore into a throwaway **hosted** project
+with `POSTURE MATCHES`. Provisioning one is a billable account-level
+action outside this pass's authority. Recovery remains **unproven** —
+what is proven is that the previous procedure would have produced a
+broken database and reported success, and that it no longer can.
+
+### D. TRUNCATE re-verification (brief item 3)
+
+Re-verified after all schema changes settled.
+
+| Check | Result |
+|---|---|
+| TRUNCATE grants for `anon`/`authenticated` on any public table | **0** |
+| `truncate public.sharing_grants` as `authenticated` | `permission denied` |
+| `truncate public.calculation_results` as `anon` | `permission denied` |
+| A table created by the migration role (`postgres`) | no TRUNCATE for either role |
+| `postgres` default ACL, schema public | `anon=rxtm`, `authenticated=arwdxtm` — no `D` |
+| `postgres` and `service_role` | retain TRUNCATE — legitimate server-side operations unaffected |
+
+The migration's documented omission is now **proven bounded** rather
+than asserted: `select rolsuper from pg_roles where rolname='postgres'`
+→ `f`, and `supabase_admin` is absent from `postgres`'s
+`pg_auth_members`. So `alter default privileges for role supabase_admin`
+is genuinely unreachable from a migration, and its ACL still carries `D`
+for both roles. That residual applies only to a table created *by
+supabase_admin* in `public`; every table in this application is created
+by a migration running as `postgres`, whose default ACL is fixed.
+
+Also now enforced continuously: `compare-database-posture.mjs`'s
+`truncate_granted_to_api_roles` self-check, which a restore must pass.
+
+**Status — VERIFIED.**
+
+### E. Re-attacked surfaces
+
+Stated precisely, because the brief lists more surfaces than this pass
+genuinely re-attacked. The fresh adversarial effort — five parallel
+read-only agents plus direct psql probing — targeted the
+calculation-write boundary and the declaration filing path. The other
+surfaces were **not** re-attacked from scratch; they are covered by the
+existing regression suites (1,626 tests, zero skips) and, for two of
+them, by new continuous assertions. **Storage could not be re-attacked
+at all** — the local container returns 503, the same environment
+blocker §18 E records.
+
+Outcome by surface:
+
+| Surface | Outcome |
+|---|---|
+| Calculation-result forgery | **closed** (A), by fresh adversarial work |
+| Declaration filing integrity | re-attacked: gate intact; `filed_snapshot` immutable against both `authenticated` (RLS) and `service_role` (trigger); a LOCKED shipment refuses new calculations |
+| RLS / cross-org isolation / active-org pinning | no fresh attack; regression suites pass |
+| Sharing, evidence, invitation authorization | no fresh attack; regression suites pass |
+| Auth/session, callback redirects, rate limiting | no fresh attack; regression suites pass |
+| Storage, storage path probing | **not re-attacked** — local Storage returns 503 |
+| SECURITY DEFINER `search_path` | all set, and now asserted continuously by a posture self-check |
+| TRUNCATE on the API roles | verified (D), and now asserted continuously by a posture self-check |
+| Service-role isolation | the new adapter holds a private client and exposes exactly one operation |
+| Append-only history | **strengthened** — grants revoked, not merely policies absent |
+| Capability boundaries | strengthened — the trusted write channel re-checks IMPORTER_DECLARANT in SQL |
+
+One new, genuinely reachable finding, **not** fixed:
+
+**`calculation_results.line_id` is `ON DELETE CASCADE`**, and
+`shipment_lines_delete_parent_not_terminal` lets a member delete a line
+on any shipment that is not LOCKED or VOID. Deleting a line therefore
+deletes its calculation history. Assessed rather than assumed:
+
+- filed data is protected — filing LOCKs every member shipment, and
+  LOCKED lines cannot be deleted;
+- `audit_events` has **no** foreign key to `shipment_lines` (verified),
+  so `calculation.computed` events, carrying the emissions figure in
+  their payload, survive the deletion;
+- removing a line from an unfiled shipment is a legitimate product
+  action.
+
+Classified **HIGH RISK / POST-RELEASE**, not a blocker: it discards
+draft work, not a filed record, and the audit trail is independent.
+
+### F. Regression (brief item 4)
+
+Run on the working tree, with `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY` exported — which is what keeps the skip
+count at zero, since without them the protected regulatory adapter's
+real-database suites silently skip.
+
+| Gate | Result |
+|---|---|
+| `pnpm typecheck` | exit 0 |
+| `pnpm test` | **1,626 passed, 0 failed, 0 skipped, 0 todo**, 138 files |
+| `pnpm regulatory:verify` (production) | **`RESULT: VALID`**, 12,540/12,540 |
+| `pnpm build` | exit 0; `postbuild` artifact assertion OK |
+| Playwright | see below |
+| Migration ledger | 63 applied both sides, **11 pending**, no drift |
+
+The test count rose from **1,616 to 1,626** — the ten
+new write-boundary cases. Skips are taken from the machine-readable
+reporter output (`numPendingTests: 0`, `numTodoTests: 0`), not from the
+terminal summary.
+
+**Playwright, reported honestly across two runs.** The first full run
+returned **37 passed, 9 skipped, 0 failed, 2 flaky**. The gate protocol
+(§18 D.2, and §10.5 of the execution plan) requires **0 failed and 0
+flaky**, so that run did not pass and is recorded rather than discarded.
+
+The two flaky specs were `importer-journey` and
+`cross-org-sharing-journey` — the two longest journeys, and the first of
+them exercises the calculate step this change touches, so it was
+investigated rather than assumed environmental:
+
+- re-run alone with `--retries=0`, both passed: 58.3 s and 1.2 m against
+  a 180 s per-test budget;
+- the whole 48-test suite took **4.3 m** in the flaky run versus **2.3 m**
+  earlier the same day for the identical set — roughly 87 % slower;
+- the calculate step itself completed normally in both attempts.
+
+The full suite was then re-run once, unchanged:
+**39 passed, 9 skipped, 0 failed, 0 flaky (3.4 m).**
+
+Conclusion, stated with its limit: the evidence says machine contention
+under a loaded host, not a defect in the new write path — a slower
+elapsed time on the two specs already closest to their timeout, both
+comfortably inside budget when not competing, and a clean rerun. It is
+not proof. What would settle it is the same suite on CI, which is
+§18 D.1's outstanding gate.
+
+The nine skips are unchanged from the P14 baseline: eight desktop-only
+journeys on `mobile-chromium`, plus the Storage-gated
+`actual-data-determination` spec, which is §18 E's environment blocker
+and not a mobile-layout skip.
+
+**The E2E artifact hazard stayed closed throughout.** `.next` is
+byte-identical before and after a full Playwright run
+(`c9614f5591…617992e` both times), `assert-clean-production-artifact
+--require-artifact` passes afterwards, and `.next-e2e` is the artifact
+carrying `E2E_RATE_LIMIT_BYPASS_BUILD = "true"` — which is the proof the
+test still genuinely exercises the bypass rather than having been
+weakened.
+
+### G. Status
+
+**SECURITY/RECOVERY REMEDIATION STATUS: READY FOR NEXT CERTIFICATION GATE**
+
+Blocker 1 is closed and proven closed at the database boundary. Blocker
+2's defects are closed and its acceptance test now demonstrably catches
+the failure the old one missed — but recovery itself stays unproven
+until a hosted restore runs, which is an owner-authorised action, not a
+defect in the work. Item 3 is verified. Nothing was deployed; the
+downstream certification gates from §18 (CI on the candidate SHA, the
+hosted Storage E2E, the hosted restore, Auth templates, production
+smoke) are untouched and still outstanding.
+
+This remains a self-audit by the agent that implemented the work. It is
+not the independent adversarial review.
