@@ -296,24 +296,72 @@ export async function persistAppSession(
     const tokenHash =
       await hashToken(token);
 
-    const { data } =
+    // 2026-09-04 (P14, session fixation). Ownership is read BEFORE
+    // anything is written, and is never written again after the insert.
+    //
+    // This used to be a single UPDATE that set user_id alongside the
+    // sealed session, keyed only on the token being live. That made a
+    // caller-supplied identifier adoptable: an attacker planted their
+    // own identifier in a signed-out victim's browser, the victim
+    // signed in, this UPDATE rebound the row to the victim, the
+    // identifier was returned unchanged so no new cookie was set, and
+    // the attacker's copy of it was now the victim's session.
+    //
+    // The distinction the code has to make, and now makes explicitly:
+    //
+    //   same identity  -> an ordinary REFRESH of a session that is
+    //                     already authenticated. Keep the identifier;
+    //                     rotating here would end a live session every
+    //                     time a token refreshed.
+    //
+    //   any other case -> an AUTHENTICATION BOUNDARY. Retire whatever
+    //                     was supplied and mint a fresh identifier. It
+    //                     covers the fixation attempt above and the
+    //                     legitimate identity switch (an invitation or
+    //                     recovery link opened in a browser already
+    //                     signed in as someone else) with the same
+    //                     rule, because from here they are the same
+    //                     event.
+    const { data: existing } =
+      await client
+        .from("app_sessions")
+        .select("id, user_id")
+        .eq("token_hash", tokenHash)
+        .is("revoked_at", null)
+        .gt("expires_at", now.toISOString())
+        .maybeSingle();
+
+    if (existing && existing.user_id === userId) {
+      const { data: refreshed } =
+        await client
+          .from("app_sessions")
+          .update(
+            {
+              sealed_provider_session: sealed,
+              last_seen_at: now.toISOString(),
+              expires_at: expiresAt,
+            },
+          )
+          .eq("id", existing.id)
+          .is("revoked_at", null)
+          .select("id")
+          .maybeSingle();
+
+      if (refreshed) {
+        return token;
+      }
+    }
+
+    if (existing) {
+      // Retired, not reused. A copy of this identifier taken a moment
+      // ago must not survive the authentication that replaced it.
       await client
         .from("app_sessions")
         .update(
-          {
-            sealed_provider_session: sealed,
-            user_id: userId,
-            last_seen_at: now.toISOString(),
-            expires_at: expiresAt,
-          },
+          { revoked_at: now.toISOString() },
         )
-        .eq("token_hash", tokenHash)
-        .is("revoked_at", null)
-        .select("id")
-        .maybeSingle();
-
-    if (data) {
-      return token;
+        .eq("id", existing.id)
+        .is("revoked_at", null);
     }
   }
 

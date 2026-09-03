@@ -372,6 +372,193 @@ describe.skipIf(!ready)(
       },
     );
 
+    // --- session fixation (P14, 2026-09-04) ---
+
+    it(
+      "NEVER rebinds a supplied identifier to a different user -- the fixation attack",
+      async () => {
+        // The exact defect: an attacker's own identifier, planted in a
+        // signed-out victim's browser, was adopted by the victim's
+        // sign-in and rebound to them, so the attacker's copy became
+        // the victim's session.
+        const attackerId =
+          await makeUser();
+
+        const victimId =
+          await makeUser();
+
+        const plantedToken =
+          await store.persistAppSession(
+            {
+              token: null,
+              cookies: providerCookies(attackerId),
+            },
+          );
+
+        // The victim authenticates while the browser presents the
+        // attacker's identifier.
+        const victimToken =
+          await store.persistAppSession(
+            {
+              token: plantedToken,
+              cookies: providerCookies(victimId),
+            },
+          );
+
+        // A fresh identifier, not the planted one.
+        expect(victimToken).not.toBe(plantedToken);
+
+        expect(victimToken).toMatch(
+          /^[A-Za-z0-9_-]{43}$/,
+        );
+
+        // The planted identifier is retired, not merely left alone: a
+        // copy taken a moment earlier must not outlive the
+        // authentication that replaced it.
+        expect(
+          await store.loadAppSession(plantedToken),
+        ).toBeNull();
+
+        // And it never became the victim's.
+        const { data: plantedRow } =
+          await serviceClient
+            .from("app_sessions")
+            .select("user_id, revoked_at")
+            .eq("user_id", attackerId);
+
+        expect(plantedRow?.length).toBe(1);
+        expect(plantedRow?.[0]?.user_id).toBe(attackerId);
+        expect(plantedRow?.[0]?.revoked_at).not.toBeNull();
+
+        // The victim's own identifier works, and belongs to them.
+        expect(
+          await store.loadAppSession(victimToken),
+        ).toEqual(
+          providerCookies(victimId),
+        );
+
+        const { data: victimRows } =
+          await serviceClient
+            .from("app_sessions")
+            .select("user_id, revoked_at")
+            .eq("user_id", victimId)
+            .is("revoked_at", null);
+
+        expect(victimRows?.length).toBe(1);
+      },
+    );
+
+    it(
+      "rotates on an identity SWITCH too -- the same rule covers the legitimate case",
+      async () => {
+        // A browser signed in as A opens an invitation or recovery link
+        // for B. Not an attack, and handled by the same rule: A is
+        // retired, B gets a fresh identifier, nothing is reassigned.
+        const userA =
+          await makeUser();
+
+        const userB =
+          await makeUser();
+
+        const tokenA =
+          await store.persistAppSession(
+            { token: null, cookies: providerCookies(userA) },
+          );
+
+        const tokenB =
+          await store.persistAppSession(
+            { token: tokenA, cookies: providerCookies(userB) },
+          );
+
+        expect(tokenB).not.toBe(tokenA);
+
+        expect(
+          await store.loadAppSession(tokenA),
+        ).toBeNull();
+
+        expect(
+          await store.loadAppSession(tokenB),
+        ).toEqual(
+          providerCookies(userB),
+        );
+      },
+    );
+
+    it(
+      "does NOT rotate an ordinary refresh of the same identity -- that would end a live session on every token refresh",
+      async () => {
+        const userId =
+          await makeUser();
+
+        const token =
+          await store.persistAppSession(
+            { token: null, cookies: providerCookies(userId) },
+          );
+
+        expect(
+          await store.persistAppSession(
+            { token, cookies: providerCookies(userId) },
+          ),
+        ).toBe(
+          token,
+        );
+
+        expect(
+          await store.loadAppSession(token),
+        ).not.toBeNull();
+      },
+    );
+
+    it(
+      "makes ownership immutable at the DATABASE, not only in the application",
+      async () => {
+        // The application fix is the real one. This is what stops a
+        // later refactor, an upsert, or a second writer from quietly
+        // reopening the takeover -- and it binds the service role,
+        // which is the only role that can reach this table at all.
+        const userId =
+          await makeUser();
+
+        const otherId =
+          await makeUser();
+
+        await store.persistAppSession(
+          { token: null, cookies: providerCookies(userId) },
+        );
+
+        const { error: reassign } =
+          await serviceClient
+            .from("app_sessions")
+            .update({ user_id: otherId })
+            .eq("user_id", userId);
+
+        expect(reassign).not.toBeNull();
+
+        expect(reassign?.message ?? "").toMatch(
+          /belongs to the identity it was created for/i,
+        );
+
+        // Still owned by whom it was created for.
+        const { data: rows } =
+          await serviceClient
+            .from("app_sessions")
+            .select("user_id")
+            .eq("user_id", userId);
+
+        expect(rows?.length).toBe(1);
+
+        // The same rule covers moving a live session onto a different
+        // cookie, which is the same reassignment wearing the other hat.
+        const { error: rehash } =
+          await serviceClient
+            .from("app_sessions")
+            .update({ token_hash: "a-different-identifier" })
+            .eq("user_id", userId);
+
+        expect(rehash).not.toBeNull();
+      },
+    );
+
     it(
       "is unreachable by the API roles -- the control a blanket grant would silently undo",
       async () => {

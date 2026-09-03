@@ -220,6 +220,165 @@ test.describe(
     );
 
     test(
+      "a planted session identifier never becomes the victim's session (P14 session fixation)",
+      async ({ browser, importerOrgSession, page, context }) => {
+        // THE ATTACK, end to end in real browsers.
+        //
+        // Before the fix: an attacker signed in, planted their own
+        // identifier as an ordinary cookie in a signed-out victim's
+        // browser, the victim signed in, and persistAppSession rebound
+        // that row to the victim WITHOUT rotating the identifier -- so
+        // the attacker's copy was now the victim's session. Measured:
+        // "identifier ROTATED on authentication: false", and the
+        // replaying browser rendered "Signed in as <victim>".
+        //
+        // The fixture's user is the ATTACKER here: it is the one whose
+        // identifier gets planted.
+        const planted =
+          (await context.cookies()).find(
+            (cookie) => cookie.name === "sb_app_session",
+          )?.value ?? "";
+
+        expect(planted).not.toBe("");
+
+        // Confirm the attacker's own session is genuinely live, so a
+        // later refusal cannot be explained by it having been dead all
+        // along.
+        await page.goto("/shipments");
+        await expect(page).not.toHaveURL(/\/sign-in/);
+
+        // A second, signed-out browser: the victim. The identifier is
+        // planted as a NON-httpOnly cookie, which is what a script on
+        // the origin can write -- a signed-out browser holds no
+        // httpOnly cookie of that name, so there is nothing to refuse.
+        const victimContext =
+          await browser.newContext();
+
+        await victimContext.addCookies(
+          [
+            {
+              name: "sb_app_session",
+              value: planted,
+              domain: "localhost",
+              path: "/",
+              httpOnly: false,
+              secure: false,
+              sameSite: "Lax",
+            },
+          ],
+        );
+
+        const victimPage =
+          await victimContext.newPage();
+
+        // The victim signs up and in through the real UI, carrying the
+        // planted identifier the whole way.
+        const victimEmail =
+          `e2e-fixation-victim-${importerOrgSession.runId}@example.com`;
+
+        const victimPassword =
+          "Password123!";
+
+        await victimPage.goto("/sign-up");
+
+        await victimPage.getByLabel(
+          "Email",
+          { exact: true },
+        ).fill(victimEmail);
+
+        await victimPage.getByLabel(
+          "Password",
+          { exact: true },
+        ).fill(victimPassword);
+
+        await victimPage.getByRole(
+          "button",
+          { name: "Create account" },
+        ).click();
+
+        await expect(victimPage).toHaveURL(
+          /\/onboarding$/,
+        );
+
+        // F. The identifier the victim now holds is NOT the planted one.
+        const victimToken =
+          (await victimContext.cookies()).find(
+            (cookie) => cookie.name === "sb_app_session",
+          )?.value ?? "";
+
+        expect(victimToken).not.toBe("");
+        expect(victimToken).not.toBe(planted);
+
+        // H/I. The attacker replays the identifier they planted. It must
+        // not authenticate as the victim -- and, because the identifier
+        // was retired rather than left alone, not as the attacker
+        // either.
+        const replayContext =
+          await browser.newContext();
+
+        await replayContext.addCookies(
+          [
+            {
+              name: "sb_app_session",
+              value: planted,
+              domain: "localhost",
+              path: "/",
+              httpOnly: false,
+              secure: false,
+              sameSite: "Lax",
+            },
+          ],
+        );
+
+        const replayPage =
+          await replayContext.newPage();
+
+        await replayPage.goto("/account/password");
+
+        await expect(replayPage).toHaveURL(
+          /\/sign-in/,
+        );
+
+        const replayBody =
+          await replayPage.locator("body").innerText();
+
+        expect(replayBody).not.toContain(victimEmail);
+        expect(replayBody).not.toContain(importerOrgSession.email);
+
+        // J. The victim's own fresh identifier works, and is theirs.
+        const victimReplay =
+          await browser.newContext();
+
+        await victimReplay.addCookies(
+          [
+            {
+              name: "sb_app_session",
+              value: victimToken,
+              domain: "localhost",
+              path: "/",
+              httpOnly: false,
+              secure: false,
+              sameSite: "Lax",
+            },
+          ],
+        );
+
+        const victimReplayPage =
+          await victimReplay.newPage();
+
+        await victimReplayPage.goto("/account/password");
+
+        await expect(
+          victimReplayPage.getByText(victimEmail),
+        ).toBeVisible();
+
+        await replayContext.close();
+        await victimReplay.close();
+        await victimContext.close();
+      },
+    );
+
+    test(
       "signing out revokes the session on the server, so a copy of the cookie is already dead",
       async ({ page, context, browser, importerOrgSession }) => {
         expect(importerOrgSession.email).toBeTruthy();
