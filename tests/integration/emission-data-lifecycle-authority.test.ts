@@ -596,6 +596,64 @@ describe.skipIf(!localSupabaseReachable)(
       );
     });
 
+    describe("verifier independence (P14 owner decision 6)", () => {
+      it(
+        "refuses a VERIFY by the user who created the record -- one person " +
+          "cannot be both the author and the attestor of a figure a " +
+          "counterparty will rely on",
+        async () => {
+          // The ADMIN creates it themselves this time, rather than the
+          // MEMBER, so the creator and the only permitted verifier are
+          // the same person.
+          const { data: created, error: createError } =
+            await clientProducerAdmin
+              .from("emission_data")
+              .insert(forgedInsert({}))
+              .select("id, created_by_user_id")
+              .single();
+
+          expect(createError).toBeNull();
+          // Written by the database from auth.uid(), never accepted from
+          // the caller -- the rule below turns on this being true.
+          expect(created?.created_by_user_id).toBe(producerAdminId);
+
+          const submit =
+            await clientProducerAdmin
+              .from("emission_data")
+              .update({ verification_status: "VERIFICATION_PENDING" })
+              .eq("id", created!.id);
+
+          expect(submit.error).toBeNull();
+
+          const { error } =
+            await clientProducerAdmin
+              .from("emission_data")
+              .update({
+                verification_status: "VERIFIED",
+                verifier_user_id: producerAdminId,
+              })
+              .eq("id", created!.id);
+
+          expect(error).not.toBeNull();
+          expect(error?.message).toContain("cannot also verify it");
+        },
+      );
+
+      it(
+        "allows a VERIFY by a different ADMIN -- this is a two-person rule, " +
+          "not an organisational one, and the ordinary workflow is untouched",
+        async () => {
+          const { emissionDataId } = await createGenuinelyActiveVerifiedRecord();
+
+          const record = await readRecord(emissionDataId);
+
+          // Created by the MEMBER, verified by the ADMIN.
+          expect(record.verification_status).toBe("VERIFIED");
+          expect(record.verifier_user_id).toBe(producerAdminId);
+        },
+      );
+    });
+
     describe("B2 -- a verified record's evidentiary basis is permanent", () => {
       it("B2.1 direct bypass: evidence cannot be emptied on an ACTIVE + VERIFIED record", async () => {
         const { emissionDataId } = await createGenuinelyActiveVerifiedRecord();

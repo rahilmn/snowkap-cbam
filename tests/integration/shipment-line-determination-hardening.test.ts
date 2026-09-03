@@ -219,6 +219,13 @@ function actualDeterminationFrom(
       // and a raw PostgREST write could set it to anything. This
       // suite's installations are seeded OPERATOR_PROVIDED.
       record_provenance: "OPERATOR_PROVIDED",
+      // 2026-09-04 (owner decision 7). Same reasoning as
+      // record_provenance above: the snapshot claims which period of
+      // emissions data it used, and the validator checks that claim
+      // against the record's own period, so an unchecked field cannot
+      // become decorative. Every emission_data row this suite seeds is
+      // ANNUAL 2026.
+      dataset_reporting_period: { kind: "ANNUAL", year: 2026 },
       emission_unit: record.emission_unit,
       values: { direct_specific: record.direct_specific, indirect_specific: record.indirect_specific },
     },

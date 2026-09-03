@@ -155,6 +155,39 @@ export interface ActualEmissionSnapshot {
    * "unknown provenance": every write since D2 sets it.
    */
   record_provenance?: InstallationRecordProvenance;
+
+  /**
+   * 2026-09-04 (owner decision 7). WHICH PERIOD of emissions data this
+   * calculation used, frozen alongside the numbers.
+   *
+   * The snapshot already froze which record (emission_data_id) and
+   * which version of it. It did not freeze what that record was a
+   * measurement OF. A producer's installation has one ACTIVE record per
+   * period, so "which record" and "which period" look interchangeable
+   * while you are looking at live data -- and stop being so the moment
+   * the record is superseded, discarded, or read across a grant that is
+   * later revoked. A frozen calculation has to be able to answer
+   * "emissions data for which period?" without a live read, because the
+   * live read is exactly what may no longer be available or may now
+   * answer differently.
+   *
+   * This freezes provenance, not a rule. It makes no claim about
+   * whether a dataset period is legally required to match the
+   * shipment's -- that question is open and is recorded as an owner
+   * decision, and inventing an answer here would be worse than leaving
+   * it open.
+   *
+   * Validated in the database against the emission_data row's own
+   * reporting period (migration 20260904130000), for the same reason
+   * record_provenance is: without that it would be a decorative field a
+   * raw PostgREST write could set to anything, and every surface that
+   * reads the snapshot would repeat the claim.
+   *
+   * OPTIONAL because determinations frozen before this existed carry no
+   * such key. Absent means "frozen before this field existed", never
+   * "unknown period": every write since sets it.
+   */
+  dataset_reporting_period?: ReportingPeriod;
 }
 
 export type EmissionDetermination =

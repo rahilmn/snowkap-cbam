@@ -283,6 +283,9 @@ describe(
             // than left to a live lookup that could be answered
             // differently later.
             record_provenance: "OPERATOR_PROVIDED",
+            // 2026-09-04 (owner decision 7): the period the emissions
+            // data covers, frozen with the numbers.
+            dataset_reporting_period: { kind: "ANNUAL", year: 2026 },
           },
         );
       },
