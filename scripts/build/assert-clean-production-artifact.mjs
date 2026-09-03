@@ -234,7 +234,46 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
+// ------------------------------------------------------------------
+// 2026-09-03 (P14 remediation). Second thing a deployable artifact must
+// never carry: a credential.
+//
+// Next's `output: "standalone"` traces the project's `.env` into the
+// standalone tree. On a developer machine that file holds the HOSTED
+// project's URL and service-role key, so `pnpm build` was producing a
+// deployable directory containing a live production credential -- found
+// by scanning the artifact during the P14 remediation.
+//
+// copy-standalone-assets.mjs (which runs immediately before this
+// script) now deletes them. This asserts the deletion actually
+// happened, rather than trusting that it did: the two scripts are
+// separate steps and the ordering between them is the kind of thing a
+// future package.json edit silently breaks.
+const strayEnvFiles =
+  existsSync(STANDALONE_DIR)
+    ? readdirSync(STANDALONE_DIR).filter(
+        (entry) => entry === ".env" || entry.startsWith(".env."),
+      )
+    : [];
+
+if (strayEnvFiles.length > 0) {
+  console.error(
+    "\nCREDENTIAL-IN-ARTIFACT CHECK FAILED\n",
+  );
+  console.error(
+    `${STANDALONE_DIR} contains ${strayEnvFiles.join(", ")}.\n\n` +
+      "A deployable artifact must never carry an env file: on a " +
+      "developer machine .env holds this project's HOSTED credentials, " +
+      "and the artifact is the thing that gets copied around.\n\n" +
+      "copy-standalone-assets.mjs strips these and runs immediately " +
+      "before this check, so seeing this means the two steps have come " +
+      "apart -- check the `postbuild` script in package.json.\n",
+  );
+
+  process.exit(1);
+}
+
 console.log(
   `[assert-clean-production-artifact] OK -- ${STANDALONE_DIR} carries no ` +
-    "E2E rate-limit bypass.",
+    "E2E rate-limit bypass and no env file.",
 );

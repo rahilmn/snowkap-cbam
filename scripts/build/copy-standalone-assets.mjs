@@ -10,6 +10,8 @@
 import {
   cpSync,
   existsSync,
+  readdirSync,
+  rmSync,
 } from "node:fs";
 
 import {
@@ -52,7 +54,52 @@ if (existsSync("public")) {
   );
 }
 
+// ------------------------------------------------------------------
+// 2026-09-03 (P14 remediation). Strip any env file Next traced into the
+// deployable tree.
+//
+// `output: "standalone"` copies the project's `.env` into
+// `<distDir>/standalone/.env`. On a developer machine that file holds
+// the HOSTED project's URL and service-role key -- the setup docs say
+// to put them there -- so `pnpm build` was producing a deployable
+// directory containing a live production credential, and a scan of the
+// artifact found exactly that.
+//
+// The production IMAGE was never affected: `.dockerignore` excludes
+// `.env` and `.env.*`, and the Docker build runs `pnpm build` inside
+// the image from a context that has neither. So this is a local
+// hygiene defect, not a shipped one -- but "the artifact is only
+// dangerous on the machines we trust" is not a property worth
+// depending on, and the file is useless in the artifact anyway:
+// production takes its configuration from platform environment
+// variables, never from a copied file.
+//
+// Deleted rather than warned about, and asserted absent afterwards by
+// assert-clean-production-artifact.mjs. The same reasoning as the E2E
+// rate-limit bypass check that runs beside it: an artifact that must
+// not contain something is a thing to enforce, not to document.
+const strippedEnvFiles =
+  readdirSync(STANDALONE_DIR)
+    .filter(
+      (entry) => entry === ".env" || entry.startsWith(".env."),
+    );
+
+for (const entry of strippedEnvFiles) {
+  rmSync(
+    `${STANDALONE_DIR}/${entry}`,
+    { force: true },
+  );
+}
+
 console.log(
   `Copied ${DIST_DIR}/static (and public/, if present) into ` +
     STANDALONE_DIR,
 );
+
+if (strippedEnvFiles.length > 0) {
+  console.log(
+    `Stripped ${strippedEnvFiles.length} env file(s) Next traced into ` +
+      `${STANDALONE_DIR}: ${strippedEnvFiles.join(", ")} -- a deployable ` +
+      "artifact must never carry credentials.",
+  );
+}
