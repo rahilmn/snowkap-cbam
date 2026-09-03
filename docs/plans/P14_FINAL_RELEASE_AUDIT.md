@@ -2255,3 +2255,292 @@ Still not closed, and not claimed:
 5. **The independent adversarial review.**
 
 This remains a self-audit by the agent that implemented the work.
+
+---
+
+## 22. P14.3 — CI on the release candidate
+
+Appended. §§1–21 stand as written.
+
+The owner verified the Railway configuration directly — production deploy
+branch `feature/full-product-build`, auto-deploy **OFF** — and authorised
+the push. `phase14/release-hardening` was pushed for CI only. **No
+production deployment was triggered**: the newest Railway deployment
+record remains `95c95bb` from 2026-09-02T13:46:30Z, unchanged across
+every push in this pass. `main` and the deploy branch are untouched, and
+production still serves `95c95bb`.
+
+### A. What CI found
+
+CI had **never run on this branch**. Four runs, each failing further
+along than the last, produced six defects. **None is in the product.**
+
+| Run | SHA | Outcome |
+|---|---|---|
+| `33739755416` | `be647ec` | `fast-gates` success; `build-and-test` **failed at step 10 (Test)** — 7 failed / 1619 passed |
+| `33740579561` | `72701dd` | Test **1626/1626**; **failed at step 13 (Playwright)** — 1 failed at 30.1s ×3 |
+| `33741306578` | `8b3e9c8` | Test 1626/1626; Playwright **38 passed / 10 skipped / 0 failed**; **failed at step 17 (secret scan)** |
+| `33742229143` | `464d6d8` | Test 1626/1626; Playwright **failed** — the health check ran for the first time and failed on both projects (§D) |
+| `33742947242` | `a977e72` | **SUCCESS** — see F |
+
+### B. The defect that justified the exercise
+
+**`supabase/seed.sql` was handing back every privilege the P14.1
+migrations revoked.**
+
+Seven security tests failed in run 1 that pass locally. The cause was not
+the tests. `seed.sql` replicates the hosted platform's bootstrap ACL with
+`grant all on all tables in schema public` and `grant all on all
+functions in schema public`, and the CLI runs it as the **last** step of
+`supabase db reset` / `supabase start` — after every migration.
+
+In any environment built by this repository's own documented procedure:
+
+| Control | Migration | What the seed did |
+|---|---|---|
+| INSERT/UPDATE/DELETE on `calculation_results` revoked | `20260903190000` | handed all three back — **the P14.1 release blocker was reachable again** |
+| `record_calculation_result` granted to `service_role` alone | `20260903190000` | handed EXECUTE to `authenticated` — a member could call the trusted channel directly and pass it any figure |
+| TRUNCATE revoked from both API roles | `20260903170000` | handed it back — the one privilege RLS does not constrain |
+
+**The P14.1 boundary was therefore never actually holding in a freshly
+built environment.** The nine live probes in §19 were sound as far as
+they went, but they measured a database where the migrations happened to
+be applied *after* the last seed. Any `supabase db reset` would have
+reverted all three controls. No amount of local verification would have
+found this; CI found it on the first honest attempt, which is precisely
+what Gate 2 was for.
+
+It is also the §20 restore-drill lesson arriving by a second and far more
+routine path. The general rule is broader than that section stated:
+**any blanket grant that runs after a narrow revoke undoes it** —
+restore, seed, or bootstrap alike. Three separate paths in this project
+re-open the same surface, and all three run through `seed.sql`, which is
+the only blanket grant in the repository.
+
+`seed.sql` now states the final intended posture rather than only the
+bootstrap, guarded on object existence because the CLI also runs it
+during `supabase start` before those objects exist. Verified on both
+paths: with the tables present it leaves zero write grants on
+`calculation_results`, zero TRUNCATE grants in `public`, and the RPC
+executable by `service_role` alone; with no product tables it applies
+cleanly, which is what stops the fix becoming an environment outage.
+
+`DEPLOYMENT.md`'s fresh-project rebuild — the documented **recovery**
+path, whose step 4 re-applies the seed — now records that the ordering is
+load-bearing, and gains a posture check as step 6 so a rebuild verifies
+rather than assumes.
+
+### C. The Storage-backed journey, in CI
+
+Run `33741306578`, step 13:
+
+```
+38 passed
+10 skipped
+ 0 failed
+```
+
+The extra pass over the previous run is
+`actual-data-determination.spec.ts` — installation → emission data →
+evidence upload → verification → activation → sharing → importer
+acceptance → actual determination → calculation → "Why this number?" →
+reproducibility → revocation → provenance survives — executing against
+real Supabase Storage inside CI, on the release candidate.
+
+Getting it there took four fixes, all in the test:
+
+1. It clicked `navigation "Primary"` on `/accept-invitation`, which
+   renders a standalone card with no app shell. Confirmed three ways: the
+   trace showed exactly two unfinished actions, both that click; the page
+   imports no `AppShell`; and the database showed the grant accepted with
+   zero shipments created.
+2. and 3. Two assertions matched by substring against text the dataset
+   `<select>` also carries, so each resolved to two elements and failed
+   strict mode. **The product was rendering both preview rows correctly
+   throughout** — Playwright's own error named the preview's `<dd>` as
+   the second match.
+4. It had **no timeout declaration at all**, so it inherited the 30s
+   default and failed at 30.1s on the initial attempt and both retries.
+   Its siblings have always carried one (`importer-journey` 180s,
+   `cross-org-sharing-journey` 300s) and this journey is shaped exactly
+   like the latter. Given 300s — roughly 4× headroom against the ~66s the
+   same journey takes on a *remote* hosted project, so a genuine hang
+   still fails rather than being absorbed.
+
+No assertion was weakened or removed. A Storage-gated spec that skipped
+everywhere had accumulated four latent faults, and only executing it
+found them.
+
+### D. Two CI gaps, also first-run discoveries
+
+**The secret scan failed on two lines containing no secret**, both
+pre-existing from `0d2fba2`:
+
+```
+process.env.SUPABASE_SERVICE_ROLE_KEY = LOCAL_SERVICE_ROLE_KEY;
+process.env.SUPABASE_SERVICE_ROLE_KEY = previousServiceRoleKey;
+```
+
+The pattern matches `SUPABASE_SERVICE_ROLE_KEY = <anything>` so a pasted
+literal is caught wherever it appears — correct, and it also catches
+assignment from a variable. The new filter is anchored on the
+`process.env.` prefix and a trailing semicolon, **not** on "the value
+looks like an identifier", because the looser shape would have excluded a
+dotenv-style `SUPABASE_DB_PASSWORD=hunter2secret` — exactly what this
+scan exists to catch. Verified both directions: the two real lines clear,
+that dotenv line still flagged.
+
+**The health-check E2E was skipping in CI on both projects.**
+`shell.spec.ts` gates it on
+`Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)`,
+and the workflow wrote those only into `.env.local` — a file the app
+build reads. The Playwright runner's process never received them. It
+passes locally for anyone who exports the pair, which is why nobody
+noticed, and §10.5 of the plan explicitly requires it to run. This is the
+same "green by omission" the step's own comment describes for the journey
+specs; that gap was closed by starting Supabase for the step, and the
+health check was left behind because nothing fails when a test quietly
+skips.
+
+### E. Skipped tests, by name
+
+**`fast-gates`** (no containers, by design): 1419 passed | 207 skipped
+(1626) across 17 suites — every one requiring local Supabase:
+`shipment-line-determination-hardening` (40),
+`organizations-isolation` (24), `emission-data-write-hardening` (21),
+`declarations-isolation` (18), `calculation-reproduction` (17),
+`sharing-grants-isolation` (14), `regulatory-repository` (10),
+`shipments-isolation` (9), `shared-data-consumption-audit` (9),
+`shared-data-status-visibility` (8), `sharing-counterparty-names` (8),
+`importer-entered-provenance` (7),
+`resolve-default-value.real-data` (6), `auth-email-links` (5),
+`regulatory-authenticated-read` (5), `regulatory-resolution` (4),
+`audit-events-occurred-at-hardening` (2).
+
+All 207 **run and pass** in `build-and-test`, which starts real Supabase:
+**1626 passed, 0 skipped.**
+
+**Playwright**: 10 skipped — 8 desktop-only journeys on
+`mobile-chromium`, plus the health check on both projects (§D, now
+fixed).
+### F. The passing run
+
+**Run `33742947242`** — SHA **`a977e720e63296da6674fb7a881ef4df7cf97b98`**,
+started 2026-09-03T10:11:14Z. Both jobs **success**. Every step in both
+jobs succeeded; none was skipped.
+
+**`fast-gates`** (no containers):
+
+| Gate | Result |
+|---|---|
+| Typecheck | success |
+| Unit / domain / architecture tests | **1419 passed \| 207 skipped (1626)** |
+| Production build | `✓ Compiled successfully in 8.1s` |
+| Build artifact | **`[assert-clean-production-artifact] OK -- .next/standalone carries no E2E rate-limit bypass.`** |
+| Secret scan | `Secret scan clean.` |
+
+**`build-and-test`** (real Supabase, Storage enabled) — all 17 steps
+success:
+
+| Gate | Result |
+|---|---|
+| Start local Supabase + regulatory dataset | success |
+| ACTIVE regulatory rows | **12540** (asserted, not printed) |
+| Storage reachable | `storage/v1/bucket -> 400` (**not** 503 — genuinely up) |
+| Evidence bucket | exists — the four storage migrations applied for real |
+| Test | **138 files, 1626 passed (1626)** — **zero skipped** |
+| Playwright | **40 passed, 8 skipped, 0 failed, 0 flaky** (1.7m) |
+| Health check | `✓ [chromium]` and `✓ [mobile-chromium]` |
+| Dependency audit | success |
+| Secret scan | `No secret-shaped literals found in tracked files.` |
+
+**Skipped tests, all 8, by name** — every one `[mobile-chromium]` only,
+each with a `chromium` counterpart that runs:
+
+1. actual-data determination journey
+2. cross-org sharing journey
+3. importer full journey
+4. producer full journey
+5. importer auth smoke
+6. producer auth smoke
+7. team invitation journey (scanner/prefetch)
+8. "all ten importer nav items are present in the primary sidebar
+   (desktop)"
+
+Desktop-only by declared discipline: the primary nav, org switcher and
+multi-column tables these journeys drive are hidden or reflowed below
+`md`/`sm`. **No skip conceals an unexercised behaviour** — which was not
+true two runs earlier, when the health check was skipping on both
+projects.
+
+**No production deployment was triggered by any push in this pass.** The
+newest Railway deployment record remains `95c95bb` from
+2026-09-02T13:46:30Z. `main` (`909233d`) and `feature/full-product-build`
+(`95c95bb`) are untouched, and production still serves `95c95bb`.
+
+### G. What this run does and does not establish
+
+**Establishes**, on the exact SHA in a clean environment, end to end:
+the candidate builds and typechecks; 1,626 tests pass against real
+Supabase with zero skips; 40 Playwright tests pass including the
+Storage-backed actual-data determination journey and the health check on
+both viewports; the production artifact carries no rate-limit bypass; no
+committed secrets; the regulatory dataset loads at exactly 12,540 ACTIVE
+rows.
+
+**Does not establish**: that production recovery works (§21 D restored
+the *local* database, not production); that hosted Auth delivers real
+mail (no mailbox has received one of these templates); that the six
+owner-UAT findings are closed; or that the Annex II sector proxy is
+anything other than a proxy (§20 F). It is also not an independent
+review.
+
+**One caveat the reviewer should weigh directly.** Three of the seven
+findings were fixed in `ci.yml` itself, so CI is green partly because
+CI was changed. Two of those deserve specific scrutiny, and both were
+verified in *both* directions before committing rather than only in the
+direction that made the build pass:
+
+- the secret-scan filter is anchored on `process.env.` and a trailing
+  semicolon, so a dotenv-style `SUPABASE_DB_PASSWORD=hunter2secret` is
+  **still flagged** — checked explicitly;
+- `APP_URL` fixes a real configuration fault rather than muting a check
+  — the health check was correct to fail, and it failed for the exact
+  reason `check-app-url.ts` was written after a production incident.
+
+"The agent adjusted the gate and the gate then passed" is a pattern that
+warrants review regardless of how sound the reasoning reads from inside,
+and those two diffs are where to look.
+
+### H. Status
+
+**READY FOR INDEPENDENT REVIEW**
+
+Every certification gate that can be executed from this environment is
+complete: CI green on the exact candidate SHA, the Storage-backed
+determination journey passing in CI, the hosted restore drill executed
+with its remedies validated, U1 verified against hosted GoTrue, the
+security re-check clean, artifact integrity proven, and
+`regulatory:verify` VALID against production.
+
+This says the candidate is ready to be **reviewed**. It does not say it
+is ready to be released, and nothing here authorises a deployment.
+
+Outstanding before release, none of them closable from here:
+
+1. **Production recovery** — the procedure is proven and its remedies
+   validated; a production-sourced restore is not.
+2. **Hosted Auth delivery** — production templates are not live and no
+   real mailbox has received one.
+3. **Owner UAT** — six of the nineteen findings require it.
+4. **The independent adversarial review.**
+
+Carried unchanged as HIGH RISK: the Annex II sector proxy (§20 F), the
+cascade deletion of calculation history on an unfiled line (§19 E), and
+the items listed in §20 M.
+
+**This remains a self-audit by the agent that implemented the work.**
+§21's `seed.sql` finding is the reason to treat it as one: nine live
+probes in §19 proved a security boundary that a freshly built
+environment did not actually have. Any "verified locally" claim in this
+document deserves the same suspicion.
