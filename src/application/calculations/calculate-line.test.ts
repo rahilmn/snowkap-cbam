@@ -317,7 +317,7 @@ describe(
             org_id: "org-1",
             line_id: "line-1",
             calculated_by_user_id: "user-1",
-            engine_version: "1.3.0",
+            engine_version: "1.4.0",
             quantity: "10.5",
             quantity_unit: "TONNES",
             embedded_emissions_tco2e: "14.595",

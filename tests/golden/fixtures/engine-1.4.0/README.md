@@ -101,3 +101,37 @@ rather than as settled:
   be resolved at all. The `ANNEX_II_DIRECT_ONLY` step is emitted even
   when indirect emissions are already zero, where the arithmetic is
   identical but the trace is not.
+
+## Engine 1.4.0 (2026-09-03, P14 remediation)
+
+Derived from 1.3.0. What actually changed, and what was re-derived by
+hand rather than carried forward:
+
+**The unit guard's denominator is now an exact token.** It previously
+tested `normalized.includes("TONNE")`, and `KILOTONNE` contains
+`TONNE` — so `tCO2e/kilotonne`, `tCO2e/megatonne`,
+`TCO2E_PER_KILOTONNE` and `TCO2E_PER_MEGATONNE` were all COMPUTED at
+1:1, overstating the regulated figure by 1,000× and 1,000,000×.
+Confirmed live before the fix by evaluating the predicate against each
+string.
+
+Five cases added to `emission-units.json`: the four prefixed units
+above, all now `UNIT_UNSUPPORTED`, plus `tCO2e/tonnes` as a control —
+tightening a rule is only safe if the ordinary spellings are asserted
+to still pass.
+
+**Two existing cases flipped from COMPUTED to UNIT_UNSUPPORTED.**
+`tCO2e/t/yr` and `tCO2e/t-year` were accepted by the old
+`/T(?![A-Z0-9])` lookahead, which admits any non-alphanumeric suffix.
+This directory pinned that as *today's behaviour, recorded as a
+follow-up defect* rather than as correct. The exact-token rule closes
+it, so the fixtures now state the right answer.
+
+**Nothing arithmetic changed.** No formula, no rounding mode, no
+precision, no rule reference. The `engine_version` field in
+`default-method.json` and `actual-method.json` was updated from
+`"1.3.0"` to `"1.4.0"` mechanically — it is the version stamp, not a
+derived value, and every expected `embedded_emissions_tco2e` in those
+two files is byte-identical to 1.3.0's. That is the one field it is
+legitimate to carry forward; if a *value* ever needs carrying forward,
+re-derive it instead.

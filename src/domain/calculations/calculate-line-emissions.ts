@@ -181,9 +181,46 @@ function unitMatchesQuantityBasis(
     return false;
   }
 
+  // 2026-09-03 (P14 remediation). The DENOMINATOR must be an exact
+  // token, not a substring.
+  //
+  // This previously read
+  //   normalized.includes("TONNE") || /\/T(?![A-Z0-9])/.test(normalized)
+  // and "KILOTONNE" contains "TONNE". Verified live before this fix:
+  // `tCO2e/kilotonne`, `tCO2e/megatonne`, `TCO2E_PER_KILOTONNE` and
+  // `TCO2E_PER_MEGATONNE` were all COMPUTED, at 1:1 -- a 1,000x and
+  // 1,000,000x overstatement of the regulated figure, produced by the
+  // trusted path from honest data.
+  //
+  // It matters because emission_data.emission_unit is an unconstrained
+  // text column that a producer types into, and the ACTUAL branch
+  // carries it straight into the engine. The unit guard is the only
+  // wall between a free-text field and the number that gets filed.
+  //
+  // This is the SECOND time this function has been fixed for the same
+  // shape of defect: the numerator check above exists because
+  // "kgCO2e/t" passed a denominator-only test and overstated by 1000x
+  // (P13). The lesson both times is that a substring test on a unit
+  // string is not a unit check -- so the denominator is now split out
+  // and compared against an exact allowlist, which is checkable by
+  // reading rather than by imagining the strings that might match.
+  //
+  // Splitting on the two separator conventions this codebase uses -- a
+  // slash, and "_PER_" (the regulatory dataset's own spelling).
+  const denominator =
+    normalized.includes("_PER_")
+      ? normalized.split("_PER_").slice(1).join("_PER_")
+      : normalized.slice(normalized.indexOf("/") + 1);
+
+  // "tCO2e/t/yr" and "tCO2e/t-year" are refused by this too, and were
+  // COMPUTED before -- the old `/T(?![A-Z0-9])` lookahead admitted any
+  // non-alphanumeric suffix. They were a recorded follow-up defect
+  // (tests/golden/fixtures pinned today's behaviour rather than the
+  // right one); the exact-token rule closes them as a side effect,
+  // which is why the goldens for them flip in the same change.
   return netMassTonnes !== null
-    ? normalized.includes("TONNE") || /\/T(?![A-Z0-9])/.test(normalized)
-    : normalized.includes("MWH");
+    ? denominator === "T" || denominator === "TONNE" || denominator === "TONNES"
+    : denominator === "MWH";
 }
 
 function calculateFromDefaultDetermination(

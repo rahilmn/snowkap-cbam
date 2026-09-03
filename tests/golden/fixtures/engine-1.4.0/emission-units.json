@@ -67,18 +67,18 @@
     "expected_status": "COMPUTED"
   },
   {
-    "name": "RECORDED DEFECT: tCO2e/t/yr currently computes as if it were per-tonne",
-    "note": "The denominator test /T(?![A-Z0-9]) admits any non-alphanumeric suffix, so a PER-YEAR intensity is accepted as a PER-TONNE one and the resulting figure is wrong by however many years the record covers. This fixture pins TODAY'S behaviour so it cannot change unnoticed; it is written down as a follow-up defect, and this expectation must be flipped to UNIT_UNSUPPORTED deliberately when it is fixed. Not silently expected to be correct.",
+    "name": "tCO2e/t/yr is refused",
+    "note": "P14 remediation, engine 1.4.0. Previously COMPUTED: the old denominator test used a /T(?![A-Z0-9]) lookahead, which admits any non-alphanumeric suffix, so a per-year intensity was treated as a per-tonne one. This fixture pinned that behaviour as a recorded follow-up defect rather than as correct. The exact-token denominator rule closes it, and the expected value is re-derived here by hand rather than carried forward.",
     "emission_unit": "tCO2e/t/yr",
     "quantity_basis": "TONNES",
-    "expected_status": "COMPUTED"
+    "expected_status": "UNIT_UNSUPPORTED"
   },
   {
-    "name": "RECORDED DEFECT: tCO2e/t-year currently computes as if it were per-tonne",
-    "note": "Same defect, hyphenated spelling. See the fixture above.",
+    "name": "tCO2e/t-year is refused",
+    "note": "P14 remediation, engine 1.4.0. Previously COMPUTED: the old denominator test used a /T(?![A-Z0-9]) lookahead, which admits any non-alphanumeric suffix, so a per-year intensity was treated as a per-tonne one. This fixture pinned that behaviour as a recorded follow-up defect rather than as correct. The exact-token denominator rule closes it, and the expected value is re-derived here by hand rather than carried forward.",
     "emission_unit": "tCO2e/t-year",
     "quantity_basis": "TONNES",
-    "expected_status": "COMPUTED"
+    "expected_status": "UNIT_UNSUPPORTED"
   },
   {
     "name": "OPEN OWNER QUESTION: tCO2/t computes, treating CO2 as CO2e",
@@ -98,5 +98,40 @@
     "emission_unit": "tCO2e/t",
     "quantity_basis": "MWH",
     "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "tCO2e/kilotonne is refused -- the spelled-out magnitude prefix, a 1000x overstatement",
+    "note": "P14 remediation. The denominator check was a substring test for TONNE, and KILOTONNE contains TONNE. Verified accepted before the fix, so a producer typing a spelled-out prefix into emission_data.emission_unit (an unconstrained text column) produced a figure a thousand times too large through the trusted path.",
+    "emission_unit": "tCO2e/kilotonne",
+    "quantity_basis": "TONNES",
+    "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "tCO2e/megatonne is refused -- 1,000,000x",
+    "note": "P14 remediation. Same substring defect as kilotonne.",
+    "emission_unit": "tCO2e/megatonne",
+    "quantity_basis": "TONNES",
+    "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "TCO2E_PER_KILOTONNE is refused -- the dataset spelling of the same prefix",
+    "note": "P14 remediation. The _PER_ separator form of the same defect.",
+    "emission_unit": "TCO2E_PER_KILOTONNE",
+    "quantity_basis": "TONNES",
+    "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "TCO2E_PER_MEGATONNE is refused",
+    "note": "P14 remediation.",
+    "emission_unit": "TCO2E_PER_MEGATONNE",
+    "quantity_basis": "TONNES",
+    "expected_status": "UNIT_UNSUPPORTED"
+  },
+  {
+    "name": "tCO2e/tonnes (plural) is accepted -- the tightening must not reject a real spelling",
+    "note": "P14 remediation. The denominator is now an exact token match, so the control that it still accepts the ordinary spellings matters as much as the rejections.",
+    "emission_unit": "tCO2e/tonnes",
+    "quantity_basis": "TONNES",
+    "expected_status": "COMPUTED"
   }
 ]

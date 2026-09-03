@@ -59,8 +59,25 @@ export type EngineVersion =
 // different implementation would be a meaningless claim even where it
 // happens to hold. No historical row is rewritten: append-only means
 // append-only.
+// 2026-09-03 (P14 remediation): bumped 1.3.0 -> 1.4.0 for the unit
+// guard. `unitMatchesQuantityBasis` tested the denominator with
+// `normalized.includes("TONNE")`, and "KILOTONNE" contains "TONNE" --
+// so `tCO2e/kilotonne`, `tCO2e/megatonne` and their `_PER_` spellings
+// were all COMPUTED at 1:1, overstating the regulated figure by 1,000x
+// and 1,000,000x. Verified live before the fix. The denominator is now
+// compared against an exact allowlist (T / TONNE / TONNES, or MWH),
+// which also closes `tCO2e/t/yr` and `tCO2e/t-year` -- previously
+// COMPUTED, and recorded as a known follow-up defect rather than fixed.
+//
+// It gets a version because the engine's ACCEPTED INPUT SET changed:
+// inputs that produced a number now produce UNIT_UNSUPPORTED. Nothing
+// stored is affected in practice -- every emission_unit in use is
+// `tCO2e/t` or `TCO2E_PER_TONNE`, both still accepted, and the ACTIVE
+// regulatory dataset is 12,540/12,540 `TCO2E_PER_TONNE` -- but "same
+// version, different behaviour" is the one thing this column must never
+// mean.
 export const ENGINE_VERSION: EngineVersion =
-  "1.3.0";
+  "1.4.0";
 
 /**
  * Identifies one ACTIVE regulatory dataset the calculation engine read

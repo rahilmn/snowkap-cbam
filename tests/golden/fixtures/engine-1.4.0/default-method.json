@@ -21,7 +21,7 @@
     },
     "expected": {
       "status": "COMPUTED",
-      "engine_version": "1.3.0",
+      "engine_version": "1.4.0",
       "embedded_emissions_tco2e": "2.78",
       "steps": [
         {
@@ -59,7 +59,7 @@
     },
     "expected": {
       "status": "COMPUTED",
-      "engine_version": "1.3.0",
+      "engine_version": "1.4.0",
       "embedded_emissions_tco2e": "2.8",
       "steps": [
         {
@@ -97,7 +97,7 @@
     },
     "expected": {
       "status": "COMPUTED",
-      "engine_version": "1.3.0",
+      "engine_version": "1.4.0",
       "embedded_emissions_tco2e": "0.46287",
       "steps": [
         {
@@ -135,7 +135,7 @@
     },
     "expected": {
       "status": "VALUE_UNAVAILABLE",
-      "engine_version": "1.3.0"
+      "engine_version": "1.4.0"
     }
   },
   {
@@ -160,7 +160,7 @@
     },
     "expected": {
       "status": "VALUE_UNAVAILABLE",
-      "engine_version": "1.3.0"
+      "engine_version": "1.4.0"
     }
   },
   {
@@ -185,7 +185,7 @@
     },
     "expected": {
       "status": "VALUE_UNAVAILABLE",
-      "engine_version": "1.3.0"
+      "engine_version": "1.4.0"
     }
   },
   {
@@ -210,7 +210,7 @@
     },
     "expected": {
       "status": "COMPUTED",
-      "engine_version": "1.3.0",
+      "engine_version": "1.4.0",
       "embedded_emissions_tco2e": "50",
       "steps": [
         {
@@ -248,7 +248,7 @@
     },
     "expected": {
       "status": "UNIT_UNSUPPORTED",
-      "engine_version": "1.3.0"
+      "engine_version": "1.4.0"
     }
   },
   {
@@ -262,7 +262,7 @@
     },
     "expected": {
       "status": "INPUT_UNRESOLVED",
-      "engine_version": "1.3.0"
+      "engine_version": "1.4.0"
     }
   }
 ]
