@@ -1572,3 +1572,421 @@ smoke) are untouched and still outstanding.
 
 This remains a self-audit by the agent that implemented the work. It is
 not the independent adversarial review.
+
+---
+
+## 20. P14.2 — final certification gates (2026-09-03)
+
+Appended. §§1–19 stand as written. Nothing was deployed; `main` and
+`feature/full-product-build` are untouched; no migration was promoted;
+no production data was modified by any probe in this pass.
+
+**Candidate SHA:** `e72d4988db5dc4473050c9b65019181370e440ee`
+(`phase14/release-hardening`, unpushed). This section adds one docs
+commit on top; the code it certifies is unchanged from `06cea94`.
+
+### Gate summary
+
+| # | Gate | Result |
+|---|---|---|
+| 1 | Railway topology | **BLOCKED** — no access by any route (A) |
+| 2 | CI on the exact SHA | **NOT RUN** — depends on 1 (B) |
+| 3 | Storage-backed actual-data E2E | **NOT RUN** — local Storage proven unusable; CI depends on 2 (C) |
+| 4 | Hosted restore | **NOT RUN** — needs an owner-authorised throwaway project (D) |
+| 5 | Hosted Auth templates | **NOT DONE** — needs dashboard access (E) |
+| 6 | D1 regulatory control | **DONE** (F) |
+| 7 | Final security re-check | **DONE** — 23 live probes (G) |
+| 8 | Build artifact integrity | **DONE** (H) |
+| 9 | Final regulatory check | **DONE** — `RESULT: VALID` (I) |
+| 10 | This section | **DONE** |
+
+### A. Gate 1 — Railway topology: BLOCKED
+
+Access was exhausted, not assumed:
+
+| Route | Result |
+|---|---|
+| `railway` CLI | not installed |
+| `RAILWAY_*` environment variables | none |
+| Railway key in `.env` | none — `.env` holds only Supabase and Resend keys |
+| `~/.railway`, `~/.config/railway` | neither exists |
+| `railway.json` in the repo | present, and carries **no branch or auto-deploy field** — only builder, Dockerfile path, start command, healthcheck and restart policy |
+| GitHub App installation API | 401 — requires a GitHub App JWT, which this session does not hold |
+| Repository webhooks | returned nothing |
+
+What §18 B established from evidence still stands: the two Railway
+services are branch-filtered (`chic-expression` deployed `main` once and
+then ignored 62 consecutive pushes to the deploy branch). What remains
+unknowable without the dashboard is what a branch that has **never
+existed on the remote** does. `feature/phase-1-foundation` and `master`
+carry no deployment record, but both were last pushed *before* the
+earliest deployment record (2026-08-28 23:43 UTC), so their silence
+proves nothing.
+
+**No push was made.** Pushing could deploy 22 unreviewed commits and 11
+unapplied migrations' worth of code to a system serving two real
+organisations, a FILED declaration and a pending invitee.
+
+**Owner action (unblocks gates 2 and 3):** in the Railway dashboard, for
+the service behind `snowkap-cbam-production.up.railway.app`, record (a)
+the connected repository, (b) the deploy branch, (c) whether auto-deploy
+is enabled, (d) whether a preview/staging environment exists, (e) the
+build-retention setting. Then either confirm a push to
+`phase14/release-hardening` cannot deploy, or pause auto-deploy for the
+duration of the CI run.
+
+### B. Gate 2 — CI on the exact SHA: NOT RUN
+
+CI triggers on push (`branches: ['**']`). Running it on the candidate
+requires pushing, which is blocked by A. There is no substitute: a tag
+push does not match `branches:`, and the brief forbids substituting an
+older SHA, the deploy branch, a local equivalent or a recreated state.
+Recorded as not run — not as passed, and not as unnecessary.
+
+### C. Gate 3 — Storage-backed actual-data E2E: NOT RUN, with a corrected diagnosis
+
+This pass **tried** rather than accepting the previous record, and the
+previous record turned out to be imprecise in a way worth fixing.
+
+§18 E said the local Storage container was "unhealthy". It was not
+running at all: `supabase/config.toml` ships `[storage] enabled = false`,
+so no storage container existed, and the 503 was the gateway answering
+with no backend behind it.
+
+So Storage was enabled — the same `awk` edit CI makes — and the stack
+restarted. The result, now precisely characterised:
+
+```
+supabase_storage_snowkap-cbam container is not ready: unhealthy
+image:       public.ecr.aws/supabase/storage-api:v1.71.0
+healthcheck: wget --spider http://127.0.0.1:5000/status
+state:       restarting, RestartCount 9
+docker logs: EMPTY — zero bytes of output across all 9 attempts
+health log:  []
+```
+
+A container that crash-loops silently. The config comment's claim of a
+machine-specific image incompatibility holds up, and is now evidenced
+rather than asserted.
+
+`config.toml` was reverted and the stack restored; the local database
+survived intact (posture comparator: `POSTURE MATCHES`; the
+calculation-write boundary unchanged).
+
+There is a second obstacle behind the first, which matters for whoever
+runs this next: four storage-touching migrations
+(`20260829240000`, `20260829410000`, `20260829490000`, `20260829510000`)
+were marked applied locally via `supabase migration repair` because
+`storage.buckets` never existed. Enabling Storage alone would therefore
+**not** produce a working evidence flow locally — those four would need
+applying by hand as well. CI does not have this problem: it starts from
+a clean runner where they apply for real.
+
+**Conclusion:** the journey — installation → emission data → evidence
+upload → verification → activation → sharing → importer acceptance →
+actual determination → calculation → provenance → reproducibility — has
+still **never executed anywhere**. It is not faked, not skipped
+silently, and not converted into a passing test. The authorised
+environment is CI, and CI is blocked behind A.
+
+### D. Gate 4 — Hosted restore: NOT RUN
+
+The Supabase CLI *is* authenticated on this host (six projects across two
+organisations are listed), so management access exists. Two things
+stopped this pass short of running the drill:
+
+1. Creating a throwaway hosted project is a **billable** action on
+   `ci@powerweave.com's Org`, which already holds five active projects
+   and is therefore not on a free plan.
+2. An existing project named **"Snowkap DBs"**
+   (`egqluooxyxqmqbprinzt`, created 2026-09-01, same org) might be the
+   intended scratch target — or might hold real data. An attempt to read
+   its API keys to find out was refused by this session's own permission
+   controls, correctly: that is credential access for a project unrelated
+   to the linked one.
+
+Restoring into a project whose contents are unknown is exactly the
+"do not restore over production" failure this gate exists to prevent, so
+neither project was touched.
+
+**Everything §19 C established still stands** and is not re-litigated
+here: `--no-privileges` carried 0 of 116 grant statements; the missing
+`auth` schema cost 5 of 56 policies (all INSERT) and 10 foreign keys; and
+even at policy and grant parity, 9 of 10 foreign keys cannot be created
+because `auth.users` is empty and is not in the dump. The procedure is
+fixed and `scripts/ops/compare-database-posture.mjs` is ready to run
+against a hosted pair.
+
+**Recovery remains unproven.** The brief's own instruction — "Do not
+claim production recovery is proven until the hosted drill succeeds" — is
+honoured.
+
+**Owner decision required:** authorise a throwaway hosted project (and
+say whether "Snowkap DBs" is that project, or whether a new one should be
+created and deleted afterwards).
+
+### E. Gate 5 — Hosted Auth templates: NOT DONE
+
+Unchanged from §18 G. The route, the token-hash handling, the error
+taxonomy, the set-password step and the local templates are implemented
+and covered by integration and E2E tests, including the prefetch/scanner
+case. The hosted templates are not live, and pasting them needs the
+Supabase dashboard.
+
+`supabase config push` exists and would technically write auth
+configuration to the linked project. It was **not** used: it pushes the
+whole config section rather than four templates, it would change
+production Auth configuration outside the documented staged procedure,
+and the brief forbids changing production absent an authorised
+procedure.
+
+Consequences that must not be glossed: the two-device password-recovery
+proof has not run against production, and assumption **U1** — that
+`{{ .TokenHash }}` carries the `pkce_` prefix for PKCE-initiated
+recovery links — remains **unverified against hosted GoTrue**. It is
+load-bearing; if false, the Recovery template breaks password reset for
+every user, which is why the runbook pastes Reset password first, alone,
+and verifies it on two devices before anything else is touched.
+
+### F. Gate 6 — D1 regulatory control: DONE
+
+D1 is **not** removed and the direct-only Annex II treatment is
+**unchanged**. The limitation is now documented precisely, in
+`docs/regulatory/ANNEX_II_APPLICABILITY_DATASET_REQUIREMENTS.md`, and
+recorded here as a **HIGH-RISK REGULATORY FOLLOW-UP**.
+
+Measured, not estimated. `ANNEX_II_SECTORS` is `{IRON_STEEL, ALUMINIUM}`,
+tested against the `sector` column of the good's `cbam_goods` row. In the
+ACTIVE dataset:
+
+| Sector | Goods | Treated as Annex II |
+|---|---|---|
+| IRON_STEEL | 221 | yes |
+| ALUMINIUM | 24 | yes |
+| FERTILISERS | 29 | no |
+| CEMENT | 8 | no |
+| HYDROGEN | 1 | no |
+| **Total** | **283** | **245 (86.6%)** |
+
+**The failure mode inverted on the day D1 landed**, and this is the part
+worth stating plainly. Before D1 the same set was a fail-closed gate: an
+over-broad proxy caused a *refusal*. After D1 it makes a good
+direct-only, which *lowers* the figure — so a good wrongly inside the
+proxy now has its indirect emissions **silently dropped**, with a
+complete and internally consistent `ANNEX_II_DIRECT_ONLY` trace step
+attesting to it.
+
+This is not an argument to reverse D1, which is the correct treatment for
+goods genuinely in Annex II. It is an argument that the membership test
+must stop being a proxy. Mitigating, fairly: the trace records the
+excluded value as `indirect_specific_excluded`, so the omission is
+discoverable after the fact — it is just not prevented.
+
+The requirements document specifies the replacement: source from EUR-Lex
+Annex II of Regulation (EU) 2023/956; a new `ANNEX_II_APPLICABILITY`
+dataset type (the current CHECK does not permit one); CN-code granularity
+with an explicit `code_level`; a three-way resolution outcome where
+`UNRESOLVED` is never silently read as either answer; the prefix/hierarchy
+matching rule registered before it is implemented; `ANNEX_II_SECTORS`
+deleted; `ENGINE_VERSION` bumped to 1.4.0 with 1.3.0 rows left alone; and
+a regression test proving a good the proxy mis-classified is now
+calculated with indirect included. It is an owner escalation under
+ADR-0013, not phase work.
+
+### G. Gate 7 — Final security re-check: DONE
+
+Twenty-three live probes against real local Postgres, every mutation
+inside a real `BEGIN … ROLLBACK`.
+
+| Probe | Result |
+|---|---|
+| `calculation_results` direct INSERT as `authenticated` | permission denied |
+| `calculation_results` UPDATE as `authenticated` | permission denied |
+| `calculation_results` DELETE as `authenticated` | permission denied |
+| `record_calculation_result` called as `authenticated` | permission denied for function |
+| cross-org write via the trusted channel | `LINE_NOT_FOUND` |
+| cross-org READ of `calculation_results` | 0 rows |
+| IDOR — foreign shipments | 0 rows |
+| foreign `sharing_grants` | 0 rows |
+| foreign `evidence_files` | 0 rows |
+| foreign `emission_data` | 0 rows |
+| foreign `organization_invitations` | 0 rows |
+| `audit_events` UPDATE / DELETE | 0 rows (append-only) |
+| capabilities removal | refused by the append-only trigger |
+| TRUNCATE as `authenticated` / `anon` | permission denied (both) |
+| SECURITY DEFINER functions without pinned `search_path` | **0** |
+| public tables without RLS | **0** |
+| write grants held by `anon`/`authenticated` on `calculation_results` | **NONE** |
+
+**Two probes were caught being vacuous and re-run properly** — the same
+error this pass criticised in the restore drill, so it was not allowed to
+stand here. The filed-snapshot and evidence-strip probes initially ran
+against an org that owned no matching rows, making `UPDATE 0` meaningless.
+Re-run as members of the orgs that actually hold the rows:
+
+| Probe | Result |
+|---|---|
+| member tampers with their OWN filed snapshot (1 row visible to them) | `UPDATE 0` — refused |
+| strip evidence from an ACTIVE+VERIFIED record **holding 1 file** | refused: "evidence cannot be removed…" |
+| swap one evidence id for another, same count | refused |
+| un-verify while moving status in the same statement (the §19 bypass) | refused: "cannot be un-verified" |
+| the legitimate DISCARD path | `UPDATE 1` — still works |
+
+A third result worth recording rather than hiding: setting
+`evidence_file_ids = '{}'` on a record whose array was **already empty**
+returns `UPDATE 1`. That is correct — nothing was removed — and it is
+noted because the raw result looks like a bypass until the row's prior
+state is checked.
+
+**Storage authorization could not be re-probed** — see C. That is the one
+surface in the brief's list this gate does not cover.
+
+### H. Gate 8 — Build artifact integrity: DONE
+
+| Check | Result |
+|---|---|
+| `.next` tree hash after a full Playwright run | `c9614f5591…617992e` — byte-identical to the pre-E2E fingerprint |
+| `assert-clean-production-artifact --require-artifact` | OK |
+| Either bypass variable anywhere in the `.next` tree | **absent** |
+| `.next` `required-server-files.json` | `E2E_RATE_LIMIT_BYPASS_BUILD = ""` |
+| `.next-e2e` `required-server-files.json` | `E2E_RATE_LIMIT_BYPASS_BUILD = "true"` |
+
+The last row is the important one: the bypass still exists where the test
+needs it, so the E2E was not weakened to achieve a clean artifact.
+
+### I. Gate 9 — Final regulatory check: DONE
+
+`pnpm regulatory:verify` against **production**, 2026-09-03T08:28:38Z:
+
+```
+Canonical records: 12540      Source checksum 900583811c7e…6f9f35
+Source checksum                 PASS      Database records: 12540
+Canonical identity uniqueness   PASS      Database identity uniqueness PASS
+Canonical/database identities   PASS      Field-level reconciliation   PASS (12540/12540)
+Emission semantic invariants    PASS      Country coverage             PASS
+CBAM goods coverage             PASS      Production route coverage    PASS
+
+RESULT: VALID
+```
+
+Active dataset: `2026-definitive-corrected`, id
+`8895df69-993b-49af-9a68-268019b214fe`, type `DEFAULT_EMISSION_VALUES`.
+
+No regulatory health condition is claimed beyond what the application
+actually enforces: `/api/health`'s `active_regulatory_dataset` check
+verifies that exactly one ACTIVE row exists — **not** its version and
+**not** its row count. Those two facts come from `regulatory:verify`, run
+separately, and that distinction is why the health check is not a
+substitute for it.
+
+### J. Migration ledger and production state
+
+| | |
+|---|---|
+| Applied both sides | 63, same order, no drift |
+| Pending | **11** — `20260902150000`, `20260903100000`…`20260903190000` |
+| Remote-only entries | none |
+| Production SHA | `95c95bb3db07eeb90eac481c6a8e16a702cf88b1` |
+| `/api/health` | `ok`; database, active_regulatory_dataset, app_url, product_schema all ok |
+| `/api/live` | 200 |
+
+Production is serving the pre-P14 build, which is the correct and
+intended state.
+
+### K. The 19 original UAT findings, re-attacked
+
+Closure is claimed only where the implementation or environment actually
+proves it.
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | signup + confirmation via a real inbox | **OPEN** — owner UAT; the Confirm-signup template is not live (E) |
+| 2 | confirmation email delivered | **OPEN** — same |
+| 3 | onboarding reaches an org | **CLOSED** — covered by E2E |
+| 4 | a real account received invitations | **OPEN** — owner UAT; old template shape |
+| 5 | `otp_expired` on the invitation link | **CODE COMPLETE, UNPROVEN** — `/auth/confirm` exists and the prefetch/scanner case passes in E2E; the hosted templates are not live |
+| 6 | second invitee reached the producer dashboard | **OPEN** — owner UAT; that user still holds no known password |
+| 7 | ABC is a real org | **CLOSED** — the trailing-space name remains an owner one-off `btrim` |
+| 8 | producer mobile navigation | **OPEN** — owner UAT; nav and dialogs changed since the original evidence |
+| 9 | 2 tCO2e correct | **CLOSED** — independently recomputed, plus golden fixtures |
+| 10 | reproducibility | **CLOSED** — the CI half now exists (`calculation-reproduction.test.ts`) and passes against real Postgres |
+| 11 | "Not determined" / "Not calculated" states | **CLOSED** |
+| 12 | weak "Use this data" CTA | **CLOSED in code** — `actual-data-preview.tsx` plus the "Determine from actual data" CTA; unverified in production |
+| 13 | no confirmation dialogs | **CLOSED in code** — `confirm-dialog.tsx` / `confirm-submit-button.tsx`; unverified in production |
+| 14 | role navigation | **PARTIALLY CLOSED** — the misleading copy is fixed; see below |
+| 15 | Settings disabled for both roles | **OWNER DECISION** — still a placeholder |
+| 16 | producer Production data / Evidence / Verification disabled | **PARTIALLY CLOSED** — the tooltips were factually wrong and are now accurate; removal is an owner decision |
+| 17 | importer Calculations / Installations disabled | **CLOSED for Installations** by D2 (External operators + External emissions are real screens); Calculations now explains that calculation happens per line |
+| 18 | hamburger / mobile drawer | **OPEN** — owner UAT; dialogs must stack above the drawer |
+| 19 | "Shared by Unknown organization" | **CODE COMPLETE, UNPROVEN IN PRODUCTION** — `20260902150000` is written and tested, and is one of the 11 unpushed migrations |
+
+On 14/16: the actual defect was that three placeholders said a built
+feature was "not available yet". Each now says where the feature is, or
+admits it does not exist. Whether the items should be removed instead
+remains open decision §11.5 — an untrue statement did not need to wait
+for that decision, and a cosmetic one does.
+
+**Six findings (1, 2, 4, 6, 8, 18) require owner UAT and cannot be closed
+from here.** Three more (5, 12, 13, 19) are code-complete but unproven in
+the environment they matter in.
+
+### L. Owner decisions still open
+
+1. **Railway deploy branch / auto-deploy** — now the single highest-leverage item; gates 2 and 3 both hang off it.
+2. **A throwaway hosted project** for the restore drill, and whether "Snowkap DBs" is it.
+3. **Hosted Auth configuration** — Site URL, redirect allowlist, `secure_password_change`, CAPTCHA off, rate limits, and the staged template paste.
+4. **EU-origin scope** (§5.9 of the plan) — required before the first real declarant files.
+5. **Backup tier / PITR** — `pitr_enabled: false` today.
+6. **Production fixture cleanup** — test users and P13 orgs still live.
+7. **The ABC installation name `btrim`** — an owner-run one-off, deliberately not a migration.
+8. **Direct CELEX re-read** (`32025R2621`, `32026R1740` Annex I).
+9. **ACTUAL dataset period vs shipment period.**
+10. **`tCO2/t` treated as CO2e.**
+11. **Navigation placeholders** — remove, or keep as a labelled "Planned" group.
+12. **Whether VERIFY may be self-performed** — production's own ABC dataset was self-verified.
+13. **Annex II applicability dataset** (F) — an ADR-0013 escalation.
+
+### M. High-risk items, none reclassified as fixed
+
+| Item | Class |
+|---|---|
+| Annex II sector proxy, now with an inverted failure mode (F) | **HIGH RISK — regulatory follow-up** |
+| Deleting an unfiled shipment line cascade-deletes its calculation history (§19 E) | HIGH RISK — bounded; filed data is LOCKed and `audit_events` has no FK to lines |
+| `service_role` can still write `calculation_results` directly | ACCEPTED — the trusted boundary by definition; a trigger binding it was considered and rejected (§19 A.7) |
+| GoTrue rate-limit buckets are project-wide | HIGH RISK |
+| Magic-link re-invite mails a real sign-in credential | HIGH RISK — owner acceptance required |
+| `/reset-password` without re-authentication | HIGH RISK |
+| Redetermination has no compare-and-swap | POST-RELEASE |
+| A filed line's figure can never be corrected | HIGH RISK — product-shape decision |
+| Observability insufficient for an incident | HIGH RISK |
+| The logical dump is not a recovery path (§19 C) | HIGH RISK |
+| The capability gate is a scoping control, not a security boundary | ACCEPTED, explicit |
+
+### N. Verdict
+
+**READY FOR INDEPENDENT REVIEW**
+
+Every certification gate that is safely executable from this environment
+is complete: D1's limitation documented with its blast radius measured,
+23 live security probes with the two vacuous ones caught and re-run,
+artifact integrity proven byte-for-byte, and `regulatory:verify` VALID
+against production.
+
+This says the candidate is ready to be **reviewed**. It does not say it
+is ready to be released, and nothing here authorises a deployment. Four
+gates have never executed, all for want of access rather than for want of
+work:
+
+1. **CI on the candidate SHA** — blocked on the Railway topology (A).
+2. **The Storage-backed actual-data journey** — has never run anywhere;
+   local Storage is now proven unusable, and CI is blocked behind (1).
+3. **A hosted restore** — recovery stays unproven.
+4. **Hosted Auth templates** — the two-device recovery proof has not run,
+   and assumption U1 is unverified against hosted GoTrue.
+
+Plus six UAT findings that only the owner can close, and the independent
+adversarial review itself.
+
+**This is a self-audit written by the agent that implemented the work.
+It is not the independent adversarial review, and it is not an
+approval.**
