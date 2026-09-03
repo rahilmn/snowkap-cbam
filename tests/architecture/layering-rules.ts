@@ -243,6 +243,24 @@ const UI_ALLOWED_INFRASTRUCTURE_IMPORTS = [
   // never the adapter, which is the arrangement this rule exists to
   // produce.
   "src/infrastructure/calculations/get-calculation-result-writer",
+  // 2026-09-04 (P14, AUTH-1). The same shape as admin-client above: a
+  // Supabase entry point scoped by convention to exactly one Auth
+  // operation, not general table access. It can do one thing -- prove
+  // that a supplied password is an account's current one -- and returns
+  // a three-value verdict, never a client or a session.
+  //
+  // It belongs to the UI layer's session integration rather than to a
+  // port, for the reason the session-scoped clients above are on this
+  // list: there is no swappable adapter here and nothing for an
+  // application service to hide. The thing being integrated with is the
+  // caller's own authentication, which is a Next.js/Supabase session
+  // concern -- and the credential must be checked by GoTrue itself, so
+  // the "adapter" would be a passthrough with a port bolted on.
+  //
+  // The narrowness is load-bearing: it uses the anon key, never the
+  // service role, so it cannot become a general RLS-bypass escape hatch
+  // if it is ever imported somewhere new.
+  "src/infrastructure/supabase/password-verification-client",
 ];
 
 /**

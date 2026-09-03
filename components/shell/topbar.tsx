@@ -1,5 +1,6 @@
 import {
   Info,
+  KeyRound,
   Mail,
   LogOut,
 } from "lucide-react";
@@ -152,6 +153,33 @@ export function Topbar(
             >
               {pendingInvitationCount}
             </span>
+          </Link>
+        ) : null}
+
+        {/*
+          2026-09-04 (P14, AUTH-1). The change-password screen, which is
+          the only place a password can now be changed by someone who
+          knows it. Gated on being signed in rather than on having an
+          organization, for the same reason sign-out below is: an
+          invited user who has not accepted yet is signed in without a
+          membership, and is exactly the person who has just set a first
+          password and may want to change it.
+
+          Sits next to the account controls rather than in either
+          experience's primary navigation -- it is not part of either
+          workflow, the way System status above is not.
+        */}
+        {isSignedIn ? (
+          <Link
+            href="/account/password"
+            aria-label="Change password"
+            title="Change password"
+            className="flex size-8 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--color-brand-100)] hover:text-[var(--color-brand-800)] focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            <KeyRound
+              className="size-4"
+              aria-hidden="true"
+            />
           </Link>
         ) : null}
 
