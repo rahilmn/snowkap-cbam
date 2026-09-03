@@ -144,7 +144,6 @@ TS=$(date +%Y%m%d_%H%M%S)
 
 docker exec supabase_db_snowkap-cbam pg_dump -U postgres -d postgres \
   --schema=public --schema=app \
-  --no-privileges \
   -f /tmp/snowkap_product_schema_${TS}.sql
 
 docker cp supabase_db_snowkap-cbam:/tmp/snowkap_product_schema_${TS}.sql \
@@ -162,12 +161,17 @@ for the "confirm it contains real table definitions/data" check below,
 and because it's the natural shape for the Storage-upload path in the
 staging/production procedure (a single `gzip`-able text stream, no
 `pg_restore` binary needed on the restoring end — plain `psql -f`
-suffices). `--no-privileges` drops `GRANT`/`REVOKE` statements — this
-cluster's `authenticated`/`anon`/`service_role` roles already exist
-target-side (see step 3) with their real grants from the applied
-migrations, and re-stating them from the dump would either be
-redundant (same cluster) or wrong (a different Supabase project's role
-OIDs/grants shouldn't be dictated by a dump taken elsewhere). `--no-owner`
+suffices). `--no-privileges` drops `GRANT`/`REVOKE` statements.
+**This flag was wrong and was removed on 2026-09-03 — see
+"Re-drill 2026-09-03" below.** The original reasoning was that the
+target cluster's `authenticated`/`anon`/`service_role` roles "already
+exist with their real grants from the applied migrations." That holds
+only when the target has had the migrations applied, which is not the
+case in the recovery this document exists for: restoring into a fresh
+project. Measured on 2026-09-03, the flag removes **116 `GRANT`/`REVOKE`
+statements**, and a restore made with it leaves the API roles holding
+**154 of 506** table grants — that is, holding none at all in `public`.
+The dump is now taken **without** it. `--no-owner`
 was deliberately **not** used — every object in this cluster is already
 owned by `postgres`, so keeping owner statements is free and slightly
 more faithful.
@@ -450,7 +454,8 @@ scheduled logical dump is what keeps a portable, provider-independent
 copy, per §12/§30. Design (matching the drill's mechanics above, run
 against the staging/production connection instead of local):
 
-- **What**: `pg_dump --schema=public --schema=app --no-privileges` of
+- **What**: `pg_dump --schema=public --schema=app` (privileges included — see
+  the 2026-09-03 re-drill) of
   the target project's database (same schema selection as the local
   drill and for the same reason — see the "Two separate recovery
   domains" section above for why this incidentally also covers the
@@ -502,6 +507,143 @@ against the staging/production connection instead of local):
   target already has the genuine `auth` schema, so step 3's shim is
   never needed there; it exists solely for this doc's bare-Postgres
   drill target.
+
+## Re-drill 2026-09-03 (P14.1) — what the first drill missed
+
+The 2026-08-29 drill checked tables, the RLS-enabled flag, functions and
+triggers, found all four matching, and concluded the restore was good.
+It was not. This section records what a deeper comparison found, why the
+original acceptance criteria could not have caught it, and what the
+criteria are now.
+
+**The acceptance test is no longer a checklist a human reads.** It is
+`scripts/ops/compare-database-posture.mjs`, which compares two databases
+object by object and exits non-zero on any difference:
+
+```bash
+# after restoring, compare the restored target against the source
+node scripts/ops/compare-database-posture.mjs \
+  "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
+  "postgresql://postgres:postgres@127.0.0.1:54322/<restored-db>"
+
+# or, against a restored target on its own, before a source is available
+node scripts/ops/compare-database-posture.mjs --check "<dsn>"
+```
+
+It compares schemas, tables, columns, RLS flags, **full policy
+definitions including USING/WITH CHECK text**, **effective table
+grants**, schema USAGE grants, functions (including `prosecdef`,
+`proconfig` and a body hash), function grants, triggers, constraints,
+indexes, sequences and extensions — and separately runs self-consistency
+checks that do not need a source to compare against.
+
+### Finding 1 — the dump carried no grants at all
+
+`--no-privileges` was in the dump command. Measured:
+
+| | with `--no-privileges` | without |
+|---|---|---|
+| `GRANT`/`REVOKE` statements in the dump | **0** | 116 |
+| API-role table grants in the restored database | **154 of 506** | **506 of 506** |
+
+A restored database in which `anon`, `authenticated` and `service_role`
+hold zero grants in `public` is not a database the application can
+serve, and no check in the original drill looked at grants. The flag has
+been removed.
+
+### Finding 2 — the `auth` schema, and the five INSERT policies
+
+Restoring `--schema=public --schema=app` into a target without the
+`auth` schema produced **15 × `ERROR: schema "auth" does not exist`**,
+and with them:
+
+- **5 of 56 RLS policies lost — every one of them an INSERT policy**:
+  `audit_events_insert_own_org_as_self`,
+  `calculation_results_insert_own_org_as_self`,
+  `declarations_insert_own_org`, `import_batches_insert_own_org`,
+  `organization_invitations_insert_admin_or_owner`. Each references
+  `auth.uid()`, which is why each failed and the other 51 did not.
+- **10 foreign keys to `auth.users` lost**, one per user-referencing
+  table.
+
+The tables, the RLS-enabled flags, the functions and the triggers all
+matched throughout. That is the whole lesson: **the four things the
+first drill checked are exactly the four things this failure does not
+touch.** A database that can be read but never written looks perfectly
+healthy to a table-existence check.
+
+### Finding 3 — `auth.users` rows, not just the `auth` schema
+
+Re-running the restore with privileges retained and the `auth` schema
+present brought policies (56/56) and grants (506/506) back to parity.
+Nine of the ten foreign keys still could not be created:
+
+```
+ERROR: insert or update on table "memberships" violates foreign key
+       constraint "memberships_user_id_fkey"
+```
+
+These are `ALTER TABLE ... ADD CONSTRAINT` failures, not row failures —
+the product rows loaded fine (row counts matched source exactly across
+all twelve tables checked). The constraints cannot be added because
+`auth.users` is **empty**, and `auth.users` is empty because it is not
+in this dump and never was.
+
+So the conclusion the previous section stated as a caution is now
+measured fact, and it is stronger than "nobody can sign in": **a restore
+from this artifact alone cannot re-establish referential integrity.**
+The logical dump is a supplement to the provider's own backup, never a
+replacement for it.
+
+### Finding 4 — default-privilege statements that cannot be replayed
+
+The restore emits **12 × `ERROR: permission denied to change default
+privileges`**. These come from `ALTER DEFAULT PRIVILEGES ... FOR ROLE
+supabase_admin` statements captured in the dump. `postgres` is not a
+superuser and is not a member of `supabase_admin` (verified against
+`pg_auth_members`), so it cannot replay them. Benign for the restored
+objects — every table's actual grants restore correctly — but it must
+not be mistaken for a clean run, and a restore log with zero `ERROR`
+lines is not achievable from this artifact today.
+
+### What the backup contains and does not contain
+
+| | In the logical dump | Where it actually lives |
+|---|---|---|
+| Product data (`public`, `app` rows) | **yes** | verified: row counts matched source across organizations, memberships, shipments, shipment_lines, calculation_results, emission_data, evidence_files, sharing_grants, declarations, audit_events, organization_invitations |
+| Regulatory data | **yes** (incidentally — the tables live in `public`) | also reproducible from `scripts/regulatory/` |
+| Audit events | **yes** | — |
+| Calculation results | **yes** | — |
+| Schema, policies, functions, triggers, constraints | **yes** | also reproducible by re-running the migration set |
+| Table/function grants | **yes, since 2026-09-03** | previously dropped by `--no-privileges` |
+| `auth.users` | **NO** | Supabase's own daily backup / PITR. Without it, 10 FKs cannot be created and no user can sign in |
+| Storage objects (evidence files) | **NO** | the `evidence` bucket. `evidence_files` rows would point at objects that do not exist |
+| Roles themselves | **NO** | the target project provides them |
+| `auth`, `storage`, `extensions`, `vault`, `realtime` schemas | **NO** | the target project provides them |
+
+### Prerequisites the restore target must provide
+
+Verified by experiment, not assumed. A target must already have: the
+`auth` schema with `auth.uid()`, `auth.role()`, `auth.jwt()` and
+`auth.users`; the `anon`/`authenticated`/`service_role` roles; and the
+`pgcrypto` and `uuid-ossp` extensions. A fresh Supabase project supplies
+all of these, which is why a fresh Supabase project — not a bare
+Postgres database — is the only supported restore target.
+
+Run `compare-database-posture.mjs --check` against the target **before**
+restoring. It fails loudly when the `auth` schema is absent, which is
+the single condition that turned the 2026-08-29 drill into a silent
+loss.
+
+### Status
+
+Recovery is **not proven**. What is proven is narrower and worth having:
+the procedure's two defects are identified and fixed, the acceptance
+test is now programmatic and demonstrably catches the exact failure the
+old one missed, and the artifact's real scope is measured rather than
+assumed. An actual restore into a throwaway **hosted** project, with
+`compare-database-posture.mjs` returning `POSTURE MATCHES`, remains
+outstanding and remains an owner-authorised step.
 
 ## Recovery decision tree
 
