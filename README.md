@@ -134,12 +134,50 @@ pnpm test                # vitest run — integration/real-data suites
                           # dataset aren't available locally
 pnpm test:watch          # vitest, watch mode
 pnpm test:e2e             # playwright test — builds + serves the app
-                          # itself; the health-check test self-skips
-                          # without Supabase credentials
+                          # itself. REQUIRES .env.local pointing at a
+                          # local Supabase; refuses to start otherwise
+                          # (see "Running the E2E suite" below)
 pnpm regulatory:verify   # Python regulatory verification gate — needs
                           # SUPABASE_DB_PASSWORD and a Python env with
                           # scripts/regulatory/requirements.txt installed
 ```
+
+### Running the E2E suite
+
+The E2E suite is **mutating**: it signs users up, creates organizations
+and installations, uploads evidence, and files declarations. It also runs
+with the rate limiters disabled, because its own natural volume would
+otherwise trip them.
+
+So it refuses to start unless the backend is demonstrably local. Create
+`.env.local` before running it — `pnpm exec supabase status -o env`
+prints the values:
+
+```
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_SERVICE_ROLE_KEY=<the local service_role key>
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<the local anon key>
+APP_URL=http://localhost:3000
+```
+
+All four backend keys must be set **in `.env.local` itself**, not
+inherited from `.env`. That is not pedantry: `.env` is the file the
+setup instructions above tell you to create, and on this project it holds
+the HOSTED project's URL and service-role key. Before the guard existed,
+a developer who had never created `.env.local` ran the whole mutating
+suite against the hosted project — silently, because the fallback from
+`.env.local` to `.env` is silent by design. The keys also resolve
+independently, so `.env.local` setting only the URLs would still hand the
+app under test a production service-role key.
+
+There is deliberately no environment variable that turns the guard off.
+See `tests/support/e2e-target-guard.ts`.
+
+Also export `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in your shell
+if you want the `/api/health` E2E check to run rather than self-skip —
+the Playwright runner's own process reads those, and `.env.local` only
+reaches the app it starts. CI does both.
 
 To build and run the production Docker image locally:
 

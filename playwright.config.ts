@@ -12,6 +12,10 @@ import {
   E2E_DIST_DIR,
 } from "./scripts/build/dist-dir.mjs";
 
+import {
+  assertE2ETargetIsLocal,
+} from "./tests/support/e2e-target-guard";
+
 /**
  * Minimal, dependency-free ".env"-shape parser: KEY=VALUE per line,
  * '#'-prefixed and blank lines skipped, no interpolation/multiline
@@ -92,6 +96,47 @@ const resolvedEnv: Record<string, string> =
 
 parseEnvFileInto(".env.local", resolvedEnv);
 parseEnvFileInto(".env", resolvedEnv);
+
+/**
+ * 2026-09-03 (P14, H3). Refuse to start unless the resolved backend is
+ * demonstrably local.
+ *
+ * The precedence above is correct, and that is exactly what made it
+ * dangerous: `.env` is the file the setup docs tell you to create and
+ * it holds the HOSTED project's URL and service-role key (this file's
+ * own comment above calls it that). A developer who never created
+ * `.env.local` ran the full MUTATING suite -- signups, organizations,
+ * evidence uploads, filed declarations -- against the hosted project,
+ * with the production service-role key and
+ * DANGEROUSLY_DISABLE_RATE_LIMITS_FOR_E2E_TESTS set. Silently, because
+ * the fallback is silent by design.
+ *
+ * The guard is parsed separately from `resolvedEnv` because the rule is
+ * about PROVENANCE, not the merged value: `.env.local` can set the URLs
+ * while the service-role key still falls through to `.env`, which
+ * points the suite at local Supabase while handing the app a
+ * production credential. See tests/support/e2e-target-guard.ts.
+ */
+const envLocalForGuard: Record<string, string> | null =
+  existsSync(".env.local")
+    ? (() => {
+        const parsed: Record<string, string> = {};
+        parseEnvFileInto(".env.local", parsed);
+        return parsed;
+      })()
+    : null;
+
+const envForGuard: Record<string, string> = {};
+parseEnvFileInto(".env", envForGuard);
+
+const e2eTarget =
+  assertE2ETargetIsLocal(envLocalForGuard, envForGuard);
+
+if (e2eTarget.status === "REFUSED") {
+  throw new Error(
+    `\n\nE2E TARGET GUARD (${e2eTarget.reason})\n\n${e2eTarget.message}\n`,
+  );
+}
 
 /**
  * Phase 2 smoke suite (docs/plans/MASTER_PLAN.md P2 scope: "Playwright
