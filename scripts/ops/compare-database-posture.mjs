@@ -400,7 +400,7 @@ const SELF_CHECKS = [
   },
   {
     name: "session_store_is_sealed_off",
-    why: "2026-09-04 (P14, AUTH-1). The two checks above deliberately skip app_sessions; this is what pays for that. The table holds the sealed Supabase session of every signed-in browser, so a policy, a grant, or RLS switched off on it is a complete impersonation of every user -- and a restore reopens exactly this kind of thing, because a dump records the grants that exist and never their absence",
+    why: "2026-09-04 (P14, AUTH-1). The two checks above deliberately skip app_sessions; this is what pays for that. The table holds the sealed Supabase session of every signed-in browser, so a policy, a grant, RLS switched off, or a missing ownership-immutability trigger on it is a complete impersonation of every user -- and a restore reopens exactly this kind of thing, because a dump records the grants that exist and never their absence",
     sql: `
       select issue from (
         select 'public.app_sessions does not exist -- the session store is missing, and the application cannot hold a session safely without it' as issue
@@ -422,6 +422,21 @@ const SELF_CHECKS = [
         from pg_policies p
         where p.schemaname = 'public'
           and p.tablename = 'app_sessions'
+
+        union all
+
+        select 'public.app_sessions has no ownership-immutability trigger -- a session could be reassigned to another identity, which is the 2026-09-04 fixation takeover'
+        where to_regclass('public.app_sessions') is not null
+          and not exists (
+            select 1
+            from pg_trigger t
+            join pg_class c on c.oid = t.tgrelid
+            join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public'
+              and c.relname = 'app_sessions'
+              and not t.tgisinternal
+              and t.tgname = 'app_sessions_ownership_is_immutable'
+          )
 
         union all
 
