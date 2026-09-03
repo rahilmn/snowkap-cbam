@@ -108,3 +108,82 @@ alter default privileges in schema public
 
 alter default privileges for role postgres in schema public
     revoke truncate on tables from anon, authenticated;
+
+-- ------------------------------------------------------------
+-- 2026-09-03 (P14 remediation). anon must not hold EXECUTE on the
+-- SECURITY DEFINER RPCs.
+--
+-- Every one of them is created with `revoke all ... from public` then
+-- `grant execute ... to authenticated`, so `authenticated` is the
+-- intended grantee and `anon` was never meant to hold EXECUTE on any of
+-- them. It did, in every freshly built environment, purely because the
+-- blanket function grant at the top of this file runs afterwards.
+--
+-- Guarded on existence so this file stays runnable against a database
+-- built from any subset of the migrations, matching the block above.
+-- ------------------------------------------------------------
+do $$
+declare
+    v_signature text;
+begin
+    foreach v_signature in array array[
+        'public.accept_organization_invitation(uuid)',
+        'public.accept_sharing_grant_invitation(uuid,uuid)',
+        'public.create_organization_with_owner(text,text,text[])',
+        'public.list_org_members(uuid)',
+        'public.record_declaration_filed(uuid,text)',
+        'public.record_shared_data_consumption(uuid,uuid,uuid,integer,uuid,text)',
+        'public.sharing_counterparty_org_names()'
+    ]
+    loop
+        if to_regprocedure(v_signature) is not null then
+            execute format('revoke all on function %s from anon', v_signature);
+        end if;
+    end loop;
+end
+$$;
+
+-- ------------------------------------------------------------
+-- 2026-09-03 (P14 remediation). THE STRUCTURAL BACKSTOP.
+--
+-- Everything above this line is a hand-maintained list of revokes to
+-- re-assert after the blanket grants. That list has been wrong twice:
+-- once when it did not exist at all and the P14.1 calculation-write
+-- boundary was silently reopened in every fresh environment, and once
+-- when it covered one of eight deliberate revokes.
+--
+-- This is the part that does not depend on anyone remembering. Every
+-- migration that deliberately revokes a privilege registers it in
+-- app.privilege_invariants (20260903230000); this asks the database
+-- whether any of them has been undone, and refuses to finish seeding if
+-- so. A forgotten re-assertion now fails the build loudly instead of
+-- producing a working application with a reopened boundary.
+--
+-- Guarded on the function existing, so this file still runs against a
+-- database built from an earlier subset of the migrations.
+-- ------------------------------------------------------------
+do $$
+declare
+    v_violations text;
+    v_count integer;
+begin
+    if to_regprocedure('app.assert_privilege_invariants()') is null then
+        raise notice
+            'seed.sql: app.assert_privilege_invariants() not present -- skipping the privilege-invariant check (database predates 20260903230000).';
+        return;
+    end if;
+
+    select count(*), string_agg('  - ' || violation, chr(10))
+    into v_count, v_violations
+    from app.assert_privilege_invariants();
+
+    if v_count > 0 then
+        raise exception
+            'seed.sql: % privilege invariant(s) violated after the blanket grants above. A deliberate REVOKE has been undone and not re-asserted: %',
+            v_count, v_violations;
+    end if;
+
+    raise notice
+        'seed.sql: privilege invariants hold -- every deliberate REVOKE survived the blanket grants.';
+end
+$$;

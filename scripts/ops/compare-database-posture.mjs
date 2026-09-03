@@ -411,6 +411,37 @@ const SELF_CHECKS = [
     `,
   },
   {
+    name: "privilege_invariants_hold",
+    why:
+      "the P14 remediation's structural answer to the class this whole script " +
+      "exists for. Every migration that deliberately revokes a privilege " +
+      "registers it in app.privilege_invariants; this asks the database " +
+      "whether any of them has been undone. It is the one check here that " +
+      "keeps working when a FUTURE revoke is added, because it reads the " +
+      "registry rather than a list hardcoded in this file -- the two checks " +
+      "above (api_roles_hold_their_grants, truncate_granted_to_api_roles) " +
+      "each cover exactly one revoke and had to be written by hand. It also " +
+      "names the migration being undone, which is what an operator needs " +
+      "mid-restore",
+    sql: `
+      select violation
+      from app.assert_privilege_invariants()
+      order by 1
+    `,
+    // A database that predates 20260903230000 has no registry. Reported
+    // as a skip rather than silently passing: "the check could not run"
+    // must never be rounded down to "the check passed", which is the
+    // exact failure this script was written after.
+    skipWhenMissing: {
+      probe: `
+        select 'present'::text
+        where to_regprocedure('app.assert_privilege_invariants()') is not null
+      `,
+      reason:
+        "app.assert_privilege_invariants() is absent -- this database predates migration 20260903230000, so deliberate revokes CANNOT be verified here",
+    },
+  },
+  {
     name: "security_definer_without_search_path",
     why: "a SECURITY DEFINER function with a mutable search_path is a privilege-escalation primitive",
     sql: `
@@ -572,6 +603,36 @@ function main() {
 
   for (const check of SELF_CHECKS) {
     let rows;
+
+    // 2026-09-03 (P14 remediation). A check whose prerequisite is
+    // absent is reported as UNVERIFIED and counted as a failure --
+    // never skipped quietly. "The check could not run" being rounded
+    // down to "the check passed" is the exact defect this whole script
+    // was written after, and the P14 review found this script itself
+    // printing POSTURE MATCHES on a database with the P14.1 write
+    // boundary fully reverted.
+    if (check.skipWhenMissing) {
+      let present;
+
+      try {
+        present = runQuery(selfDsn, check.skipWhenMissing.probe);
+      } catch (error) {
+        console.log(`[ERROR] ${check.name}: ${error.message}`);
+        failures += 1;
+        criticalFailures += 1;
+        continue;
+      }
+
+      if (present.length === 0) {
+        console.log(
+          `[UNVERIFIED] ${check.name} -- CRITICAL
+    ${check.skipWhenMissing.reason}`,
+        );
+        failures += 1;
+        criticalFailures += 1;
+        continue;
+      }
+    }
 
     try {
       rows = runQuery(selfDsn, check.sql);
