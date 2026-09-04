@@ -6,6 +6,7 @@ import {
 
 import {
   deriveExperience,
+  resolveExperience,
 } from "./app-shell";
 
 describe(
@@ -69,6 +70,85 @@ describe(
         expect(
           deriveExperience(
             [],
+          ),
+        ).toBe(
+          "importer",
+        );
+      },
+    );
+  },
+);
+
+describe(
+  "resolveExperience",
+  () => {
+    it(
+      "honors the cookie preference for a dual-capability org",
+      () => {
+        expect(
+          resolveExperience(
+            ["IMPORTER_DECLARANT", "PRODUCER_OPERATOR"],
+            "producer",
+          ),
+        ).toBe(
+          "producer",
+        );
+
+        expect(
+          resolveExperience(
+            ["IMPORTER_DECLARANT", "PRODUCER_OPERATOR"],
+            "importer",
+          ),
+        ).toBe(
+          "importer",
+        );
+      },
+    );
+
+    it(
+      "falls back to deriveExperience's default when a dual-capability org has no cookie preference",
+      () => {
+        expect(
+          resolveExperience(
+            ["IMPORTER_DECLARANT", "PRODUCER_OPERATOR"],
+            undefined,
+          ),
+        ).toBe(
+          "importer",
+        );
+      },
+    );
+
+    it(
+      "ignores the cookie preference entirely for a single-capability org -- a forged/stale cookie can never override the org's real, only-possible layout",
+      () => {
+        expect(
+          resolveExperience(
+            ["PRODUCER_OPERATOR"],
+            "importer",
+          ),
+        ).toBe(
+          "producer",
+        );
+
+        expect(
+          resolveExperience(
+            ["IMPORTER_DECLARANT"],
+            "producer",
+          ),
+        ).toBe(
+          "importer",
+        );
+      },
+    );
+
+    it(
+      "ignores the cookie preference when there is no org yet",
+      () => {
+        expect(
+          resolveExperience(
+            undefined,
+            "producer",
           ),
         ).toBe(
           "importer",

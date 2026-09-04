@@ -187,7 +187,7 @@ export function MobileNav(
         ref={triggerRef}
         type="button"
         // Only exists below `md`, exactly where Sidebar hides itself.
-        className="flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--text-secondary)] hover:bg-[var(--surface-sunken)] md:hidden"
+        className="flex size-11 md:size-8 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--text-secondary)] hover:bg-[var(--surface-sunken)] md:hidden"
         aria-expanded={open}
         aria-controls={panelId}
         aria-label="Open navigation menu"
@@ -222,7 +222,7 @@ export function MobileNav(
                 type="button"
                 onClick={close}
                 aria-label="Close navigation menu"
-                className="flex size-8 items-center justify-center rounded-[var(--radius-sm)] text-[var(--text-secondary)] hover:bg-[var(--surface-sunken)]"
+                className="flex size-11 md:size-8 items-center justify-center rounded-[var(--radius-sm)] text-[var(--text-secondary)] hover:bg-[var(--surface-sunken)]"
               >
                 <X className="size-4" />
               </button>

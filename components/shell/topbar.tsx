@@ -33,6 +33,10 @@ import {
 } from "./org-switcher";
 
 import {
+  ExperienceSwitcher,
+} from "./experience-switcher";
+
+import {
   signOutAction,
 } from "../../app/(auth)/actions";
 
@@ -61,6 +65,14 @@ export interface TopbarProps {
   // the desktop sidebar would for this org's capabilities.
   experience?: Experience;
   activeNavLabel?: string;
+
+  /**
+   * Whether the current org holds BOTH capabilities -- the only case
+   * the experience switcher renders at all (SME Experience v2.1.1 S1;
+   * app-shell.tsx's resolveExperience is the one place that reads the
+   * cookie this switcher writes).
+   */
+  hasDualCapability?: boolean;
 }
 
 export function Topbar(
@@ -72,6 +84,7 @@ export function Topbar(
     organizations,
     experience,
     activeNavLabel,
+    hasDualCapability = false,
   }: TopbarProps,
 ) {
   return (
@@ -96,6 +109,16 @@ export function Topbar(
             />
           </>
         ) : null}
+
+        {hasDualCapability && experience ? (
+          <>
+            <div className="hidden h-5 w-px shrink-0 bg-[var(--border-default)] sm:block" />
+
+            <ExperienceSwitcher
+              current={experience}
+            />
+          </>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-3">
@@ -117,7 +140,7 @@ export function Topbar(
           href="/status"
           aria-label="System status"
           title="System status"
-          className="flex size-8 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--color-brand-100)] hover:text-[var(--color-brand-800)] focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="flex size-11 md:size-8 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--color-brand-100)] hover:text-[var(--color-brand-800)] focus-visible:outline-2 focus-visible:outline-offset-2"
         >
           <Info
             className="size-4"
@@ -140,7 +163,7 @@ export function Topbar(
             href="/accept-invitation"
             aria-label={`Pending invitations (${pendingInvitationCount})`}
             title={`Pending invitations (${pendingInvitationCount})`}
-            className="relative flex size-8 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--color-brand-100)] hover:text-[var(--color-brand-800)] focus-visible:outline-2 focus-visible:outline-offset-2"
+            className="relative flex size-11 md:size-8 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--color-brand-100)] hover:text-[var(--color-brand-800)] focus-visible:outline-2 focus-visible:outline-offset-2"
           >
             <Mail
               className="size-4"
@@ -174,7 +197,7 @@ export function Topbar(
             href="/account/password"
             aria-label="Change password"
             title="Change password"
-            className="flex size-8 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--color-brand-100)] hover:text-[var(--color-brand-800)] focus-visible:outline-2 focus-visible:outline-offset-2"
+            className="flex size-11 md:size-8 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--color-brand-100)] hover:text-[var(--color-brand-800)] focus-visible:outline-2 focus-visible:outline-offset-2"
           >
             <KeyRound
               className="size-4"
@@ -196,7 +219,7 @@ export function Topbar(
               type="submit"
               aria-label="Sign out"
               title="Sign out"
-              className="flex size-8 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--color-danger-100)] hover:text-[var(--color-danger-700)] focus-visible:outline-2 focus-visible:outline-offset-2"
+              className="flex size-11 md:size-8 items-center justify-center rounded-full bg-[var(--surface-sunken)] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--color-danger-100)] hover:text-[var(--color-danger-700)] focus-visible:outline-2 focus-visible:outline-offset-2"
             >
               <LogOut
                 className="size-4"

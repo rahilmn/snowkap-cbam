@@ -11,9 +11,17 @@ import {
 } from "./get-preferred-org-id";
 
 import {
+  getPreferredExperience,
+} from "./get-preferred-experience";
+
+import {
   Sidebar,
   type Experience,
 } from "./sidebar";
+
+import {
+  SkipLink,
+} from "../ui/skip-link";
 
 import {
   Breadcrumbs,
@@ -68,6 +76,41 @@ export function deriveExperience(
   return hasProducer && !hasImporter
     ? "producer"
     : "importer";
+}
+
+/**
+ * SME Experience v2.1.1, S1: the experience switcher for dual-
+ * capability orgs `deriveExperience`'s own doc comment named as not
+ * yet built. Presentation only -- the cookie can only ever choose
+ * between the two layouts a dual-capability org's real capabilities
+ * already authorize (see get-preferred-experience.ts's own doc
+ * comment); a single-capability org's preference is never consulted,
+ * so `deriveExperience`'s existing default still governs it exactly
+ * as before.
+ */
+export function resolveExperience(
+  capabilities: string[] | undefined,
+  cookiePreference: Experience | undefined,
+): Experience {
+  const hasProducer =
+    capabilities?.includes(
+      "PRODUCER_OPERATOR",
+    ) ??
+    false;
+
+  const hasImporter =
+    capabilities?.includes(
+      "IMPORTER_DECLARANT",
+    ) ??
+    false;
+
+  if (hasProducer && hasImporter && cookiePreference) {
+    return cookiePreference;
+  }
+
+  return deriveExperience(
+    capabilities,
+  );
 }
 
 /**
@@ -128,15 +171,24 @@ export async function AppShell(
 
   // Resolved once and shared by Topbar (mobile drawer) and Sidebar
   // (desktop) so the two navigations can never disagree about which
-  // experience this org is in.
+  // experience this org is in. An explicit `experience` prop from the
+  // call site still wins outright (resolveExperience is never
+  // consulted then) -- unchanged from before this cookie existed.
   const resolvedExperience =
     experience ??
-    deriveExperience(
+    resolveExperience(
       orgSummary?.context.capabilities,
+      await getPreferredExperience(),
     );
+
+  const hasDualCapability =
+    (orgSummary?.context.capabilities.includes("PRODUCER_OPERATOR") ?? false) &&
+    (orgSummary?.context.capabilities.includes("IMPORTER_DECLARANT") ?? false);
 
   return (
     <div className="flex h-dvh flex-col bg-[var(--surface-page)]">
+      <SkipLink />
+
       <Topbar
         experience={resolvedExperience}
         activeNavLabel={activeNavLabel}
@@ -144,6 +196,7 @@ export async function AppShell(
         isSignedIn={user !== null}
         pendingInvitationCount={pendingInvitationCount}
         currentOrgId={orgSummary?.context.org_id}
+        hasDualCapability={hasDualCapability}
         organizations={orgSummary?.availableOrganizations.map(
           (org) => (
             {
@@ -167,7 +220,10 @@ export async function AppShell(
             </div>
           ) : null}
 
-          <main className="flex-1 overflow-auto p-6">
+          <main
+            id="main"
+            className="flex-1 overflow-auto p-6"
+          >
             {children}
           </main>
         </div>

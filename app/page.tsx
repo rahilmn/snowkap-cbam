@@ -2,8 +2,12 @@ import Link from "next/link";
 
 import {
   AppShell,
-  deriveExperience,
+  resolveExperience,
 } from "../components/shell/app-shell";
+
+import {
+  getPreferredExperience,
+} from "../components/shell/get-preferred-experience";
 
 import {
   Card,
@@ -236,11 +240,14 @@ export default async function HomePage() {
     );
   }
 
-  // Same derivation the sidebar uses, so the starting points below can
-  // never disagree with the navigation beside them.
+  // Same resolution AppShell/Topbar/Sidebar use (including the
+  // experience-switcher cookie for a dual-capability org), so the
+  // starting points below can never disagree with the navigation
+  // beside them.
   const experience =
-    deriveExperience(
+    resolveExperience(
       orgSummary.context.capabilities,
+      await getPreferredExperience(),
     );
 
   const startingPoints =
