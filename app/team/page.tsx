@@ -25,6 +25,10 @@ import {
 } from "../../src/application/organizations/invitations";
 
 import {
+  listOrgMembers,
+} from "../../src/application/organizations/list-org-members";
+
+import {
   TeamMemberList,
   type TeamMemberRow,
 } from "./team-member-list";
@@ -61,34 +65,24 @@ export default async function TeamPage() {
     );
   }
 
-  const { data: members, error } =
-    await supabase.rpc(
-      "list_org_members",
-      { p_org_id: orgSummary.context.org_id },
+  const members =
+    await listOrgMembers(
+      supabase,
+      orgSummary.context.org_id,
     );
 
   const memberRows: TeamMemberRow[] =
-    error
-      ? []
-      : (members ?? []).map(
-          (
-            row: {
-              membership_id: string;
-              user_id: string;
-              email: string;
-              role: "OWNER" | "ADMIN" | "MEMBER";
-              deactivated_at: string | null;
-            },
-          ) => (
-            {
-              membershipId: row.membership_id,
-              userId: row.user_id,
-              email: row.email,
-              role: row.role,
-              deactivatedAt: row.deactivated_at,
-            }
-          ),
-        );
+    members.map(
+      (row) => (
+        {
+          membershipId: row.membership_id,
+          userId: row.user_id,
+          email: row.email,
+          role: row.role,
+          deactivatedAt: row.deactivated_at,
+        }
+      ),
+    );
 
   const canManage =
     hasAdminAccess(

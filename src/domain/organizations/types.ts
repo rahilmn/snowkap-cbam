@@ -93,3 +93,33 @@ export interface Invitation {
   created_at: IsoTimestamp;
   expires_at: IsoTimestamp;
 }
+
+/**
+ * The CBAM sectors an org may self-declare it works in (SME Experience
+ * v2.1.1, S1) -- mirrors the canonical `cbam_goods.sector` vocabulary
+ * (the regulatory dataset's own enum) rather than inventing a
+ * different one, but is deliberately its own type: this is an
+ * organization's self-declared identity, not a line's classified
+ * sector, and never flows into a calculation or an authorization
+ * check (organization_profiles migration header comment).
+ *
+ * ELECTRICITY is a real member of the regulatory dataset's own sector
+ * enum, but is refused by the application layer in v1 (no default
+ * values are loaded for electricity yet) -- see
+ * parseOnboardingSetupSubmission.
+ */
+export type CbamSector =
+  | "CEMENT"
+  | "FERTILISERS"
+  | "IRON_STEEL"
+  | "ALUMINIUM"
+  | "HYDROGEN"
+  | "ELECTRICITY";
+
+export interface OrganizationSmeProfile {
+  org_id: OrganizationId;
+  sectors: CbamSector[];
+  onboarding_completed_at: IsoTimestamp | null;
+  updated_at: IsoTimestamp;
+  updated_by_user_id: UserId | null;
+}

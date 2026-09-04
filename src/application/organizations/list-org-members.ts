@@ -1,0 +1,69 @@
+import type {
+  SupabaseClient,
+} from "@supabase/supabase-js";
+
+import type {
+  MembershipRole,
+} from "../../domain/organizations/types";
+
+import type {
+  OrganizationId,
+} from "../../domain/shared/ids";
+
+export interface OrgMember {
+  membership_id: string;
+  user_id: string;
+  email: string;
+  role: MembershipRole;
+  deactivated_at: string | null;
+}
+
+interface ListOrgMembersRpcRow {
+  membership_id: string;
+  user_id: string;
+  email: string;
+  role: MembershipRole;
+  deactivated_at: string | null;
+}
+
+/**
+ * Wraps the `list_org_members` RPC (20260828120000) -- moved out of
+ * app/team/page.tsx (SME plan S1) so the page component itself no
+ * longer calls `supabase.rpc(...)` directly, matching every other
+ * screen's own application-service indirection. The RPC itself is
+ * unchanged; this is presentation-layer extraction only.
+ *
+ * Degrades to an empty array on error rather than throwing -- matches
+ * the exact behaviour team/page.tsx already had (`error ? [] :
+ * ...map(...)`), preserved here rather than silently changed. Note
+ * this means a read failure and a genuinely-empty org are today
+ * indistinguishable to a caller of this function; a guidance
+ * consumer that needs to tell them apart (v2.1.1 §9, not yet built)
+ * would need a FactRead-shaped sibling, not a change to this one.
+ */
+export async function listOrgMembers(
+  supabase: SupabaseClient,
+  orgId: OrganizationId,
+): Promise<OrgMember[]> {
+  const { data, error } =
+    await supabase.rpc(
+      "list_org_members",
+      { p_org_id: orgId },
+    );
+
+  if (error || !data) {
+    return [];
+  }
+
+  return (data as ListOrgMembersRpcRow[]).map(
+    (row) => (
+      {
+        membership_id: row.membership_id,
+        user_id: row.user_id,
+        email: row.email,
+        role: row.role,
+        deactivated_at: row.deactivated_at,
+      }
+    ),
+  );
+}
