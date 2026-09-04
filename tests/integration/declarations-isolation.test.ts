@@ -6,6 +6,8 @@ import {
   it,
 } from "vitest";
 
+import { spawnSync } from "node:child_process";
+
 import {
   createClient,
   type SupabaseClient,
@@ -63,6 +65,54 @@ const LOCAL_API_URL =
 const LOCAL_ANON_KEY =
   process.env.SUPABASE_LOCAL_ANON_KEY ??
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
+
+const LOCAL_DB_URL =
+  process.env.SUPABASE_LOCAL_DB_URL ??
+  "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+
+/**
+ * Mutates a READY shipment's lines WITHOUT reopening it.
+ *
+ * 2026-09-04 (P14). This used to reopen the shipment, mutate,
+ * and mark it ready again. That is no longer a way to reach the
+ * state these cases are about: reopening a shipment now retires
+ * the approval of every READY declaration containing it
+ * (20260905140000), so the filing would refuse with NOT_READY
+ * long before reaching the clause under test, and the case would
+ * pass while proving nothing about it.
+ *
+ * The clauses below are defence in depth for paths that do NOT
+ * go through a reopen -- an internal job, a restore artefact, a
+ * future policy regression -- so the mutation is made the way
+ * such a path would reach the rows: directly, with the
+ * line-editing trigger suspended, leaving the shipment READY and
+ * the declaration approved throughout.
+ */
+function mutateLinesBehindTheApproval(sql: string): void {
+  const result =
+    spawnSync(
+      "psql",
+      [
+        LOCAL_DB_URL,
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-q",
+        "-c",
+        "alter table public.shipment_lines disable trigger user; " +
+          sql +
+          " alter table public.shipment_lines enable trigger user;",
+      ],
+      { encoding: "utf8" },
+    );
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    throw new Error(`psql exited ${result.status}: ${result.stderr}`);
+  }
+}
 
 const LOCAL_SERVICE_ROLE_KEY =
   process.env.SUPABASE_LOCAL_SERVICE_ROLE_KEY ??
@@ -1695,64 +1745,15 @@ describe.skipIf(!localSupabaseReachable)(
         // (20260828150000) only excludes LOCKED/VOID parents, and
         // shipment C is still READY, so this is a genuinely permitted
         // action, not a privilege escalation.
-        // 2026-09-04 (P14 owner decision 1). A READY shipment's lines
-        // are no longer editable, so this setup performs the audited
-        // reopen the product requires. The state it builds is still
-        // reachable -- an administrator may reopen a shipment, change
-        // it and mark it ready again -- and reaching it this way is
-        // what keeps this test about the FILING-time re-check rather
-        // than about the mutation wall, which
-        // tests/integration/ready-shipment-immutability.test.ts covers.
-        async function withShipmentReopened(
-          shipmentId: string,
-          mutate: () => Promise<void>,
-        ): Promise<void> {
-          const reopen =
-            await serviceClient
-              .from("shipments")
-              .update({ status: "DRAFT" })
-              .eq("id", shipmentId);
-
-          if (reopen.error) {
-            throw new Error(`reopen failed: ${reopen.error.message}`);
-          }
-
-          await mutate();
-
-          const reready =
-            await serviceClient
-              .from("shipments")
-              .update({ status: "READY" })
-              .eq("id", shipmentId);
-
-          if (reready.error) {
-            throw new Error(`re-ready failed: ${reready.error.message}`);
-          }
-        }
-
-        let deleteError: { message: string } | null = null;
-
-        await withShipmentReopened(
-          shipmentCId,
-          async () => {
-            const result =
-              await clientMemberA
-                .from("shipment_lines")
-                .delete()
-                .eq(
-                  "id",
-                  cLines[0]?.id,
-                );
-
-            deleteError = result.error;
-          },
+        // 2026-09-04 (P14). Reopening the shipment would now retire this
+        // declaration's approval outright (20260905140000), so the
+        // filing would refuse with NOT_READY and this case would pass
+        // without reaching the clause it exists for. The mutation is
+        // made behind the approval instead -- see
+        // mutateLinesBehindTheApproval.
+        mutateLinesBehindTheApproval(
+          `delete from public.shipment_lines where id = '${cLines[0]?.id}';`,
         );
-
-        if (deleteError) {
-          throw new Error(
-            `Failed to delete shipment C's own line: ${(deleteError as { message: string }).message}`,
-          );
-        }
 
         const { data } =
           await clientOwnerA.rpc(
@@ -2157,59 +2158,24 @@ describe.skipIf(!localSupabaseReachable)(
         // re-determined" scenario) rather than attaching recordB's
         // record to a line still declaring recordA's classification,
         // which the new check correctly refuses as a mismatch.
-        // 2026-09-04 (P14 owner decision 1). Wrapped in the audited
-        // reopen: a READY shipment's lines are no longer editable, so
-        // this setup does what the product now requires of a user who
-        // wants to change an approved shipment. The end state is
-        // identical and still reachable, and this test stays about the
-        // FILING-time re-check rather than about the mutation wall
-        // (tests/integration/ready-shipment-immutability.test.ts).
-        const reopenA =
-          await serviceClient
-            .from("shipments")
-            .update({ status: "DRAFT" })
-            .eq("id", shipmentId);
-
-        if (reopenA.error) {
-          throw new Error(`reopen failed: ${reopenA.error.message}`);
-        }
-
-        const { error: redetermineError } =
-          await clientOwnerA
-            .from("shipment_lines")
-            .update(
-              {
-                cn_code: recordB.source_trade_code.replace(/\s+/g, ""),
-                cn_code_level:
-                  recordB.source_trade_code.replace(/\s+/g, "").length > 8
-                    ? "TARIC10"
-                    : "CN8",
-                origin_country: recordB.origin_country_iso2,
-                emission_determination: determinationFrom(
-                  recordB,
-                ),
-              },
-            )
-            .eq(
-              "id",
-              lineId,
-            );
-
-        if (redetermineError) {
-          throw new Error(
-            `Failed to redetermine the line: ${redetermineError.message}`,
-          );
-        }
-
-        const rereadyA =
-          await serviceClient
-            .from("shipments")
-            .update({ status: "READY" })
-            .eq("id", shipmentId);
-
-        if (rereadyA.error) {
-          throw new Error(`re-ready failed: ${rereadyA.error.message}`);
-        }
+        // 2026-09-04 (P14). Mutated behind the approval rather than
+        // through a reopen -- see mutateLinesBehindTheApproval above for
+        // why a reopen would now make this case pass without ever
+        // reaching the clause it is about.
+        mutateLinesBehindTheApproval(
+          `update public.shipment_lines set ` +
+            `cn_code = '${recordB.source_trade_code.replace(/\s+/g, "")}', ` +
+            `cn_code_level = '${
+              recordB.source_trade_code.replace(/\s+/g, "").length > 8
+                ? "TARIC10"
+                : "CN8"
+            }', ` +
+            `origin_country = '${recordB.origin_country_iso2}', ` +
+            `emission_determination = '${
+              JSON.stringify(determinationFrom(recordB)).replace(/'/g, "''")
+            }'::jsonb ` +
+            `where id = '${lineId}';`,
+        );
 
         const { data } =
           await clientOwnerA.rpc(
@@ -2313,45 +2279,12 @@ describe.skipIf(!localSupabaseReachable)(
         // identical and still reachable, and this test stays about the
         // FILING-time re-check rather than about the mutation wall
         // (tests/integration/ready-shipment-immutability.test.ts).
-        const reopenB =
-          await serviceClient
-            .from("shipments")
-            .update({ status: "DRAFT" })
-            .eq("id", shipmentId);
-
-        if (reopenB.error) {
-          throw new Error(`reopen failed: ${reopenB.error.message}`);
-        }
-
-        const { error: editError } =
-          await clientOwnerA
-            .from("shipment_lines")
-            .update(
-              {
-                net_mass_tonnes: "20",
-                emission_determination: null,
-              },
-            )
-            .eq(
-              "id",
-              lineId,
-            );
-
-        if (editError) {
-          throw new Error(
-            `Failed to edit the line: ${editError.message}`,
-          );
-        }
-
-        const rereadyB =
-          await serviceClient
-            .from("shipments")
-            .update({ status: "READY" })
-            .eq("id", shipmentId);
-
-        if (rereadyB.error) {
-          throw new Error(`re-ready failed: ${rereadyB.error.message}`);
-        }
+        // 2026-09-04 (P14). Behind the approval, not through a reopen --
+        // see mutateLinesBehindTheApproval above.
+        mutateLinesBehindTheApproval(
+          `update public.shipment_lines set net_mass_tonnes = '20', ` +
+            `emission_determination = null where id = '${lineId}';`,
+        );
 
         const { data } =
           await clientOwnerA.rpc(

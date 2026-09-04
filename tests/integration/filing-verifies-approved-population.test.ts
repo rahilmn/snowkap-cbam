@@ -6,6 +6,8 @@ import {
   it,
 } from "vitest";
 
+import { spawnSync } from "node:child_process";
+
 import {
   createClient,
   type SupabaseClient,
@@ -45,6 +47,10 @@ const LOCAL_API_URL =
 const LOCAL_ANON_KEY =
   process.env.SUPABASE_LOCAL_ANON_KEY ??
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
+
+const LOCAL_DB_URL =
+  process.env.SUPABASE_LOCAL_DB_URL ??
+  "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
 const LOCAL_SERVICE_ROLE_KEY =
   process.env.SUPABASE_LOCAL_SERVICE_ROLE_KEY ??
@@ -301,29 +307,55 @@ describe.skipIf(!ready)(
     }
 
     /**
-     * Reaches the lines the way anything not bound by RLS would. The
-     * service role can move the status, so the mutation trigger -- which
-     * only fires while the shipment is READY -- is stepped around
-     * exactly as the member's own reproduction stepped around it.
+     * Reaches the lines the way anything not bound by RLS would.
+     *
+     * 2026-09-04 (P14). This used to reopen the shipment, delete, and
+     * mark it ready again. That is no longer a route to the state these
+     * cases test: reopening now retires the approval of every READY
+     * declaration containing the shipment (20260905140000), so filing
+     * would refuse with NOT_READY before reaching the population
+     * comparison, and every case below would pass while proving nothing
+     * about it.
+     *
+     * The comparison is defence in depth for paths that do NOT reopen --
+     * an internal job, a restore artefact, a future policy regression --
+     * so the mutation is made the way those reach the rows: directly,
+     * with the line trigger suspended, leaving the shipment READY and
+     * the declaration approved throughout.
      */
+    function mutateLinesBehindTheApproval(sql: string): void {
+      const result =
+        spawnSync(
+          "psql",
+          [
+            LOCAL_DB_URL,
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-q",
+            "-c",
+            "alter table public.shipment_lines disable trigger user; " +
+              sql +
+              " alter table public.shipment_lines enable trigger user;",
+          ],
+          { encoding: "utf8" },
+        );
+
+      if (result.error) {
+        throw result.error;
+      }
+
+      if (result.status !== 0) {
+        throw new Error(`psql exited ${result.status}: ${result.stderr}`);
+      }
+    }
+
     async function shrinkPopulationBehindTheApproval(
-      shipmentId: string,
+      _shipmentId: string,
       lineId: string,
     ): Promise<void> {
-      await serviceClient
-        .from("shipments")
-        .update({ status: "DRAFT" })
-        .eq("id", shipmentId);
-
-      await serviceClient
-        .from("shipment_lines")
-        .delete()
-        .eq("id", lineId);
-
-      await serviceClient
-        .from("shipments")
-        .update({ status: "READY" })
-        .eq("id", shipmentId);
+      mutateLinesBehindTheApproval(
+        `delete from public.shipment_lines where id = '${lineId}';`,
+      );
     }
 
     it(
@@ -360,6 +392,14 @@ describe.skipIf(!ready)(
             })
             .select("id")
             .single();
+
+        // The shipment must itself be approved before a declaration over
+        // it can be (20260905140000), so this does that first -- the
+        // case is about the forged population, not about that rule.
+        await serviceClient
+          .from("shipments")
+          .update({ status: "READY" })
+          .eq("id", shipment!.id);
 
         // Created as DRAFT (the only status an insert accepts) and then
         // approved, with a forged population supplied on BOTH writes --
@@ -472,28 +512,10 @@ describe.skipIf(!ready)(
         // approved one than a population that shrank.
         const seeded = await seedApproved();
 
-        await serviceClient
-          .from("shipments")
-          .update({ status: "DRAFT" })
-          .eq("id", seeded.shipmentId);
-
-        await serviceClient
-          .from("shipment_lines")
-          .insert({
-            shipment_id: seeded.shipmentId,
-            org_id: orgId,
-            line_number: 3,
-            cn_code: "72081000",
-            cn_code_level: "CN8",
-            origin_country: "IN",
-            net_mass_tonnes: "250",
-            emission_determination: { method: "DEFAULT", marker: "added" },
-          });
-
-        await serviceClient
-          .from("shipments")
-          .update({ status: "READY" })
-          .eq("id", seeded.shipmentId);
+        mutateLinesBehindTheApproval(
+          `insert into public.shipment_lines (shipment_id, org_id, line_number, cn_code, cn_code_level, origin_country, net_mass_tonnes, emission_determination) ` +
+            `values ('${seeded.shipmentId}', '${orgId}', 3, '72081000', 'CN8', 'IN', '250', '{"method":"DEFAULT","marker":"added"}'::jsonb);`,
+        );
 
         expect(
           await file(seeded.declarationId, `REF-GREW-${seeded.year}`),
@@ -540,6 +562,233 @@ describe.skipIf(!ready)(
         expect(
           await file(seeded.declarationId, `REF-REWRITE-${seeded.year}`),
         ).toBe("POPULATION_CHANGED_SINCE_READY");
+      },
+    );
+
+    // ----------------------------------------------------------------
+    // 2026-09-04 (P14). Content, not just identity.
+    //
+    // approved_line_ids freezes WHICH lines. The filed figure is made of
+    // what is IN them. Reproduced before this rule existed: an admin
+    // reopened a shipment for an ordinary correction, a MEMBER changed a
+    // line 1000 -> 10, the line was re-determined and recalculated
+    // through the product's own path, the admin re-approved the
+    // SHIPMENT, and the filing recorded 510 against an approved 1500 --
+    // identities unchanged, so every gate passed.
+    //
+    // Re-approving a shipment is not re-approving a declaration.
+    // ----------------------------------------------------------------
+    it(
+      "reopening a member shipment retires the declaration's approval",
+      async () => {
+        const seeded = await seedApproved();
+
+        await serviceClient
+          .from("shipments")
+          .update({ status: "DRAFT" })
+          .eq("id", seeded.shipmentId);
+
+        const { data: declaration } =
+          await serviceClient
+            .from("declarations")
+            .select("status, approved_line_ids")
+            .eq("id", seeded.declarationId)
+            .single();
+
+        expect(declaration?.status).toBe("DRAFT");
+        expect(declaration?.approved_line_ids).toBeNull();
+      },
+    );
+
+    it(
+      "content changed under unchanged identities cannot be filed on the old approval",
+      async () => {
+        const seeded = await seedApproved();
+
+        // The exact reproduction: reopen, change a line's quantity,
+        // re-determine, recalculate, re-approve the SHIPMENT, file.
+        await serviceClient
+          .from("shipments")
+          .update({ status: "DRAFT" })
+          .eq("id", seeded.shipmentId);
+
+        await serviceClient
+          .from("shipment_lines")
+          .update({ net_mass_tonnes: "10" })
+          .eq("id", seeded.lineIds[0]!);
+
+        await serviceClient
+          .from("shipment_lines")
+          .update({
+            emission_determination: { method: "DEFAULT", marker: `y${seeded.year}` },
+          })
+          .eq("id", seeded.lineIds[0]!);
+
+        await serviceClient
+          .from("calculation_results")
+          .insert({
+            org_id: orgId,
+            line_id: seeded.lineIds[0],
+            shipment_id: seeded.shipmentId,
+            engine_version: "1.4.0",
+            quantity: "10",
+            quantity_unit: "TONNES",
+            determination: { method: "DEFAULT", marker: `y${seeded.year}` },
+            steps: [],
+            embedded_emissions_tco2e: "10",
+            calculated_by_user_id: adminId,
+          });
+
+        await serviceClient
+          .from("shipments")
+          .update({ status: "READY" })
+          .eq("id", seeded.shipmentId);
+
+        // The identities are untouched, and every other gate is
+        // satisfied. Only the retired approval refuses it.
+        expect(
+          await file(seeded.declarationId, `REF-CONTENT-${seeded.year}`),
+        ).toBe("NOT_READY");
+
+        const { data: declaration } =
+          await serviceClient
+            .from("declarations")
+            .select("status, filed_snapshot")
+            .eq("id", seeded.declarationId)
+            .single();
+
+        expect(declaration?.status).toBe("DRAFT");
+        expect(declaration?.filed_snapshot).toBeNull();
+      },
+    );
+
+    it(
+      "a declaration cannot be approved over a shipment that is not itself approved",
+      async () => {
+        // The step to the left: approve the declaration while a member
+        // is still DRAFT, edit its lines freely, then mark the shipment
+        // ready and file. Refused at the approval instead.
+        const year = nextYear++;
+
+        const { data: shipment } =
+          await serviceClient
+            .from("shipments")
+            .insert({
+              org_id: orgId,
+              reference: `POP-DRAFT-${year}-${runId}`,
+              release_date: `${year}-06-01`,
+              reporting_period_kind: "ANNUAL",
+              reporting_period_year: year,
+              status: "DRAFT",
+            })
+            .select("id")
+            .single();
+
+        const { data: declaration } =
+          await adminClient
+            .from("declarations")
+            .insert({
+              org_id: orgId,
+              reporting_period_kind: "ANNUAL",
+              reporting_period_year: year,
+              status: "DRAFT",
+              member_shipment_ids: [shipment!.id],
+              created_by_user_id: adminId,
+            })
+            .select("id")
+            .single();
+
+        const { error } =
+          await adminClient
+            .from("declarations")
+            .update({ status: "READY" })
+            .eq("id", declaration!.id);
+
+        expect(error).not.toBeNull();
+
+        expect(error?.message ?? "").toMatch(
+          /member shipments are not themselves approved/i,
+        );
+      },
+    );
+
+    it(
+      "the whole legitimate correction still works: reopen, edit, re-approve both, file",
+      async () => {
+        // The rule must not make correction impossible. This is the
+        // supported end-to-end path an administrator takes to fix an
+        // approved shipment, and it has to finish in a filed
+        // declaration carrying the CORRECTED figure.
+        const seeded = await seedApproved();
+
+        await serviceClient
+          .from("shipments")
+          .update({ status: "DRAFT" })
+          .eq("id", seeded.shipmentId);
+
+        // The declaration's approval is retired by that reopen.
+        const { data: retired } =
+          await serviceClient
+            .from("declarations")
+            .select("status")
+            .eq("id", seeded.declarationId)
+            .single();
+
+        expect(retired?.status).toBe("DRAFT");
+
+        // The administrator corrects the line and recalculates it.
+        await serviceClient
+          .from("shipment_lines")
+          .update({
+            net_mass_tonnes: "800",
+            emission_determination: { method: "DEFAULT", marker: `y${seeded.year}` },
+          })
+          .eq("id", seeded.lineIds[0]!);
+
+        await serviceClient
+          .from("calculation_results")
+          .insert({
+            org_id: orgId,
+            line_id: seeded.lineIds[0],
+            shipment_id: seeded.shipmentId,
+            engine_version: "1.4.0",
+            quantity: "800",
+            quantity_unit: "TONNES",
+            determination: { method: "DEFAULT", marker: `y${seeded.year}` },
+            steps: [],
+            embedded_emissions_tco2e: "800",
+            calculated_by_user_id: adminId,
+          });
+
+        // Both are re-approved, in the order the product requires.
+        await serviceClient
+          .from("shipments")
+          .update({ status: "READY" })
+          .eq("id", seeded.shipmentId);
+
+        await adminClient
+          .from("declarations")
+          .update({ status: "READY" })
+          .eq("id", seeded.declarationId);
+
+        expect(
+          await file(seeded.declarationId, `REF-CORRECTED-${seeded.year}`),
+        ).toBe("OK");
+
+        const { data: filed } =
+          await serviceClient
+            .from("declarations")
+            .select("status, filed_snapshot")
+            .eq("id", seeded.declarationId)
+            .single();
+
+        expect(filed?.status).toBe("FILED_RECORDED");
+
+        // 800 + 500, the corrected figure -- not the 1000 + 500 that
+        // was originally approved.
+        expect(
+          filed?.filed_snapshot?.totals?.embedded_emissions_tco2e,
+        ).toBe("1300");
       },
     );
 
