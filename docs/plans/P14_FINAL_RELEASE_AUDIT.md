@@ -4170,3 +4170,147 @@ self-assessment and inherits that prior.
 Second, where to look: sections 2–5 of the review brief have now been
 attacked at this SHA, but by the session that wrote the fixes. Filing
 integrity is the surface that has failed twice. Start there.
+
+---
+
+## 30. P14 finished (2026-09-04)
+
+§29 declared implementation complete. A review of it found the approved
+population was frozen by IDENTITY and the filed figure is made of
+CONTENT. This section closes that, and states what P14 now is.
+
+### The last blocker
+
+```
+Before:
+  1. ADMIN reopens a shipment (an ordinary correction)
+  2. MEMBER edits an approved line, 1000 -> 10
+  3. the edit nulls emission_determination, so a naive recalculation
+     is refused                                    <- a real control
+  3b. the line is re-determined
+  3c. and recalculated at the new quantity
+  4. ADMIN re-approves the SHIPMENT
+  5. ADMIN files; the DECLARATION was never re-approved  -> OK
+
+  filed_snapshot: line_count 2, embedded_emissions_tco2e 510
+  approved was 1500
+
+After:
+  step 1 retires the declaration's approval
+  step 5 -> NOT_READY, declaration DRAFT, no snapshot
+```
+
+Every gate had passed, correctly by its own terms: identities matched,
+the calculation matched the line, the determination matched, the engine
+was current, the period was exact. Nothing connected a shipment leaving
+READY to the declarations approved over it.
+
+**The rule** (owner decision 4): reopening a shipment retires the
+approval of every READY declaration containing it. Only explicit
+re-approval — which recomputes the frozen population over whatever the
+lines now say — makes it filable again. Stronger than comparing content
+at filing and simpler: a content comparison must enumerate every field
+that can move a number; "the approval is stale" enumerates nothing.
+
+**And the step to the left**: a declaration can no longer be approved
+over a member shipment that is not itself approved, or the same gap
+reopens before approval instead of after.
+
+### Filing — the four controls, each measured
+
+| attack | result |
+|---|---|
+| MEMBER reopens a READY shipment | refused; shipment still READY |
+| line removed after approval (reopen bypassed) | `POPULATION_CHANGED_SINCE_READY` |
+| line added after approval | `POPULATION_CHANGED_SINCE_READY` |
+| content changed, identities unchanged | approval retired → `NOT_READY` |
+| declaration approved over a DRAFT member | refused at approval |
+| filing raced against a reopen | member shipments locked first, fails closed |
+| **legitimate correction** — reopen, edit, re-approve both, file | **OK, files the corrected 1300, not the original 1500** |
+
+Each control was broken deliberately and the tests failed; restored, they
+pass. Eleven cases in the population suite, thirteen in the READY suite.
+
+### Everything else, re-verified at this SHA
+
+**Calculation** — as a real MEMBER: INSERT, UPDATE, DELETE and a direct
+call to the trusted RPC all `42501`; only the RPC's own figure is stored.
+The RPC is SECURITY DEFINER, `search_path=public`, EXECUTE for
+`service_role` alone.
+
+**Session/auth** — cookie yields no access or refresh token under any
+decoding; the opaque value at Supabase Auth returns `403 bad_jwt` /
+`401 no_authorization`; the identifier rotates on authentication and a
+planted one authenticates as nobody; `app_sessions` ownership immutable
+at the database; current-password proof intact; `/reset-password` still
+requires an email-link session.
+
+**Database** — fresh build 88 applied / 2 pipeline-skipped / 0 failed;
+seed's blanket grants survive the invariant backstop; comparator MATCHES
+and fails naming the exact control when any of three is broken.
+
+**Regulatory** — validator `RESULT: VALID`, 12,540/12,540 (local); the
+protected zone is byte-identical; EU-origin fails closed on both
+determination paths; D1's sector proxy documented as approximate;
+`tCO2/t` still escalated.
+
+### Gates
+
+```
+typecheck:              PASS
+unit/integration:       152 files, 1783 tests, 1783 passed, 0 failed, 0 skipped
+E2E:                    65 passed, 0 failed, 0 flaky, 9 skipped
+build:                  PASS -- 0 env files, 0 bypass, 0 JWTs in browser JS
+secret scan:            PASS
+posture comparator:     POSTURE MATCHES; negative test PASS -> 3 named failures -> PASS
+fresh DB + seed:        88 applied, 2 skipped (pipeline-dependent), 0 failed
+regulatory:             RESULT: VALID (local)
+```
+
+The 9 E2E skips are unchanged: 8 deliberate desktop-only journeys on
+`mobile-chromium`, and the Storage-backed actual-data journey on
+chromium, which **did not execute on this host** and is not counted as
+passed. CI enables Storage, asserts it answers, asserts the bucket
+exists, and fails otherwise.
+
+### Environment gates — unverified, not passed
+
+- **CI has not run.** It triggers on push, which is out of scope.
+- **The Storage journey did not execute** here.
+- **`regulatory:verify` ran against local**, not production.
+- **Hosted Auth settings unread** — `HOSTED CONFIGURATION UNVERIFIED`.
+- **No hosted restore has ever been performed.** The local drill and the
+  comparator are what exist; recovery is not claimed as proven.
+
+### Residual, stated rather than buried
+
+A path that both suspends the line-mutation trigger and avoids reopening
+the shipment could still change content under unchanged identities. That
+requires superuser control of the database, which is not distinct from
+owning it. Recorded, not claimed closed.
+
+The trusted calculation RPC does not verify the emissions value — the
+engine is TypeScript and a plpgsql second copy would be worse than none.
+And a stolen opaque session cookie authenticates to this application as
+the user until revoked or expired, which is what a session cookie is.
+
+### Owner decisions still open
+
+D1's sector proxy versus an exact Annex II dataset; `tCO2/t` as CO2e;
+whether a dataset period must equal the shipment's; whether an EU-origin
+line should ever be determinable.
+
+### Status
+
+**P14 IMPLEMENTATION COMPLETE — NO RELEASE BLOCKER REMAINS**
+
+One thing the next reader is owed, because it is the most useful fact in
+this document. Five successive gates on this phase were performed by the
+session that wrote the code, and four of them missed a defect that the
+next gate found — each time the same shape: a guard verified against the
+attack it was written for, not the attack one step to the left. The
+attacks that found them were, in order: a fresh session rather than an
+aged one; a planted identifier rather than a stolen one; a status change
+rather than a line edit; a content change rather than a population
+change. This section is the fifth such gate. Its evidence is real and
+its verdict is honest, and it is still not independent.
