@@ -60,7 +60,7 @@ const CAPABILITY_OPTIONS = [
     value: "PRODUCER_OPERATOR" as const,
     label: "Third-country Producer / Operator",
     description:
-      "Run production installations and share verified emissions data with importers.",
+      "Run production installations and share internally reviewed emissions data with importers.",
     icon: Factory,
   },
 ];

@@ -381,11 +381,11 @@ test.describe(
             async () => {
               await producerPage.getByRole(
                 "button",
-                { name: "Submit for verification" },
+                { name: "Submit for internal review" },
               ).click();
 
               await expect(
-                producerPage.getByText("VERIFICATION PENDING", { exact: true }),
+                producerPage.getByText("Awaiting internal review", { exact: true }),
               ).toBeVisible();
 
               // Dialog #15. Verification is irreversible in the shape
@@ -393,24 +393,24 @@ test.describe(
               // back -- and it locks the evidence behind it.
               await producerPage.getByRole(
                 "button",
-                { name: "Verify", exact: true },
+                { name: "Approve in internal review", exact: true },
               ).click();
 
               const verifyDialog =
                 producerPage.getByRole(
                   "dialog",
-                  { name: "Verify this emission data record?" },
+                  { name: "Approve this record in internal review?" },
                 );
 
               await expect(verifyDialog).toBeVisible();
 
               await verifyDialog.getByRole(
                 "button",
-                { name: "Verify record" },
+                { name: "Approve record" },
               ).click();
 
               await expect(
-                producerPage.getByText("VERIFIED", { exact: true }),
+                producerPage.getByText("Reviewed internally by the operator's organisation", { exact: true }),
               ).toBeVisible();
 
               // Dialog #16. Activation is a cross-party transition: it
@@ -592,7 +592,7 @@ test.describe(
               await expect(determineButton).toBeDisabled();
 
               await importerPage.getByLabel(
-                "Choose a verified dataset",
+                "Choose a reviewed dataset",
               ).selectOption(
                 { index: 1 },
               );
@@ -658,7 +658,7 @@ test.describe(
               // the record's evidence set, its verifier and the grant it
               // was read through, none of which reach the browser.
               await importerPage.getByLabel(
-                "Choose a verified dataset",
+                "Choose a reviewed dataset",
               ).selectOption(
                 { index: 1 },
               );

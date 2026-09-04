@@ -88,11 +88,15 @@ export default async function EmissionDataPage() {
       ],
     );
 
-  const installationNameById =
+  // Carries provenance alongside the name -- reviewBadgeFor needs it
+  // to render this record's review badge correctly (v2.1.1 §3
+  // Correction B / SME plan F13); every installation is fetched
+  // already, so no extra query.
+  const installationById =
     new Map(
       installations.map(
         (installation) => (
-          [installation.id, installation.name]
+          [installation.id, { name: installation.name, provenance: installation.provenance }]
         ),
       ),
     );
@@ -173,9 +177,17 @@ export default async function EmissionDataPage() {
                     record,
                   );
 
+                const installation =
+                  installationById.get(record.installation_id);
+
                 return {
                   id: record.id,
-                  installationName: installationNameById.get(record.installation_id) ?? "Unknown installation",
+                  installationName: installation?.name ?? "Unknown installation",
+                  // Referential-integrity edge case only (the FK makes
+                  // this practically unreachable) -- OPERATOR_PROVIDED
+                  // is the common-case default on this, the producer's
+                  // own screen.
+                  provenance: installation?.provenance ?? "OPERATOR_PROVIDED",
                   cnScope: record.cn_scope,
                   periodLabel: formatReportingPeriod(record.period),
                   directSpecific: record.direct_specific,

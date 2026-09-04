@@ -222,7 +222,7 @@ function AcceptSharingGrantItem(
                 description:
                   selectedOrganization
                     ? `Every member of ${selectedOrganization.organizationName} will be able to ` +
-                      `read this installation's verified emissions data. The grant is bound to ` +
+                      `read this installation's published, internally reviewed emissions data. The grant is bound to ` +
                       `${selectedOrganization.organizationName} permanently -- ` +
                       `${invitation.grantorOrganizationName} would have to revoke it and invite ` +
                       "you again to move it to a different organization."

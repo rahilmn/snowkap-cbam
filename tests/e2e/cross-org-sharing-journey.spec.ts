@@ -360,7 +360,7 @@ test.describe(
               // information). What matters for THIS journey is only
               // that a real emission_data row exists, scoped to this
               // exact installation and cn_scope, and is NOT VERIFIED.
-              await expect(producerPage.getByText("UNVERIFIED", { exact: true })).toBeVisible();
+              await expect(producerPage.getByText("Not yet reviewed", { exact: true })).toBeVisible();
             },
           );
 

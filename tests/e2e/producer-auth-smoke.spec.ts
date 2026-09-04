@@ -79,7 +79,7 @@ test.describe(
             { label: "Production data", role: "button" },
             { label: "Emissions", role: "link" },
             { label: "Evidence", role: "button" },
-            { label: "Verification", role: "button" },
+            { label: "Internal review", role: "button" },
             { label: "Sharing", role: "link" },
             { label: "Activity", role: "link" },
           ];

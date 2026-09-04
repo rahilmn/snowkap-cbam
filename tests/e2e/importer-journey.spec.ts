@@ -212,7 +212,7 @@ test.describe(
 
             await expect(page.getByText(/RULE-EE-001/)).toBeVisible();
 
-            await page.getByRole("button", { name: "Verify reproducibility" }).click();
+            await page.getByRole("button", { name: "Check reproducibility" }).click();
 
             await expect(page.getByText(/^Reproducible/)).toBeVisible();
           },

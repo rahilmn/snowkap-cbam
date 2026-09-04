@@ -151,7 +151,7 @@ test.describe(
           `e2e-importer-invitee-${producerOrgSession.runId}@example.com`;
 
         const EVIDENCE_INCOMPLETE_NOTICE =
-          "Additional evidence is required before these actual emissions can be used as verified data.";
+          "Additional evidence is required before these actual emissions can be approved in internal review.";
 
         const primaryNav =
           page.getByRole(
@@ -276,7 +276,7 @@ test.describe(
             ).toBeVisible();
 
             await expect(page.getByText("DRAFT", { exact: true })).toBeVisible();
-            await expect(page.getByText("UNVERIFIED", { exact: true })).toBeVisible();
+            await expect(page.getByText("Not yet reviewed", { exact: true })).toBeVisible();
 
             // Live, re-derived completeness (checkEmissionDataEvidenceCompleteness)
             // is Incomplete from the moment the record exists -- no
@@ -357,11 +357,11 @@ test.describe(
             // -- so this transition is genuinely, fully reachable.
             await page.getByRole(
               "button",
-              { name: "Submit for verification" },
+              { name: "Submit for internal review" },
             ).click();
 
             await expect(
-              page.getByText("VERIFICATION PENDING", { exact: true }),
+              page.getByText("Awaiting internal review", { exact: true }),
             ).toBeVisible();
           },
         );
@@ -380,7 +380,7 @@ test.describe(
             // hang retrying actionability on a button that can never
             // become enabled here.
             const verifyButton =
-              page.getByRole("button", { name: "Verify", exact: true });
+              page.getByRole("button", { name: "Approve in internal review", exact: true });
 
             await expect(verifyButton).toBeVisible();
 

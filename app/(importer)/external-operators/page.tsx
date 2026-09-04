@@ -144,8 +144,8 @@ export default async function ExternalOperatorsPage() {
         <p className="text-sm text-[var(--text-secondary)]">
           Once an installation exists here, record its emissions under
           External emissions, attach the operator&apos;s supporting
-          documentation, and take it through verification before using it
-          to determine a shipment line.
+          documentation, and take it through internal review before using
+          it to determine a shipment line.
         </p>
       </div>
 

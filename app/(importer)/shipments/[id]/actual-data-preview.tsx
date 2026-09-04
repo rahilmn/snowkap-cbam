@@ -3,6 +3,14 @@ import {
 } from "../../../../components/ui/badge";
 
 import {
+  StatusBadge,
+} from "../../../../components/ui/status-badge";
+
+import {
+  reviewBadgeFor,
+} from "../../../../src/domain/status-vocabulary/review-badges";
+
+import {
   formatReportingPeriod,
 } from "../../../../src/domain/shared/reporting-period";
 
@@ -129,9 +137,22 @@ export function ActualDataPreview(
       </dl>
 
       <div className="flex flex-wrap gap-1.5">
-        <Badge tone="success">
-          Verified
-        </Badge>
+        {/*
+          * This picker only ever offers ACTIVE + VERIFIED records
+          * (listAvailableActualEmissionData's own query), so
+          * verificationStatus is always VERIFIED here -- the badge
+          * still goes through reviewBadgeFor rather than a hardcoded
+          * "Verified" string, so the label differs correctly by
+          * provenance (v2.1.1 §3 Correction B / SME plan F13): an
+          * operator's own record was reviewed by the operator's own
+          * organisation; an importer-entered record was only ever
+          * reviewed by the importer's own organisation, reviewing a
+          * transcription -- never a review of the producer's actual
+          * emissions.
+          */}
+        <StatusBadge
+          statusKey={reviewBadgeFor("VERIFIED", option.record_provenance)}
+        />
 
         {option.record_provenance === "IMPORTER_ENTERED" ? (
           <Badge tone="neutral">

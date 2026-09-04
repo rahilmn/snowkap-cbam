@@ -6,6 +6,10 @@ import {
   vi,
 } from "vitest";
 
+import {
+  EVIDENCE_INCOMPLETE_NOTICE,
+} from "../../../src/domain/status-vocabulary/owner-sentences";
+
 // 2026-08-30 (test-coverage audit): app/(producer)/emission-data/actions.ts
 // had ZERO test coverage across all five exported Server Actions --
 // including verifyEmissionDataAction/rejectEmissionDataAction, which
@@ -771,9 +775,7 @@ describe(
         expect(result).toEqual(
           {
             status: "error",
-            message:
-              "Additional evidence is required before these actual emissions " +
-              "can be used as verified data.",
+            message: EVIDENCE_INCOMPLETE_NOTICE,
           },
         );
       },
@@ -944,7 +946,7 @@ describe(
         expect(result).toEqual(
           {
             status: "error",
-            message: "Only an admin or owner can verify or reject emission data.",
+            message: "Only an admin or owner can approve or reject emission data in internal review.",
           },
         );
       },
@@ -970,9 +972,7 @@ describe(
         expect(result).toEqual(
           {
             status: "error",
-            message:
-              "Additional evidence is required before these actual emissions " +
-              "can be used as verified data.",
+            message: EVIDENCE_INCOMPLETE_NOTICE,
           },
         );
       },
@@ -1128,7 +1128,7 @@ describe(
         expect(result).toEqual(
           {
             status: "error",
-            message: "Only an admin or owner can verify or reject emission data.",
+            message: "Only an admin or owner can approve or reject emission data in internal review.",
           },
         );
       },

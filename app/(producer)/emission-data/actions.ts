@@ -32,6 +32,10 @@ import {
 } from "../../../src/application/evidence/upload-evidence";
 
 import {
+  EVIDENCE_INCOMPLETE_NOTICE,
+} from "../../../src/domain/status-vocabulary/owner-sentences";
+
+import {
   createInMemoryRateLimiter,
   type RateLimitConfig,
 } from "../../../src/infrastructure/rate-limit/rate-limiter";
@@ -208,26 +212,31 @@ function transitionMessageFor(
       return "This action requires the record to be in draft.";
 
     case "VERIFICATION_NOT_PENDING":
-      return "This action requires the record to be pending verification.";
+      return "This action requires the record to be pending internal review.";
 
     case "NOT_VERIFIED":
-      return "This record must be verified before it can be activated.";
+      return "This record must be approved in internal review before it can be activated.";
 
-    // Exact copy required by the owner's blocking-model directive
-    // (2026-08-28) -- surfaced here as the server-side source of truth
-    // for both verifyEmissionData and activateEmissionData rejections
-    // (manage-emission-data.ts), in addition to the persistent
-    // client-side "Incomplete" panel emission-data-list.tsx already
-    // renders from the same live completeness check, so the message is
-    // never only a one-time toast.
+    // Enforces the owner's blocking-model directive (2026-08-28):
+    // evidence completeness blocks review/activation, and the message
+    // is persistent, not a one-time toast -- surfaced here as the
+    // server-side source of truth for both verifyEmissionData and
+    // activateEmissionData rejections (manage-emission-data.ts), in
+    // addition to the client-side "Incomplete" panel
+    // emission-data-list.tsx renders from the same live completeness
+    // check. The exact wording was revised under v2.1.1 §3 Correction
+    // B (the original said "...used as verified data"); both sites
+    // import the same constant from the vocabulary module
+    // (src/domain/status-vocabulary/owner-sentences.ts) so they can
+    // never drift from each other.
     case "EVIDENCE_INCOMPLETE":
-      return "Additional evidence is required before these actual emissions can be used as verified data.";
+      return EVIDENCE_INCOMPLETE_NOTICE;
 
     case "REJECTION_REASON_REQUIRED":
       return "Enter a reason for rejecting this record.";
 
     case "PERMISSION_DENIED":
-      return "Only an admin or owner can verify or reject emission data.";
+      return "Only an admin or owner can approve or reject emission data in internal review.";
 
     case "CAPABILITY_NOT_HELD":
       return "Your organization is not set up as a CBAM producer/operator.";

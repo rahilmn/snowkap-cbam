@@ -36,9 +36,33 @@ import {
   type EvidenceFileListItem,
 } from "./evidence-section";
 
+import {
+  StatusBadge,
+} from "../../../components/ui/status-badge";
+
+import {
+  reviewBadgeFor,
+} from "../../../src/domain/status-vocabulary/review-badges";
+
+import {
+  EVIDENCE_INCOMPLETE_NOTICE,
+} from "../../../src/domain/status-vocabulary/owner-sentences";
+
+import type {
+  InstallationRecordProvenance,
+} from "../../../src/domain/installations/types";
+
 export interface EmissionDataListItem {
   id: string;
   installationName: string;
+  // Who stands behind these figures -- the operator that runs the
+  // installation, or an importer transcribing what an external
+  // operator supplied (owner decision D2). Required, not optional:
+  // reviewBadgeFor's review label reads differently for each, and a
+  // provenance-free render would badge an importer's own transcription
+  // as the operator's internal review (v2.1.1 §3 Correction B / SME
+  // plan F13).
+  provenance: InstallationRecordProvenance;
   cnScope: string[];
   periodLabel: string;
   directSpecific: string;
@@ -61,15 +85,6 @@ export interface EmissionDataListItem {
   missingEvidenceFields: string[];
   evidenceFiles: EvidenceFileListItem[];
 }
-
-// Required exact copy from the owner's blocking-model directive
-// (2026-08-28) -- shown as a persistent, always-visible state on the
-// record while it remains incomplete (never a dismissible one-time
-// toast), matching the same string manage-emission-data.ts's
-// EVIDENCE_INCOMPLETE rejection surfaces server-side (actions.ts's
-// transitionMessageFor) if the Verify control is ever reached anyway.
-const EVIDENCE_INCOMPLETE_NOTICE =
-  "Additional evidence is required before these actual emissions can be used as verified data.";
 
 /**
  * Maps a domain missingFields entry (snapshot-completeness.ts's own
@@ -96,14 +111,6 @@ const STATUS_TONE: Record<EmissionDataListItem["status"], BadgeProps["tone"]> =
     ACTIVE: "success",
     SUPERSEDED: "neutral",
     DISCARDED: "danger",
-  };
-
-const VERIFICATION_TONE: Record<EmissionDataListItem["verificationStatus"], BadgeProps["tone"]> =
-  {
-    UNVERIFIED: "neutral",
-    VERIFICATION_PENDING: "warning",
-    VERIFIED: "success",
-    REJECTED: "danger",
   };
 
 export function EmissionDataList(
@@ -160,15 +167,15 @@ function EmissionDataRow(
               {record.status}
             </Badge>
 
-            <Badge tone={VERIFICATION_TONE[record.verificationStatus]}>
-              {record.verificationStatus.replace(/_/g, " ")}
-            </Badge>
+            <StatusBadge
+              statusKey={reviewBadgeFor(record.verificationStatus, record.provenance)}
+            />
 
             {/*
               Shown regardless of verificationStatus/status -- see this
               file's own EmissionDataListItem doc comment on
-              evidenceComplete. Not the same signal as the
-              VERIFICATION_TONE badge above: a record can be
+              evidenceComplete. Not the same signal as the review badge
+              above: a record can be
               VERIFICATION_PENDING (not yet gated) and Incomplete at the
               same time, or -- in the S5 gap this check exists to make
               harmless -- ACTIVE + VERIFIED and Incomplete at the same
@@ -208,7 +215,7 @@ function EmissionDataRow(
           {!record.evidenceComplete ? (
             <div className="flex flex-col gap-1 rounded-[var(--radius-md)] border border-[var(--color-warning-300)] bg-[var(--color-warning-100)] p-2 text-xs text-[var(--color-warning-700)]">
               <p className="font-medium">
-                Not ready for verification
+                Not ready for internal review
               </p>
 
               <ul className="list-disc pl-4">
@@ -284,17 +291,21 @@ function availableActions(
 
   if (record.verificationStatus === "UNVERIFIED" || record.verificationStatus === "REJECTED") {
     actions.push(
-      { kind: "SUBMIT_FOR_VERIFICATION", label: "Submit for verification", variant: "primary", adminOnly: false },
+      { kind: "SUBMIT_FOR_VERIFICATION", label: "Submit for internal review", variant: "primary", adminOnly: false },
     );
   }
 
   if (record.verificationStatus === "VERIFICATION_PENDING") {
     actions.push(
-      { kind: "VERIFY", label: "Verify", variant: "primary", adminOnly: true },
+      { kind: "VERIFY", label: "Approve in internal review", variant: "primary", adminOnly: true },
     );
 
     actions.push(
-      { kind: "REJECT", label: "Reject", variant: "destructive", adminOnly: true },
+      // Dead value today: RejectForm below renders its own button text
+      // rather than reading action.label (REJECT never flows through
+      // TransitionButton -- see this file's RecordActions). Kept in
+      // sync with the domain-action label vocabulary anyway.
+      { kind: "REJECT", label: "Reject in internal review", variant: "destructive", adminOnly: true },
     );
   }
 
@@ -549,10 +560,10 @@ function VerifyButton(
           title={state.status === "error" ? state.message : undefined}
           confirm={
             {
-              title: "Verify this emission data record?",
+              title: "Approve this record in internal review?",
               description:
-                "Verification cannot be undone from this screen -- a verified record offers no path back to unverified. The evidence attached to it can no longer be removed, and the record becomes activatable, which is what makes it visible to importers you share the installation with.",
-              confirmLabel: "Verify record",
+                "Approving cannot be undone from this screen -- an approved record offers no path back to pending. The evidence attached to it can no longer be removed, and the record becomes activatable, which is what makes it visible to importers you share the installation with.",
+              confirmLabel: "Approve record",
               cancelLabel: "Cancel",
             }
           }
@@ -613,7 +624,7 @@ function RejectForm(
           size="sm"
           loading={pending}
         >
-          Reject
+          Reject in internal review
         </Button>
       </div>
 

@@ -264,7 +264,7 @@ function ReproducibilityCheck(
           size="sm"
           loading={pending}
         >
-          Verify reproducibility
+          Check reproducibility
         </Button>
       </form>
 
@@ -348,8 +348,8 @@ function ReproducibilityCheck(
 
       {result?.status === "NOT_FOUND" ? (
         <p className="text-xs text-[var(--color-danger-700)]">
-          Something went wrong verifying this calculation. Please try
-          again.
+          Something went wrong checking this calculation&apos;s
+          reproducibility. Please try again.
         </p>
       ) : null}
     </div>

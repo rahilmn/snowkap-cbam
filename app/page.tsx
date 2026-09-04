@@ -75,13 +75,13 @@ const PRODUCER_STARTING_POINTS: StartingPoint[] =
       href: "/emission-data",
       title: "Emission data",
       description:
-        "Record actual emissions per installation and period, attach evidence, and move them through verification.",
+        "Record actual emissions per installation and period, attach evidence, and move them through internal review.",
     },
     {
       href: "/sharing",
       title: "Sharing",
       description:
-        "Grant importers read-only access to verified data, and revoke it when the relationship ends.",
+        "Grant importers read-only access to published, internally reviewed data, and revoke it when the relationship ends.",
     },
   ];
 
@@ -261,7 +261,7 @@ export default async function HomePage() {
 
       <p className="mb-6 text-sm text-[var(--text-secondary)]">
         {experience === "producer"
-          ? "Record verified installation emissions and share them with the importers who declare your goods."
+          ? "Record installation emissions, reviewed internally, and share them with the importers who declare your goods."
           : "Classify imported goods, determine their embedded emissions, and prepare CBAM declarations."}
       </p>
 

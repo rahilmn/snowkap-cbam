@@ -251,7 +251,7 @@ export function EmissionsCell(
                   {
                     title: "Replace actual data with a default value?",
                     description:
-                      "This line's verified actual-data determination is replaced by the regulatory default value for its CN code and origin. Its current calculation becomes stale until you recalculate, and the change is recorded in the audit trail together with the determination it replaced.",
+                      "This line's actual-data determination is replaced by the regulatory default value for its CN code and origin. Its current calculation becomes stale until you recalculate, and the change is recorded in the audit trail together with the determination it replaced.",
                     confirmLabel: "Replace with default value",
                     cancelLabel: "Keep actual data",
                     variant: "destructive",
@@ -298,7 +298,7 @@ export function EmissionsCell(
           <select
             name="emissionDataId"
             required
-            aria-label="Choose a verified dataset"
+            aria-label="Choose a reviewed dataset"
             value={selectedEmissionDataId}
             onChange={(event) =>
               setSelectedEmissionDataId(event.target.value)
@@ -306,7 +306,7 @@ export function EmissionsCell(
             className="h-8 max-w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-2 text-xs text-[var(--text-primary)]"
           >
             <option value="">
-              Choose a verified dataset...
+              Choose a reviewed dataset...
             </option>
 
             {availableActualData.map(
@@ -352,7 +352,7 @@ export function EmissionsCell(
                 {
                   title: "Replace this line's emission determination?",
                   description:
-                    "This line currently carries a verified actual-data determination. Replacing it freezes a new snapshot of the dataset you selected. The line's calculation becomes stale until you recalculate, and the change is recorded in the audit trail together with the determination it replaced.",
+                    "This line currently carries an actual-data determination. Replacing it freezes a new snapshot of the dataset you selected. The line's calculation becomes stale until you recalculate, and the change is recorded in the audit trail together with the determination it replaced.",
                   children:
                     selectedOption ? (
                       <ActualDataPreview

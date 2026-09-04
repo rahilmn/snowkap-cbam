@@ -115,11 +115,14 @@ export const PRODUCER_NAV: NavItem[] = [
       "Evidence is attached per dataset -- open Emission data and use each record's Evidence section",
   },
   {
-    label: "Verification",
+    label: "Internal review",
     icon: FileCheck2,
-    // Also built. Also previously described as unavailable.
+    // Also built. Also previously described as unavailable. Renamed
+    // from "Verification" (v2.1.1 §3 Correction B) -- internal review
+    // is a real product concept but is not accredited verification,
+    // and the nav label must not blur the two.
     unavailableReason:
-      "Verification is per dataset -- open Emission data and use each record's Verify or Reject action",
+      "Internal review is per dataset -- open Emission data and use each record's Approve or Reject action",
   },
   { label: "Sharing", icon: Share2, href: "/sharing" },
   { label: "Activity", icon: Activity, href: "/activity" },

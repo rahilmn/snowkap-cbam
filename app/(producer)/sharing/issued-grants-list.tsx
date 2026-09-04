@@ -147,7 +147,7 @@ function IssuedGrantListItem(
                   description:
                     grant.status === "INVITED"
                       ? "The invitation stops working immediately. Nobody has read this installation's data through it yet. To share again you would issue a new grant."
-                      : "The grantee can no longer read this installation's verified emissions data. Determinations they have already made from it are frozen copies and stay valid -- only future reads stop. This cannot be undone; to share again you would issue a new grant.",
+                      : "The grantee can no longer read this installation's published, internally reviewed emissions data. Determinations they have already made from it are frozen copies and stay valid -- only future reads stop. This cannot be undone; to share again you would issue a new grant.",
                   confirmLabel: "Revoke access",
                   cancelLabel: "Keep sharing",
                   variant: "destructive",

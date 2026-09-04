@@ -337,7 +337,7 @@ function EvidenceFileRow(
             {
               title: `Remove ${file.originalFilename}?`,
               description:
-                "The file is deleted from storage. If this record is then left with no evidence it becomes incomplete, and cannot be verified or activated until evidence is attached again.",
+                "The file is deleted from storage. If this record is then left with no evidence it becomes incomplete, and cannot be approved in internal review or activated until evidence is attached again.",
               confirmLabel: "Remove file",
               variant: "destructive",
             }

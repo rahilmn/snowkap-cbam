@@ -143,8 +143,8 @@ export default async function EmissionsPage() {
           </h2>
 
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
-            Verified data other organizations have shared with you, available
-            to determine a line from.
+            Published, internally reviewed data other organizations have
+            shared with you, available to determine a line from.
           </p>
         </div>
 
@@ -168,7 +168,7 @@ function DeterminedLinesTable(
       <p className="p-6 text-sm text-[var(--text-secondary)]">
         No shipment lines are determined from actual data yet. Use a
         line&apos;s emissions cell on its shipment detail page to determine
-        it from your own or a shared producer&apos;s verified data.
+        it from your own or a shared producer&apos;s reviewed data.
       </p>
     );
   }

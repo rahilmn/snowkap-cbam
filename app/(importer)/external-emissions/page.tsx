@@ -111,11 +111,19 @@ export default async function ExternalEmissionsPage() {
       ],
     );
 
-  const installationNameById =
+  // Carries provenance alongside the name -- reviewBadgeFor needs it
+  // to render this record's review badge correctly (v2.1.1 §3
+  // Correction B / SME plan F13); every installation is fetched
+  // already, so no extra query. On this screen provenance is normally
+  // IMPORTER_ENTERED (this route is the D2 importer-entered path), but
+  // it is read from the actual row rather than assumed, since an
+  // importer's "External operators" list is org-scoped, not
+  // provenance-filtered.
+  const installationById =
     new Map(
       installations.map(
         (installation) => (
-          [installation.id, installation.name]
+          [installation.id, { name: installation.name, provenance: installation.provenance }]
         ),
       ),
     );
@@ -157,7 +165,7 @@ export default async function ExternalEmissionsPage() {
           Emissions information supplied to you by operators that do not
           use Snowkap, recorded against the installations you registered
           under External operators. Attach the documentation the operator
-          gave you, then take each record through verification -- the
+          gave you, then take each record through internal review -- the
           same lifecycle a producer&apos;s own data goes through, and the
           same conditions before it can determine a shipment line.
         </p>
@@ -213,9 +221,17 @@ export default async function ExternalEmissionsPage() {
                     record,
                   );
 
+                const installation =
+                  installationById.get(record.installation_id);
+
                 return {
                   id: record.id,
-                  installationName: installationNameById.get(record.installation_id) ?? "Unknown installation",
+                  installationName: installation?.name ?? "Unknown installation",
+                  // Referential-integrity edge case only (the FK makes
+                  // this practically unreachable) -- IMPORTER_ENTERED
+                  // is the common-case default on this, the D2
+                  // importer-entered path's own screen.
+                  provenance: installation?.provenance ?? "IMPORTER_ENTERED",
                   cnScope: record.cn_scope,
                   periodLabel: formatReportingPeriod(record.period),
                   directSpecific: record.direct_specific,
