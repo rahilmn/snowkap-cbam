@@ -162,21 +162,41 @@ function quantityFieldsFromRow(
  * failure the same way it treats a null release_date lookup failure
  * (no match => don't gate), so this degrades the same direction its own
  * "unexpected-data-drift, not a normal outcome" case does.
+ *
+ * Verifies the fetched line's own org_id against the caller's orgId
+ * before returning its cn_code, same posture as
+ * resolveGoodSectorForActualLine's own org_id check on the neighboring
+ * shipments lookup (calculate-line.ts) -- found missing here in a
+ * fresh S3 review (N2): `row.line_id` above is already proven to
+ * belong to orgId (row.org_id was checked before this function is ever
+ * called), and the P4 org_id/shipment_id immutability triggers make a
+ * mismatch here unreachable for legitimate data, but this function
+ * accepts lineId as a bare parameter with no proof attached, so it
+ * re-derives ownership itself rather than relying on a caller
+ * invariant holding forever.
  */
 async function resolveCnCodeForLine(
   supabase: SupabaseClient,
+  orgId: OrganizationId,
   lineId: string,
 ): Promise<string | null> {
   const { data } =
     await supabase
       .from("shipment_lines")
       .select(
-        "cn_code",
+        "cn_code, org_id",
       )
       .eq("id", lineId)
       .maybeSingle();
 
-  return (data as { cn_code: string } | null)?.cn_code ?? null;
+  const line =
+    data as { cn_code: string; org_id: string } | null;
+
+  if (!line || line.org_id !== orgId) {
+    return null;
+  }
+
+  return line.cn_code;
 }
 
 /**
@@ -335,6 +355,7 @@ export async function reproduceCalculationResult(
             const cnCode =
               await resolveCnCodeForLine(
                 supabase,
+                orgId,
                 row.line_id,
               );
 

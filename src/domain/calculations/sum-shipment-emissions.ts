@@ -34,6 +34,21 @@ export type ShipmentEmissionsTotal =
  * where the layering rule permits it (src/domain/shared/decimal.ts's
  * own header comment).
  *
+ * `computedLineEmissions` MUST already be filtered to CURRENT
+ * calculations only (src/domain/emissions/check-calculation-currency.ts)
+ * -- a STALE one (the line was re-determined without being
+ * recalculated; calculation_results is append-only, so its superseded
+ * figure just sits there) must never reach this function, the same way
+ * build-period-summary.ts's calculationIsCurrent excludes one from the
+ * period-level total, for the identical reason: this codebase found
+ * and fixed exactly this class of bug once already at the reporting
+ * layer (2026-09-03, P14) and it is not this function's job to
+ * re-derive that filter itself (it has no way to: it only receives
+ * bare DecimalStrings, not the determinations needed to check
+ * currency) -- the caller (the shipment detail page) does it, the same
+ * way calculation-cell.tsx's own per-line staleness badge does.
+ *
+
  * NONE (not zero) when no line has been calculated yet, so the UI can
  * render "not yet calculated" rather than a misleading "0 tCO2e" --
  * the same "no value" is never "value is zero" discipline

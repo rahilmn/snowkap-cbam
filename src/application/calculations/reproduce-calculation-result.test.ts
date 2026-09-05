@@ -176,7 +176,7 @@ function mockSupabase(
   {
     calculationResultFetchResult,
     lineFetchResult = {
-      data: { cn_code: "72061000" },
+      data: { cn_code: "72061000", org_id: "org-1" },
       error: null,
     },
     shipmentFetchResult = {
@@ -510,6 +510,74 @@ describe(
 
         expect(calculationResultEqCalls).toContainEqual(
           ["org_id", orgId],
+        );
+      },
+    );
+
+    it(
+      "never applies the Annex II gate from a shipment_lines row belonging to a DIFFERENT org -- resolveCnCodeForLine's own org_id defense (2026-09-06, fresh S3 review N2)",
+      async () => {
+        const result =
+          await reproduceCalculationResult(
+            mockSupabase(
+              {
+                calculationResultFetchResult: {
+                  data: {
+                    org_id: "org-1",
+                    line_id: "line-1",
+                    shipment_id: "ship-1",
+                    engine_version: ENGINE_VERSION,
+                    quantity: "10.5",
+                    quantity_unit: "TONNES",
+                    // Stored as calculated WITHOUT the Annex II gate
+                    // (summed): 10.5 x (1.0 + 0.25) = 13.125.
+                    determination: {
+                      method: "ACTUAL",
+                      snapshot: {
+                        ...actualDeterminationZeroIndirect.snapshot,
+                        values: {
+                          direct_specific: "1.0",
+                          indirect_specific: "0.25",
+                        },
+                      },
+                    },
+                    steps: [
+                      {
+                        step: "LINE_EMBEDDED_EMISSIONS",
+                        rule_ref: "RULE-EE-009",
+                        formula: "line_embedded_emissions = quantity * (direct_specific + indirect_specific)",
+                        inputs: { quantity: "10.5", direct_specific: "1.0", indirect_specific: "0.25" },
+                        value: "13.125",
+                      },
+                    ],
+                    embedded_emissions_tco2e: "13.125",
+                  },
+                  error: null,
+                },
+                // A different org's shipment_lines row happens to share
+                // this line_id -- resolveCnCodeForLine must treat this
+                // as "not found," never surface its cn_code, and so
+                // never let a same-id-different-org good's sector
+                // (IRON_STEEL, per mockRepository below) gate this
+                // recompute.
+                lineFetchResult: {
+                  data: { cn_code: "72061000", org_id: "org-2" },
+                  error: null,
+                },
+              },
+            ),
+            mockRepository(
+              "IRON_STEEL",
+            ),
+            orgId,
+            calculationResultId,
+          );
+
+        // No Annex II gate applied: the recompute reproduces the
+        // stored SUMMED figure exactly, proving the other org's sector
+        // was never consulted.
+        expect(result).toEqual(
+          { status: "REPRODUCIBLE" },
         );
       },
     );

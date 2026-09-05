@@ -33,8 +33,8 @@ import {
 } from "../../../../src/application/calculations/get-latest-calculations";
 
 import {
-  sumShipmentEmissions,
-} from "../../../../src/domain/calculations/sum-shipment-emissions";
+  getShipmentEmissionsTotal,
+} from "../../../../src/application/calculations/get-shipment-emissions-total";
 
 import {
   markActualOptionsForLine,
@@ -128,15 +128,14 @@ export default async function ShipmentDetailPage(
     );
 
   // S3 (v2.1.1 §6), prominent result: the one number a user actually
-  // came here for, summed from each line's own already-COMPUTED
-  // figure -- never a second calculation (see
-  // sum-shipment-emissions.ts's own doc comment).
+  // came here for. See get-shipment-emissions-total.ts's own doc
+  // comment for why a STALE calculation (a line re-determined without
+  // being recalculated) must never contribute its superseded figure
+  // here -- fixed 2026-09-06 after a fresh independent review (B1).
   const emissionsTotal =
-    sumShipmentEmissions(
-      Object.values(latestCalculations).map(
-        (calculation) => calculation.embedded_emissions_tco2e,
-      ),
-      shipment.lines.length,
+    getShipmentEmissionsTotal(
+      shipment.lines,
+      latestCalculations,
     );
 
   // Per-line, not org-wide -- listAvailableActualEmissionData now filters
