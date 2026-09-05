@@ -1,31 +1,49 @@
 {
   "phase": "S1",
   "review_model": "Opus 5",
-  "reviewed_commit": "862edd845a9054ecaa7bf75529b7ae41d5c21663",
+  "reviewed_commit": "030897d3823707fdbcc4d65adc4a18fce68c50da",
   "verdict": "PASS",
   "blocking_findings": 0,
-  "yellow_findings": 4,
+  "yellow_findings": 2,
   "p14_protected": true,
   "tests_acceptable": true,
   "certifiable": true,
-  "timestamp": "2026-09-05T09:58:23Z",
-  "yellow_findings_detail": [
+  "timestamp": "2026-09-05T12:28:38Z",
+  "supersedes": {
+    "reviewed_commit": "862edd845a9054ecaa7bf75529b7ae41d5c21663",
+    "reason": "Original S1 certification (0 blocking, 4 yellow) superseded after remediation commit 030897d fixed all 4 yellow findings from that review. This artifact reflects the fresh, independent re-review of the remediated code, not a reuse of the prior verdict."
+  },
+  "remediated_findings": [
     {
-      "location": "tests/e2e/shell.spec.ts:300",
-      "summary": "new RegExp(`^${label} \\(.+\\)$`) inside a template literal loses the backslash escape and compiles to a capture group, not a literal paren. Currently unreachable (no importer nav item is role: \"button\" after placeholder removal), but under-constrains the moment a disabled item returns."
+      "original_finding": "tests/e2e/shell.spec.ts:300 -- unescaped-parens regex bug in a template literal (backslash silently dropped before RegExp, turning intended literal parens into an unintended capture group)",
+      "status": "RESOLVED",
+      "reviewer_evidence": "Reproduced the behavioral delta directly: constructed both the old and new regex forms and ran them against real and adversarial input strings. Old form matched 'Evidence anything at all, no parens required' and 'Evidence ()' (both should be false); new form correctly rejects both. Confirmed shell.spec.ts imports and uses the extracted helper and no inline `new RegExp` construction remains."
     },
     {
-      "location": "tests/architecture/status-vocabulary-enforcement.test.ts REPLACE_UNDERSCORE_ALLOWLIST",
-      "summary": "Allowlist entries match by bare expression prefix (e.g. \"key.replace(\") with no file scoping, so any future file naming a variable `key` could humanize a raw enum and still pass the scan."
+      "original_finding": "status-vocabulary-enforcement.test.ts's .replace(/_/g,\" \") allowlist matched by bare expression-prefix with no file scoping",
+      "status": "RESOLVED",
+      "reviewer_evidence": "Confirmed isReplaceUnderscoreAllowed checks exact file-path equality AND expression prefix. Adversarially corrupted the allowlist's file entries (case-changed) in the reviewer's own worktree and confirmed the scan then correctly flags both previously-allowed real call sites -- proving the check is load-bearing, not incidentally green. Reverted the corruption afterward."
     },
     {
-      "location": "src/domain/status-vocabulary/types.ts:108-111, axis-keys.ts:124-145",
-      "summary": "IncompleteLineReasonKey is hand-restated (layering rule forbids importing the application-layer source type), so it is the one axis without compile-time exhaustiveness -- a 4th member would compile clean and throw at runtime instead. Honestly documented in the code; a structural tradeoff, not an oversight."
+      "original_finding": "IncompleteLineReasonKey had no compile-time exhaustiveness against its application-layer source type",
+      "status": "RESOLVED",
+      "reviewer_evidence": "Independently proved Equals<A,B> is genuinely bidirectional (a naive one-directional extends check was shown to wrongly pass a member-removal case, in contrast). Added a real 4th member to IncompleteLineReason in the reviewer's own worktree and confirmed pnpm typecheck fails at exactly the new assertion file's line, not elsewhere. Confirmed tests/architecture/** is never scanned by checkLayering's real-repository check, so no layering-rule weakening occurred. Reverted the added member afterward."
     },
     {
-      "location": "components/shell/derive-active-nav-label.ts:34-42 vs app/onboarding/setup/page.tsx:76",
-      "summary": "Doc comment describes /onboarding/setup deriving to undefined as a deliberate behavior change, but the page still hard-codes activeNavLabel=\"Dashboard\" -- comment/behavior mismatch only, no functional bug."
+      "original_finding": "derive-active-nav-label.ts's comment claimed a behaviour change at /onboarding/setup that did not actually occur, and referenced a comment on that page that did not exist",
+      "status": "RESOLVED",
+      "reviewer_evidence": "Confirmed app/onboarding/setup/page.tsx is the only file under app/ or components/ that passes an explicit activeNavLabel prop, so pathname-derivation genuinely never runs for that route; both comments now state this accurately."
     }
   ],
-  "reviewer_notes": "Independent subagent review, isolated worktree, no memory of implementation conversation. P14 confirmed untouched via git diff --name-only fdf3c15..862edd8 grepped against every path in ADR-0005 plus its 2026-08-29 addendum; the single migration in range is an addition, not a modification, of a non-protected file. The 2 failing tests in tests/integration/password-change-current-password-proof.test.ts were independently reproduced at the fdf3c15 baseline (checkout, run, restore) and confirmed pre-existing, not S1-caused. tests/e2e/shell.spec.ts could not be executed in the reviewer's environment (no .env.local in a fresh worktree; the repo's own E2E target guard correctly refused to fall back to hosted credentials) -- verified by code reading only, noted explicitly rather than silently skipped."
+  "new_yellow_findings": [
+    {
+      "location": "tests/support/disabled-nav-item-pattern.ts:27",
+      "summary": "label is interpolated into the RegExp unescaped -- a future nav label containing a regex metacharacter (e.g. parens) would throw or under-constrain. No current label triggers this (all 15 current labels are plain alphanumerics/spaces, enumerated by the reviewer)."
+    },
+    {
+      "location": "components/shell/app-shell.tsx:200",
+      "summary": "Comment says the explicit activeNavLabel prop is kept at \"a handful of call sites\" -- there is exactly one (app/onboarding/setup/page.tsx). Pre-existing at 862edd8, not introduced by this remediation, but the same species of comment/reality drift as finding 4."
+    }
+  ],
+  "reviewer_notes": "Fresh, isolated-context Opus 5 review of commit 030897d specifically (not a reuse of the 862edd8 verdict). Test counts independently measured by the reviewer in its own environment (2 failed / 1831 passed / 20 skipped -- same 2 pre-existing failures, different skip count due to a fresh worktree lacking a populated .env, not a substantive discrepancy). The 2 pre-existing failures were independently re-confirmed against the 862edd8 baseline by the reviewer itself, not merely taken from the implementer's claim. Playwright's shell.spec.ts could not be executed in the reviewer's environment (no .env.local in a fresh worktree; the repo's own E2E target guard correctly refused to fall back to hosted credentials) -- verified by code reading, typecheck coverage, and the extracted helper's unit tests instead, stated explicitly rather than silently skipped."
 }
