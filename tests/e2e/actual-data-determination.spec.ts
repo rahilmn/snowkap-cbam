@@ -677,6 +677,28 @@ test.describe(
                 importerPage.getByText("Actual data", { exact: true }),
               ).toBeVisible();
 
+              await test.step(
+                "S3: 'Why this number?' shows the review-status badge for this actual-data determination (v2.1.1 trust panel)",
+                async () => {
+                  await importerPage.getByRole(
+                    "button",
+                    { name: /Why this number\? Line/ },
+                  ).click();
+
+                  // This dataset is the producer's own record, verified
+                  // internally by a second admin of the OPERATOR's own
+                  // organization -- never a claim of accredited
+                  // (Article 8) verification, and never conflated with
+                  // "reviewed" for a transcription (which would show
+                  // review.IMPORTER_TRANSCRIPTION instead).
+                  await expect(
+                    importerPage.getByText(
+                      "Reviewed internally by the operator's organization",
+                    ),
+                  ).toBeVisible();
+                },
+              );
+
               // Re-choosing the SAME dataset. The server decided this,
               // not a client-side id comparison -- the comparison covers
               // the record's evidence set, its verifier and the grant it

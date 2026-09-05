@@ -15,6 +15,10 @@ import {
 } from "../../../../src/domain/status-vocabulary";
 
 import {
+  reviewBadgeFor,
+} from "../../../../src/domain/status-vocabulary/review-badges";
+
+import {
   Button,
 } from "../../../../components/ui/button";
 
@@ -523,11 +527,34 @@ export function WhyThisNumberPanel(
               />
             </div>
 
-            <p className="text-[11px] text-[var(--text-tertiary)]">
+            <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--text-tertiary)]">
               Methodology <StatusBadge statusKey={methodologyKey(actualSnapshot.methodology)} /> ·{" "}
               {actualSnapshot.sharing_grant_id !== null
                 ? "via a shared installation"
                 : "from your organization's own data"}
+              {/*
+                * S3 trust panel (v2.1.1 SS8). This picker/determination
+                * pipeline only ever offers ACTIVE + VERIFIED records
+                * (listAvailableActualEmissionData's own query), so
+                * verification.status is typed as literally "VERIFIED"
+                * on this frozen snapshot -- matching
+                * actual-data-preview.tsx's own identical comment. Still
+                * goes through reviewBadgeFor rather than a hardcoded
+                * "Verified" string so the label differs correctly by
+                * provenance, and is gated on record_provenance being
+                * present for the same reason the prose below it is:
+                * absent on determinations frozen before that field
+                * existed (owner decision D2), and reviewBadgeFor takes
+                * no default for provenance.
+                */}
+              {actualSnapshot.record_provenance ? (
+                <StatusBadge
+                  statusKey={reviewBadgeFor(
+                    actualSnapshot.verification.status,
+                    actualSnapshot.record_provenance,
+                  )}
+                />
+              ) : null}
             </p>
 
             {/*
