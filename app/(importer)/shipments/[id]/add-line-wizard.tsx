@@ -459,11 +459,22 @@ export function AddLineWizard(
         {state.status === "error" ? state.message : null}
       </FieldError>
 
+      {
+        /*
+         * size="lg" (h-11, 44px) on every button here, not the design
+         * system's own default -- this form has no separate mobile
+         * layout (unlike DataTable's card fallback, this exact markup
+         * is what a phone renders too), so these are genuinely touch-
+         * operated controls, not desktop-only ones. See S3 v2.1.1's
+         * 44x44 touch-target requirement.
+         */
+      }
       <div className="flex items-center gap-2">
         {stepIndex > 0 ? (
           <Button
             type="button"
             variant="secondary"
+            size="lg"
             disabled={pending}
             onClick={() => goToStep(stepIndex - 1)}
           >
@@ -474,6 +485,7 @@ export function AddLineWizard(
         {currentStep !== "review" ? (
           <Button
             type="button"
+            size="lg"
             disabled={pending || !canAdvance()}
             onClick={() => goToStep(stepIndex + 1)}
           >
@@ -482,6 +494,7 @@ export function AddLineWizard(
         ) : (
           <Button
             type="submit"
+            size="lg"
             loading={pending}
           >
             Add line
