@@ -1,49 +1,39 @@
 {
   "phase": "S1",
   "review_model": "Opus 5",
-  "reviewed_commit": "030897d3823707fdbcc4d65adc4a18fce68c50da",
+  "reviewed_commit": "8d95738365fa71fd628581e574aa2f98d962f86c",
   "verdict": "PASS",
   "blocking_findings": 0,
   "yellow_findings": 2,
   "p14_protected": true,
   "tests_acceptable": true,
   "certifiable": true,
-  "timestamp": "2026-09-05T12:28:38Z",
+  "timestamp": "2026-09-05T13:31:58Z",
   "supersedes": {
-    "reviewed_commit": "862edd845a9054ecaa7bf75529b7ae41d5c21663",
-    "reason": "Original S1 certification (0 blocking, 4 yellow) superseded after remediation commit 030897d fixed all 4 yellow findings from that review. This artifact reflects the fresh, independent re-review of the remediated code, not a reuse of the prior verdict."
+    "reviewed_commit": "030897d3823707fdbcc4d65adc4a18fce68c50da",
+    "reason": "Prior certification (0 blocking, 2 yellow) superseded after final hygiene commit 8d95738 fixed both of those yellow findings. This artifact reflects a fresh, independent third review of the hygiene-passed code, not a reuse of either prior verdict (862edd8 or 030897d)."
   },
   "remediated_findings": [
     {
-      "original_finding": "tests/e2e/shell.spec.ts:300 -- unescaped-parens regex bug in a template literal (backslash silently dropped before RegExp, turning intended literal parens into an unintended capture group)",
+      "original_finding": "tests/support/disabled-nav-item-pattern.ts:27 -- nav label interpolated into RegExp without escaping regex metacharacters",
       "status": "RESOLVED",
-      "reviewer_evidence": "Reproduced the behavioral delta directly: constructed both the old and new regex forms and ran them against real and adversarial input strings. Old form matched 'Evidence anything at all, no parens required' and 'Evidence ()' (both should be false); new form correctly rejects both. Confirmed shell.spec.ts imports and uses the extracted helper and no inline `new RegExp` construction remains."
+      "reviewer_evidence": "Confirmed escapeRegExp is byte-identical to the MDN idiom and to both files it claims to match. Empirically swept 22 metacharacters and 11 label shapes (well beyond the implementer's own 3 test cases), including a balanced-parens case (\"a(b)c\") the implementer had not tested, which pre-fix silently became a capture group (no throw, wrong match) and post-fix is correctly rejected. Confirmed byte-for-byte identical regex .source for both real disabled-item labels (Evidence, Internal review) before and after the escape -- proving zero behavioral change for anything the product actually renders today."
     },
     {
-      "original_finding": "status-vocabulary-enforcement.test.ts's .replace(/_/g,\" \") allowlist matched by bare expression-prefix with no file scoping",
+      "original_finding": "components/shell/app-shell.tsx:200 -- stale comment claiming \"a handful of call sites\" when exactly one remains",
       "status": "RESOLVED",
-      "reviewer_evidence": "Confirmed isReplaceUnderscoreAllowed checks exact file-path equality AND expression prefix. Adversarially corrupted the allowlist's file entries (case-changed) in the reviewer's own worktree and confirmed the scan then correctly flags both previously-allowed real call sites -- proving the check is load-bearing, not incidentally green. Reverted the corruption afterward."
-    },
-    {
-      "original_finding": "IncompleteLineReasonKey had no compile-time exhaustiveness against its application-layer source type",
-      "status": "RESOLVED",
-      "reviewer_evidence": "Independently proved Equals<A,B> is genuinely bidirectional (a naive one-directional extends check was shown to wrongly pass a member-removal case, in contrast). Added a real 4th member to IncompleteLineReason in the reviewer's own worktree and confirmed pnpm typecheck fails at exactly the new assertion file's line, not elsewhere. Confirmed tests/architecture/** is never scanned by checkLayering's real-repository check, so no layering-rule weakening occurred. Reverted the added member afterward."
-    },
-    {
-      "original_finding": "derive-active-nav-label.ts's comment claimed a behaviour change at /onboarding/setup that did not actually occur, and referenced a comment on that page that did not exist",
-      "status": "RESOLVED",
-      "reviewer_evidence": "Confirmed app/onboarding/setup/page.tsx is the only file under app/ or components/ that passes an explicit activeNavLabel prop, so pathname-derivation genuinely never runs for that route; both comments now state this accurately."
+      "reviewer_evidence": "Independent tree-wide grep confirmed exactly one call site (app/onboarding/setup/page.tsx:82) among 11 total activeNavLabel-related hits (the rest are declarations, destructures, fallbacks, and doc-comment references, not call sites). Comment now names the file explicitly and uses unambiguous singular framing. Cross-checked for consistency against onboarding/setup/page.tsx's own comment and derive-active-nav-label.ts -- no contradiction."
     }
   ],
   "new_yellow_findings": [
     {
-      "location": "tests/support/disabled-nav-item-pattern.ts:27",
-      "summary": "label is interpolated into the RegExp unescaped -- a future nav label containing a regex metacharacter (e.g. parens) would throw or under-constrain. No current label triggers this (all 15 current labels are plain alphanumerics/spaces, enumerated by the reviewer)."
+      "location": "tests/e2e/producer-auth-smoke.spec.ts:108, tests/e2e/importer-auth-smoke.spec.ts:116",
+      "summary": "The identical buggy inline regex construction that S1 finding #1 (in shell.spec.ts) was raised about still exists verbatim in these two sibling specs, unaffected by the shell.spec.ts extraction. Proven empirically live against the two real disabled sidebar items (Evidence, Internal review) in producer-auth-smoke.spec.ts specifically -- the assertion there would not actually catch a regression to the sr-only reason text, contrary to its own adjacent comment's claim. Pre-existing (predates S1 entirely), test-only, latent (E2E did not run in the reviewer's environment or in CI historically per the file's own comment). Not introduced or claimed-fixed by 8d95738. Recommended as a tracked follow-up, not a blocker."
     },
     {
-      "location": "components/shell/app-shell.tsx:200",
-      "summary": "Comment says the explicit activeNavLabel prop is kept at \"a handful of call sites\" -- there is exactly one (app/onboarding/setup/page.tsx). Pre-existing at 862edd8, not introduced by this remediation, but the same species of comment/reality drift as finding 4."
+      "location": "tests/support/disabled-nav-item-pattern.test.ts:132-148",
+      "summary": "Test titled '...matches only that exact literal accessible name' asserts only the positive case, no negative -- would not fail if the pattern were over-permissive. Largely duplicative of the adjacent unbalanced-paren throw test. Correctness of the implementation is unaffected (reviewer independently verified the negative case holds); this is test-naming precision only."
     }
   ],
-  "reviewer_notes": "Fresh, isolated-context Opus 5 review of commit 030897d specifically (not a reuse of the 862edd8 verdict). Test counts independently measured by the reviewer in its own environment (2 failed / 1831 passed / 20 skipped -- same 2 pre-existing failures, different skip count due to a fresh worktree lacking a populated .env, not a substantive discrepancy). The 2 pre-existing failures were independently re-confirmed against the 862edd8 baseline by the reviewer itself, not merely taken from the implementer's claim. Playwright's shell.spec.ts could not be executed in the reviewer's environment (no .env.local in a fresh worktree; the repo's own E2E target guard correctly refused to fall back to hosted credentials) -- verified by code reading, typecheck coverage, and the extracted helper's unit tests instead, stated explicitly rather than silently skipped."
+  "reviewer_notes": "Fresh, isolated-context Opus 5 review of commit 8d95738 specifically (not a reuse of the 862edd8 or 030897d verdicts). Diff scope for this specific commit confirmed as exactly the 3 claimed files; the 4th file in the 030897d..8d95738 range is .certification/S1.json from the intervening certification-only commit 464214f, not scope creep. P14 protection independently re-verified across the FULL S1 range (fdf3c15..8d95738, 13 commits, 93 files) against every ADR-0005 path plus its addendum plus CLAUDE.md's explicit five-migration list -- zero matches on all. The 2 pre-existing password-change/session-eviction test failures were independently reproduced by checking out fdf3c15 (the very start of S1, before any S1 commit existed) and running that file alone -- identical failures, confirming they predate all of S1, not merely the remediation rounds. Playwright's shell.spec.ts could not be executed in the reviewer's environment (no .env.local in a fresh worktree; the repo's own E2E target guard correctly refused to fall back to hosted credentials) -- verified by code reading, unit-test coverage, and the reviewer's own empirical regex sweep instead, stated explicitly rather than silently skipped."
 }
