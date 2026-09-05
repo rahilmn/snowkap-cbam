@@ -20,6 +20,10 @@ import {
 } from "./theme-toggle";
 
 import {
+  FeedbackTrigger,
+} from "./feedback-trigger";
+
+import {
   MobileNav,
 } from "./mobile-nav";
 
@@ -147,6 +151,16 @@ export function Topbar(
             aria-hidden="true"
           />
         </Link>
+
+        {/*
+          SME Experience v2.1.1, S2. Gated on organizationName, same
+          condition the OrgSwitcher itself uses: /feedback requires a
+          real org (it redirects to /onboarding otherwise), so the
+          trigger is only shown once one exists.
+        */}
+        {organizationName ? (
+          <FeedbackTrigger />
+        ) : null}
 
         {/*
           2026-09-03 (P14). /accept-invitation is reachable from no

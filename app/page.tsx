@@ -35,6 +35,14 @@ import {
   getPreferredOrgId,
 } from "../components/shell/get-preferred-org-id";
 
+import {
+  deriveDashboardGuidance,
+} from "../src/application/guidance/derive-dashboard-guidance";
+
+import {
+  GuidanceWorkQueue,
+} from "../components/guidance/guidance-work-queue";
+
 interface StartingPoint {
   href: string;
   title: string;
@@ -242,6 +250,17 @@ export default async function HomePage() {
       ? PRODUCER_STARTING_POINTS
       : IMPORTER_STARTING_POINTS;
 
+  // SME Experience v2.1.1, S2. Not experience-gated: guidance is
+  // derived from whatever real state the org actually has (currently
+  // only I19, shipment-based -- an importer concept), so a
+  // producer-only org simply gets an empty result today, the same
+  // GuidanceWorkQueue empty state as any org genuinely caught up.
+  const guidance =
+    await deriveDashboardGuidance(
+      supabase,
+      orgSummary.context,
+    );
+
   return (
     <AppShell
       breadcrumbs={[
@@ -257,6 +276,10 @@ export default async function HomePage() {
           ? "Record installation emissions, reviewed internally, and share them with the importers who declare your goods."
           : "Classify imported goods, determine their embedded emissions, and prepare CBAM declarations."}
       </p>
+
+      <GuidanceWorkQueue
+        result={guidance}
+      />
 
       <div className="grid max-w-4xl gap-4 sm:grid-cols-2">
         {startingPoints.map(
