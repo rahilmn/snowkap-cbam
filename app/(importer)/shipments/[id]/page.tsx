@@ -46,6 +46,19 @@ import {
 } from "../../../../src/application/emissions/check-actual-determination-staleness";
 
 import {
+  getDefaultReferenceForLine,
+} from "../../../../src/application/emissions/get-default-reference-for-line";
+
+import type {
+  DefaultReferenceDisplay,
+} from "../../../../src/domain/emissions/default-reference";
+
+import {
+  getRegulatoryCountryMapper,
+  getRegulatoryRepository,
+} from "../../../../src/infrastructure/regulatory/get-regulatory-repository";
+
+import {
   formatReportingPeriod,
 } from "../../../../src/domain/shared/reporting-period";
 
@@ -175,6 +188,48 @@ export default async function ShipmentDetailPage(
       shipment.reporting_period,
     );
 
+  // S3 (v2.1.1 §9), default reference display: pure context for a line
+  // determined from ACTUAL data -- "what would the regulatory default
+  // say for this same classification/origin/route", never used in any
+  // calculation. Only fetched for ACTUAL-determined lines: a
+  // DEFAULT-determined line's own "Regulatory determination" section
+  // already shows these exact figures live, so a second reference
+  // fetch for it would be pure duplication.
+  const regulatoryRepository =
+    getRegulatoryRepository();
+
+  const regulatoryCountryMapper =
+    getRegulatoryCountryMapper();
+
+  const actualDeterminedLines =
+    shipment.lines.filter(
+      (line) => line.emission_determination?.method === "ACTUAL",
+    );
+
+  const defaultReferenceByLineId: Record<string, DefaultReferenceDisplay> =
+    Object.fromEntries(
+      await Promise.all(
+        actualDeterminedLines.map(
+          async (line) => (
+            [
+              line.id,
+              await getDefaultReferenceForLine(
+                supabase,
+                regulatoryRepository,
+                regulatoryCountryMapper,
+                {
+                  shipmentId: shipment.id,
+                  cnCode: line.cn_code,
+                  originCountry: line.origin_country,
+                  productionRouteIndicator: line.production_route?.source_route_indicator ?? null,
+                },
+              ),
+            ] as const
+          ),
+        ),
+      ),
+    );
+
   const editable =
     shipment.status === "DRAFT" || shipment.status === "READY";
 
@@ -263,6 +318,7 @@ export default async function ShipmentDetailPage(
           latestCalculations={latestCalculations}
           availableActualDataByLineId={availableActualDataByLineId}
           actualDeterminationStaleness={actualDeterminationStaleness}
+          defaultReferenceByLineId={defaultReferenceByLineId}
         />
       </Card>
 

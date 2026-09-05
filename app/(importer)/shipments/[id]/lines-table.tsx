@@ -53,6 +53,10 @@ import type {
 } from "../../../../src/application/calculations/get-latest-calculations";
 
 import type {
+  DefaultReferenceDisplay,
+} from "../../../../src/domain/emissions/default-reference";
+
+import type {
   ActualEmissionDataOptionForLine,
 } from "../../../../src/application/emissions/mark-actual-options-for-line";
 
@@ -76,6 +80,7 @@ export function LinesTable(
     latestCalculations,
     availableActualDataByLineId,
     actualDeterminationStaleness,
+    defaultReferenceByLineId,
   }: {
     shipmentId: string;
     lines: ShipmentLine[];
@@ -83,6 +88,7 @@ export function LinesTable(
     latestCalculations: Record<string, LatestLineCalculation>;
     availableActualDataByLineId: Record<string, ActualEmissionDataOptionForLine[]>;
     actualDeterminationStaleness: Record<string, ActualSnapshotStaleness>;
+    defaultReferenceByLineId: Record<string, DefaultReferenceDisplay>;
   },
 ) {
   if (lines.length === 0) {
@@ -144,6 +150,7 @@ export function LinesTable(
                 latestCalculation={latestCalculations[line.id]}
                 availableActualData={availableActualDataByLineId[line.id] ?? []}
                 staleness={actualDeterminationStaleness[line.id]}
+                defaultReference={defaultReferenceByLineId[line.id]}
               />
             ),
           )}
@@ -161,6 +168,7 @@ function LineRow(
     latestCalculation,
     availableActualData,
     staleness,
+    defaultReference,
   }: {
     shipmentId: string;
     line: ShipmentLine;
@@ -168,6 +176,7 @@ function LineRow(
     latestCalculation: LatestLineCalculation | undefined;
     availableActualData: ActualEmissionDataOptionForLine[];
     staleness: ActualSnapshotStaleness | undefined;
+    defaultReference: DefaultReferenceDisplay | undefined;
   },
 ) {
   const [
@@ -356,6 +365,7 @@ function LineRow(
               line={line}
               latestCalculation={latestCalculation}
               resolveState={resolveState}
+              defaultReference={defaultReference}
             />
           </td>
         </tr>

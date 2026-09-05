@@ -167,7 +167,11 @@ async function fetchLineForResolution(
  * for why the snapshot separately records MAPPED/UNLISTED rather than
  * relying on the resolver's reason alone.
  */
-function resolutionCountryName(
+// Exported (2026-09-06, S3) so get-default-reference-for-line.ts's
+// read-only reference lookup builds the SAME resolver input shape this
+// (mutating, capability-gated) determination path does, rather than a
+// second, drifting copy of this mapping.
+export function resolutionCountryName(
   mapping: CountryMappingOutcome,
   isoCode: string,
 ): string {

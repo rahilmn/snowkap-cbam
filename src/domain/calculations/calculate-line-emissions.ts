@@ -43,7 +43,12 @@ const ANNEX_II_RULE_REF =
  * until a real Annex II dataset lands, per the owner's explicit
  * decision to gate rather than accept the interim risk.
  */
-const ANNEX_II_SECTORS: ReadonlySet<string> =
+// Exported (2026-09-06, S3) so the default-reference display
+// (src/domain/emissions/default-reference.ts) consults this SAME set
+// rather than defining its own copy -- "do not duplicate
+// classification logic" applies to this proxy exactly as it would to
+// a real dataset.
+export const ANNEX_II_SECTORS: ReadonlySet<string> =
   new Set(
     [
       "IRON_STEEL",

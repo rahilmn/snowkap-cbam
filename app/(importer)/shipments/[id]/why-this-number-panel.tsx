@@ -50,6 +50,10 @@ import {
   checkCalculationCurrency,
 } from "../../../../src/domain/emissions/check-calculation-currency";
 
+import type {
+  DefaultReferenceDisplay,
+} from "../../../../src/domain/emissions/default-reference";
+
 function ValuePill(
   {
     label,
@@ -381,10 +385,22 @@ export function WhyThisNumberPanel(
     line,
     latestCalculation,
     resolveState,
+    defaultReference,
   }: {
     line: ShipmentLine;
     latestCalculation: LatestLineCalculation | undefined;
     resolveState: ResolveEmissionsActionState;
+    /**
+     * S3 (v2.1.1 §9), display only -- absent for a DEFAULT-determined
+     * line (its own "Regulatory determination" section below already
+     * shows these exact live figures, so a second reference would be
+     * pure duplication); present for an ACTUAL-determined line, where
+     * it is genuinely a different, clearly-labeled fact worth showing
+     * for context. Never compared against actualSnapshot's own
+     * figures -- there is no arithmetic here, only two facts shown
+     * side by side.
+     */
+    defaultReference?: DefaultReferenceDisplay;
   },
 ) {
   const determination =
@@ -578,6 +594,49 @@ export function WhyThisNumberPanel(
                 Source: entered by the organization that operates the
                 installation.
               </p>
+            ) : null}
+
+            {/*
+              * S3 (v2.1.1 §9), default reference display. DISPLAY
+              * ONLY -- there is no arithmetic comparator here, and this
+              * is never a second calculation of the number above: it is
+              * a different, independently-labeled fact (what the
+              * regulatory default would say for this same
+              * classification/origin/route), shown for context and
+              * nothing else. `defaultReference` is only ever fetched
+              * for an ACTUAL-determined line (see the shipment detail
+              * page's own doc comment on why) -- absent here would mean
+              * a rendering bug upstream, not a real state to handle
+              * silently, so this deliberately does not also guard on
+              * actualSnapshot being present.
+              */}
+            {defaultReference ? (
+              <div className="mt-1 flex flex-col gap-1.5 rounded-[var(--radius-sm)] border border-[var(--border-default)] px-2 py-1.5">
+                <p className="text-[11px] font-medium text-[var(--text-primary)]">
+                  Default reference (for context only)
+                </p>
+
+                {defaultReference.status === "AVAILABLE" ? (
+                  <>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <ValuePill label="Direct" value={defaultReference.direct} />
+                      <ValuePill label="Indirect" value={defaultReference.indirect} />
+                      <ValuePill label="Total" value={defaultReference.total} />
+                    </div>
+
+                    <p className="text-[11px] text-[var(--text-tertiary)]">
+                      What the regulatory default value would be for this
+                      same classification, origin, and route. Shown for
+                      context only -- it has no bearing on the actual-data
+                      result above.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-[var(--text-tertiary)]">
+                    Reference unavailable.
+                  </p>
+                )}
+              </div>
             ) : null}
           </div>
         ) : (
