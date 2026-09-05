@@ -15,10 +15,6 @@ import {
 } from "../../../components/ui/card";
 
 import {
-  StatusBadge,
-} from "../../../components/ui/status-badge";
-
-import {
   Button,
 } from "../../../components/ui/button";
 
@@ -39,12 +35,8 @@ import {
 } from "../../../src/application/shipments/list-shipments";
 
 import {
-  formatReportingPeriod,
-} from "../../../src/domain/shared/reporting-period";
-
-import {
-  shipmentStatusKey,
-} from "../../../src/domain/status-vocabulary";
+  ShipmentsTable,
+} from "./shipments-table";
 
 export default async function ShipmentsPage() {
   const supabase =
@@ -94,69 +86,9 @@ export default async function ShipmentsPage() {
       </div>
 
       <Card>
-        {shipments.length === 0 ? (
-          <p className="p-6 text-sm text-[var(--text-secondary)]">
-            No shipments yet. Create your first shipment to begin
-            classifying goods and resolving embedded emissions.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-[var(--border-default)] text-[var(--text-tertiary)]">
-                  <th className="px-4 py-2.5 font-medium">
-                    Reference
-                  </th>
-
-                  <th className="px-4 py-2.5 font-medium">
-                    Release date
-                  </th>
-
-                  <th className="px-4 py-2.5 font-medium">
-                    Reporting period
-                  </th>
-
-                  <th className="px-4 py-2.5 font-medium">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-[var(--border-default)]">
-                {shipments.map(
-                  (shipment) => (
-                    <tr key={shipment.id}>
-                      <td className="px-4 py-2.5">
-                        <Link
-                          href={`/shipments/${shipment.id}`}
-                          className="font-medium text-[var(--text-primary)] hover:underline"
-                        >
-                          {shipment.reference}
-                        </Link>
-                      </td>
-
-                      <td className="px-4 py-2.5 tabular-nums text-[var(--text-secondary)]">
-                        {shipment.release_date}
-                      </td>
-
-                      <td className="px-4 py-2.5 tabular-nums text-[var(--text-secondary)]">
-                        {formatReportingPeriod(
-                          shipment.reporting_period,
-                        )}
-                      </td>
-
-                      <td className="px-4 py-2.5">
-                        <StatusBadge
-                          statusKey={shipmentStatusKey(shipment.status)}
-                        />
-                      </td>
-                    </tr>
-                  ),
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <ShipmentsTable
+          shipments={shipments}
+        />
       </Card>
     </AppShell>
   );
