@@ -66,7 +66,18 @@ const ACTIONS_BY_STATUS: Record<
   TransitionActionSpec[]
 > = {
   DRAFT: [
-    { action: "MARK_READY", label: "Mark ready", variant: "primary" },
+    // 2026-09-06 (S3, v2.1.1 terminology). "Ready for declaration" is
+    // the user-facing READINESS language this specific transition
+    // means (this shipment is complete and eligible to be included
+    // when a declaration is filed) -- distinct from a DECLARATION's
+    // own DRAFT->READY transition, which is "Approved for filing"
+    // (declaration-actions.tsx's MarkReadyForm). Both used the
+    // identical "Mark ready" label before this change, which read as
+    // the same action at two different levels when they are not. The
+    // underlying action name (MARK_READY) and every domain/RLS/
+    // lifecycle rule it triggers are unchanged -- this is presentation
+    // only.
+    { action: "MARK_READY", label: "Ready for declaration", variant: "primary" },
     { action: "VOID", label: "Void", variant: "destructive", confirm: VOID_CONFIRMATION },
   ],
 

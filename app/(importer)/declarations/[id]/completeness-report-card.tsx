@@ -58,7 +58,7 @@ export function CompletenessReportCard(
       ) : report.complete ? (
         <div className="p-4">
           <Badge tone="success">
-            Complete -- ready to mark ready
+            Complete -- ready to approve for filing
           </Badge>
         </div>
       ) : (

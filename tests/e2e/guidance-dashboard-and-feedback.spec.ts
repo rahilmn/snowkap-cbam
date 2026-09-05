@@ -200,7 +200,7 @@ test.describe(
           async () => {
             await page.getByRole(
               "button",
-              { name: "Mark ready" },
+              { name: "Ready for declaration" },
             ).click();
 
             await expect(

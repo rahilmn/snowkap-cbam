@@ -180,20 +180,30 @@ function MarkReadyForm(
         pending={pending}
         confirm={
           {
-            title: "Mark this declaration ready?",
+            title: "Approve this declaration for filing?",
 
             // Ready freezes the set of member shipments, and there is no
             // route back to draft from this screen -- the period's own
             // PERIOD_HAS_READY_DECLARATION rule then prevents starting
             // another draft for it.
+            //
+            // 2026-09-06 (S3, v2.1.1 terminology). "Approved for filing"
+            // is this transition's own declaration-approval language,
+            // distinct from a SHIPMENT's "Ready for declaration"
+            // (transition-actions.tsx) -- both used to say "Mark ready"
+            // identically, which read as the same action at two
+            // different levels when they are not. The underlying
+            // action (markDeclarationReadyAction, DRAFT->READY) and
+            // every domain/RLS/lifecycle rule it triggers are
+            // unchanged -- this is presentation only.
             description:
-              "This freezes the set of shipments in this declaration and is the step before recording it as filed. A ready declaration cannot be returned to draft from this screen.",
-            confirmLabel: "Mark ready",
+              "This freezes the set of shipments in this declaration and is the step before recording it as filed. An approved declaration cannot be returned to draft from this screen.",
+            confirmLabel: "Approve for filing",
             cancelLabel: "Keep as draft",
           }
         }
       >
-        Mark ready
+        Approved for filing
       </ConfirmSubmitButton>
 
       {state.status === "error" ? (

@@ -251,9 +251,9 @@ test.describe(
         );
 
         await test.step(
-          "shipment lifecycle: mark ready",
+          "shipment lifecycle: ready for declaration",
           async () => {
-            await page.getByRole("button", { name: "Mark ready" }).click();
+            await page.getByRole("button", { name: "Ready for declaration" }).click();
 
             await expect(
               page.locator('[data-status-key="shipment.READY"]'),
@@ -298,30 +298,30 @@ test.describe(
             await expect(page).toHaveURL(/\/declarations\/[0-9a-f-]{36}$/);
 
             await expect(
-              page.getByText("Complete -- ready to mark ready"),
+              page.getByText("Complete -- ready to approve for filing"),
             ).toBeVisible();
           },
         );
 
         await test.step(
-          "declare: mark ready and record filed (LOCK)",
+          "declare: approve for filing and record filed (LOCK)",
           async () => {
-            // Marking a declaration ready freezes its shipment set and
-            // is the step before recording it filed, so it asks first
-            // (P14 dialog #11).
-            await page.getByRole("button", { name: "Mark ready" }).click();
+            // Approving a declaration for filing freezes its shipment
+            // set and is the step before recording it filed, so it
+            // asks first (P14 dialog #11).
+            await page.getByRole("button", { name: "Approved for filing" }).click();
 
             const markReadyDialog =
               page.getByRole(
                 "dialog",
-                { name: "Mark this declaration ready?" },
+                { name: "Approve this declaration for filing?" },
               );
 
             await expect(markReadyDialog).toBeVisible();
 
             await markReadyDialog.getByRole(
               "button",
-              { name: "Mark ready" },
+              { name: "Approve for filing" },
             ).click();
 
             // Scoped to the declaration's own status, not a bare
