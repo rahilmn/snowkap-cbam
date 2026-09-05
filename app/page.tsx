@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { redirect } from "next/navigation";
+
 import {
   AppShell,
   resolveExperience,
@@ -117,21 +119,6 @@ export default async function HomePage() {
       await getPreferredOrgId(),
     );
 
-  // Deliberately does NOT redirect when there is no session.
-  //
-  // `/` currently renders the application shell to signed-out visitors,
-  // because proxy.ts only refreshes the session and never redirects.
-  // That is a real, PRE-EXISTING issue -- tests/e2e/shell.spec.ts has
-  // seven signed-out cases that navigate here, and
-  // importer-auth-smoke.spec.ts's own header comment already tracks it
-  // as follow-up ("not merely that the shell renders while signed out").
-  //
-  // Closing it means requiring auth on this route and re-basing all
-  // seven of those specs onto the authenticated fixture, each of which
-  // performs a real sign-up. That is its own change with its own risk,
-  // and bundling it into a fix for the placeholder content would be a
-  // silent scope expansion. It is recorded as an open finding instead of
-  // being either half-done or quietly left unmentioned.
   if (!orgSummary) {
     // 2026-09-03 (P14). getCurrentOrgSummary returns null for BOTH a
     // signed-out visitor and a signed-in user with no membership, and
@@ -214,29 +201,19 @@ export default async function HomePage() {
       );
     }
 
-    return (
-      <AppShell
-        breadcrumbs={[
-          { label: "Dashboard" },
-        ]}
-        activeNavLabel="Dashboard"
-      >
-        <h1 className="mb-1 text-2xl font-semibold text-[var(--text-primary)]">
-          Snowkap CBAM
-        </h1>
-
-        <p className="mb-6 max-w-xl text-sm text-[var(--text-secondary)]">
-          Sign in to classify imported goods, determine their embedded
-          emissions, and prepare CBAM declarations.
-        </p>
-
-        <Link
-          href="/sign-in"
-          className="text-sm font-medium text-[var(--accent-interactive)] hover:text-[var(--accent-interactive-hover)]"
-        >
-          Sign in →
-        </Link>
-      </AppShell>
+    // 2026-09-05 (SME plan v2.1.1, S1). Closes the gap the removed
+    // comment above this branch used to name: `/` no longer renders
+    // the shell to a genuinely signed-out visitor (getCurrentOrgSummary
+    // returned null AND there is no session at all) -- it redirects to
+    // /sign-in instead, same as every other authenticated screen's own
+    // guard (e.g. app/(producer)/emission-data/page.tsx's
+    // `if (!orgSummary) redirect("/onboarding")`, and this route's own
+    // Server Actions already redirect("/sign-in") when signed out).
+    // The signed-in-without-an-org branch above is unchanged -- an
+    // invited user is still shown their invitation, never bounced to
+    // sign-in.
+    redirect(
+      "/sign-in",
     );
   }
 
