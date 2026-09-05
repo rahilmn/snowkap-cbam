@@ -197,10 +197,11 @@ export async function AppShell(
     (orgSummary?.context.capabilities.includes("IMPORTER_DECLARANT") ?? false);
 
   // SME Experience v2.1.1, S1: derived navigation. An explicit
-  // `activeNavLabel` prop still wins outright (kept at the handful of
-  // call sites whose route doesn't map cleanly onto a nav item, e.g.
-  // /onboarding/setup) -- this only fills in when a screen passes
-  // none, using the pathname proxy.ts forwards on every request.
+  // `activeNavLabel` prop still wins outright -- as of this comment,
+  // kept at exactly one call site whose route doesn't map cleanly onto
+  // a nav item (app/onboarding/setup/page.tsx; see that page's own
+  // comment on why) -- this only fills in when a screen passes none,
+  // using the pathname proxy.ts forwards on every request.
   const resolvedActiveNavLabel =
     activeNavLabel ??
     deriveActiveNavLabel(

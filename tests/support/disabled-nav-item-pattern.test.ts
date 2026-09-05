@@ -79,5 +79,72 @@ describe(
         );
       },
     );
+
+    // S1 remediation (fresh Opus 5 review of 030897d, remaining yellow
+    // finding #1): `label` was interpolated into the RegExp source
+    // unescaped. Two distinct failure modes, both covered below --
+    // an unbalanced-paren label THROWS at construction, and a balanced-
+    // but-special-character label (a literal ".", "+", etc.) silently
+    // changes what the pattern actually matches instead of throwing.
+    it(
+      "does not throw when a label contains an unbalanced regex metacharacter (an unmatched opening paren)",
+      () => {
+        expect(
+          () =>
+            disabledNavItemNamePattern(
+              "Great (value",
+            ),
+        ).not.toThrow();
+      },
+    );
+
+    it(
+      "treats a regex metacharacter in the label as a LITERAL character, not as regex syntax",
+      () => {
+        const pattern =
+          disabledNavItemNamePattern(
+            "Sharing v2.0",
+          );
+
+        // Positive: the real accessible name still matches.
+        expect(
+          pattern.test(
+            "Sharing v2.0 (Not available in this release)",
+          ),
+        ).toBe(
+          true,
+        );
+
+        // Negative: an unescaped "." in the pattern would match ANY
+        // character, so "v2X0" would wrongly satisfy "v2.0" if the
+        // label were interpolated raw. A correctly-escaped pattern
+        // requires a literal dot and must reject this.
+        expect(
+          pattern.test(
+            "Sharing v2X0 (Not available in this release)",
+          ),
+        ).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "treats an unbalanced-paren label as literal text, matching only that exact literal accessible name",
+      () => {
+        const pattern =
+          disabledNavItemNamePattern(
+            "Great (value",
+          );
+
+        expect(
+          pattern.test(
+            "Great (value (Not available in this release)",
+          ),
+        ).toBe(
+          true,
+        );
+      },
+    );
   },
 );
