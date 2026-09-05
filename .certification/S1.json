@@ -1,0 +1,31 @@
+{
+  "phase": "S1",
+  "review_model": "Opus 5",
+  "reviewed_commit": "862edd845a9054ecaa7bf75529b7ae41d5c21663",
+  "verdict": "PASS",
+  "blocking_findings": 0,
+  "yellow_findings": 4,
+  "p14_protected": true,
+  "tests_acceptable": true,
+  "certifiable": true,
+  "timestamp": "2026-09-05T09:58:23Z",
+  "yellow_findings_detail": [
+    {
+      "location": "tests/e2e/shell.spec.ts:300",
+      "summary": "new RegExp(`^${label} \\(.+\\)$`) inside a template literal loses the backslash escape and compiles to a capture group, not a literal paren. Currently unreachable (no importer nav item is role: \"button\" after placeholder removal), but under-constrains the moment a disabled item returns."
+    },
+    {
+      "location": "tests/architecture/status-vocabulary-enforcement.test.ts REPLACE_UNDERSCORE_ALLOWLIST",
+      "summary": "Allowlist entries match by bare expression prefix (e.g. \"key.replace(\") with no file scoping, so any future file naming a variable `key` could humanize a raw enum and still pass the scan."
+    },
+    {
+      "location": "src/domain/status-vocabulary/types.ts:108-111, axis-keys.ts:124-145",
+      "summary": "IncompleteLineReasonKey is hand-restated (layering rule forbids importing the application-layer source type), so it is the one axis without compile-time exhaustiveness -- a 4th member would compile clean and throw at runtime instead. Honestly documented in the code; a structural tradeoff, not an oversight."
+    },
+    {
+      "location": "components/shell/derive-active-nav-label.ts:34-42 vs app/onboarding/setup/page.tsx:76",
+      "summary": "Doc comment describes /onboarding/setup deriving to undefined as a deliberate behavior change, but the page still hard-codes activeNavLabel=\"Dashboard\" -- comment/behavior mismatch only, no functional bug."
+    }
+  ],
+  "reviewer_notes": "Independent subagent review, isolated worktree, no memory of implementation conversation. P14 confirmed untouched via git diff --name-only fdf3c15..862edd8 grepped against every path in ADR-0005 plus its 2026-08-29 addendum; the single migration in range is an addition, not a modification, of a non-protected file. The 2 failing tests in tests/integration/password-change-current-password-proof.test.ts were independently reproduced at the fdf3c15 baseline (checkout, run, restore) and confirmed pre-existing, not S1-caused. tests/e2e/shell.spec.ts could not be executed in the reviewer's environment (no .env.local in a fresh worktree; the repo's own E2E target guard correctly refused to fall back to hosted credentials) -- verified by code reading only, noted explicitly rather than silently skipped."
+}
