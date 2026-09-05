@@ -155,7 +155,7 @@ function mockSupabase(
       error: null,
     },
     shipmentFetchResult = {
-      data: { release_date: "2026-01-01" },
+      data: { release_date: "2026-01-01", org_id: "org-1" },
       error: null,
     },
   }: {
@@ -558,6 +558,74 @@ describe(
         expect(insertPayloads).toHaveLength(
           1,
         );
+      },
+    );
+
+    it(
+      "does not apply the Annex II gate when the line's own shipment_id resolves to a DIFFERENT org's shipment -- resolveGoodSectorForActualLine's own org_id defense, not just calculateLine's line-level check",
+      async () => {
+        const insertPayloads: unknown[] =
+          [];
+
+        const result =
+          await calculateLine(
+            mockSupabase(
+              {
+                lineFetchResult: {
+                  data: {
+                    org_id: "org-1",
+                    shipment_id: "ship-1",
+                    cn_code: "72061000",
+                    net_mass_tonnes: "10.5",
+                    quantity_mwh: null,
+                    emission_determination: actualDetermination,
+                  },
+                  error: null,
+                },
+                // A different org's shipment happens to share this id --
+                // resolveGoodSectorForActualLine must treat this as
+                // "not found," never fetch its sector, and never let the
+                // Annex II gate apply on the strength of a shipment row
+                // it was not authorized to read.
+                shipmentFetchResult: {
+                  data: { release_date: "2026-01-01", org_id: "org-2" },
+                  error: null,
+                },
+              },
+            ),
+            mockRepository(
+              "IRON_STEEL",
+            ),
+            mockWriter(
+              { payloads: insertPayloads },
+            ),
+            memberContext(),
+            lineId,
+          );
+
+        expect(result.status).toBe(
+          "OK",
+        );
+
+        if (result.status === "OK") {
+          expect(result.calculation.status).toBe(
+            "COMPUTED",
+          );
+
+          if (result.calculation.status === "COMPUTED") {
+            // No Annex II gate applied: direct + indirect summed, same
+            // as any non-Annex-II good -- 10.5 x (1.0 + 0.2) = 12.6.
+            expect(result.calculation.embedded_emissions_tco2e).toBe(
+              "12.6",
+            );
+
+            expect(
+              result.calculation.steps.map((step) => step.step),
+            ).not.toContain(
+              "ANNEX_II_DIRECT_ONLY",
+            );
+          }
+        }
       },
     );
 

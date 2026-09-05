@@ -343,6 +343,7 @@ export async function reproduceCalculationResult(
               : resolveGoodSectorForActualLine(
                   supabase,
                   repository,
+                  orgId,
                   row.shipment_id,
                   cnCode,
                 );

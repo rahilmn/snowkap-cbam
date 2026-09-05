@@ -43,11 +43,23 @@ import {
  * not compare this against the actual figures; it only decides
  * whether the resolver's own values are internally consistent enough
  * to show).
+ *
+ * `orgId` is passed through to resolveGoodSectorForActualLine (not
+ * consulted directly here): `line.shipmentId` arrives as a bare
+ * parameter with no proof of ownership attached, so it is the callee's
+ * job -- not this function's -- to re-derive that the shipment
+ * actually belongs to orgId before its release_date is used, same
+ * "re-authorized rather than believed" posture as calculateLine's own
+ * org_id check (calculate-line.ts). Found missing in this function's
+ * first cut: its only caller at the time (the shipment detail page)
+ * happened to already pass an org-verified shipmentId, which masked
+ * the gap -- see resolveGoodSectorForActualLine's own doc comment.
  */
 export async function getDefaultReferenceForLine(
   supabase: SupabaseClient,
   repository: RegulatoryRepository,
   mapper: RegulatoryCountryMapper,
+  orgId: string,
   line: {
     shipmentId: string;
     cnCode: string;
@@ -99,6 +111,7 @@ export async function getDefaultReferenceForLine(
     await resolveGoodSectorForActualLine(
       supabase,
       repository,
+      orgId,
       line.shipmentId,
       line.cnCode,
     );

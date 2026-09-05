@@ -180,7 +180,7 @@ function mockSupabase(
       error: null,
     },
     shipmentFetchResult = {
-      data: { release_date: "2026-01-01" },
+      data: { release_date: "2026-01-01", org_id: "org-1" },
       error: null,
     },
     calculationResultEqCalls,

@@ -105,17 +105,32 @@ function quantityInput(
  * (see the regulatory adapter's own five-sequential-query design).
  *
  * Returns `null` -- not a rejection -- when the shipment's release_date
- * can't be found or no matching good exists: an already-classified line
- * reaching ACTUAL determination should always have exactly one match,
- * so this is an unexpected-data-drift case, not a normal outcome; the
- * engine's own `good_sector: null` handling already treats "unknown" as
- * "don't gate" (conservative in the other direction is not this
- * function's job -- see calculate-line-emissions.ts's own doc comment
- * on why an indeterminate sector does not block calculation).
+ * can't be found, belongs to a different org, or no matching good
+ * exists: an already-classified line reaching ACTUAL determination
+ * should always have exactly one match, so this is an
+ * unexpected-data-drift case, not a normal outcome; the engine's own
+ * `good_sector: null` handling already treats "unknown" as "don't gate"
+ * (conservative in the other direction is not this function's job --
+ * see calculate-line-emissions.ts's own doc comment on why an
+ * indeterminate sector does not block calculation).
+ *
+ * Verifies the fetched shipment's own org_id against the caller's
+ * orgId before proceeding -- every caller of this function has already
+ * established org ownership on a DIFFERENT row (calculateLine on the
+ * shipment_line, reproduceCalculationResult on the calculation_result)
+ * before extracting a shipment_id from it and reaching here, but this
+ * function accepts that shipment_id as a bare parameter with no proof
+ * attached, so it re-derives ownership itself rather than trusting the
+ * caller -- the same "re-authorized rather than believed" posture
+ * calculateLine's own doc comment states, applied one level deeper.
+ * Folded into the same null return as "not found" (not a distinct
+ * "forbidden" outcome), matching the not-found-not-forbidden IDOR
+ * defense already used elsewhere in this file's callers.
  */
 export async function resolveGoodSectorForActualLine(
   supabase: SupabaseClient,
   repository: RegulatoryRepository,
+  orgId: string,
   shipmentId: string,
   cnCode: string,
 ): Promise<string | null> {
@@ -123,7 +138,7 @@ export async function resolveGoodSectorForActualLine(
     await supabase
       .from("shipments")
       .select(
-        "release_date",
+        "release_date, org_id",
       )
       .eq("id", shipmentId)
       .maybeSingle();
@@ -132,10 +147,17 @@ export async function resolveGoodSectorForActualLine(
     return null;
   }
 
+  const shipmentRow =
+    shipment as { release_date: string; org_id: string };
+
+  if (shipmentRow.org_id !== orgId) {
+    return null;
+  }
+
   const candidates =
     await repository.findCbamGoodsByCode(
       cnCode,
-      (shipment as { release_date: string }).release_date,
+      shipmentRow.release_date,
     );
 
   return candidates[0]?.sector ?? null;
@@ -217,6 +239,7 @@ export async function calculateLine(
       ? await resolveGoodSectorForActualLine(
           supabase,
           repository,
+          orgId,
           line.shipment_id,
           line.cn_code,
         )

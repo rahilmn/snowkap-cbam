@@ -67,6 +67,7 @@ function fakeMapper(
 
 function fakeSupabase(
   releaseDate: string | null = "2026-01-15",
+  shipmentOrgId = "org-1",
 ) {
   return {
     from: () => ({
@@ -75,12 +76,15 @@ function fakeSupabase(
           maybeSingle: async () =>
             releaseDate === null
               ? { data: null }
-              : { data: { release_date: releaseDate } },
+              : { data: { release_date: releaseDate, org_id: shipmentOrgId } },
         }),
       }),
     }),
   } as never;
 }
+
+const ORG_ID =
+  "org-1";
 
 const LINE =
   {
@@ -101,6 +105,7 @@ describe(
             fakeSupabase(),
             fakeRepository({ candidates: [record()] }),
             fakeMapper(),
+            ORG_ID,
             LINE,
           );
 
@@ -123,6 +128,7 @@ describe(
             fakeSupabase(),
             fakeRepository({ candidates: [] }),
             fakeMapper(),
+            ORG_ID,
             LINE,
           );
 
@@ -140,6 +146,7 @@ describe(
             fakeSupabase(null),
             fakeRepository({ candidates: [record()] }),
             fakeMapper(),
+            ORG_ID,
             LINE,
           );
 
@@ -167,10 +174,29 @@ describe(
             fakeSupabase(),
             fakeRepository({ candidates: [annexIIRecord], goodSector: "IRON_STEEL" }),
             fakeMapper(),
+            ORG_ID,
             LINE,
           );
 
         expect(result.status).toBe("AVAILABLE");
+      },
+    );
+
+    it(
+      "returns UNAVAILABLE when the shipment id belongs to a DIFFERENT org -- never reads that org's release_date or sector to build a reference",
+      async () => {
+        const result =
+          await getDefaultReferenceForLine(
+            fakeSupabase("2026-01-15", "org-2"),
+            fakeRepository({ candidates: [record()] }),
+            fakeMapper(),
+            ORG_ID,
+            LINE,
+          );
+
+        expect(result).toEqual(
+          { status: "UNAVAILABLE" },
+        );
       },
     );
 
@@ -182,6 +208,7 @@ describe(
             fakeSupabase(),
             fakeRepository({ candidates: [] }),
             fakeMapper("UNLISTED"),
+            ORG_ID,
             LINE,
           );
 

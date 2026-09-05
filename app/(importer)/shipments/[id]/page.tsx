@@ -217,6 +217,7 @@ export default async function ShipmentDetailPage(
                 supabase,
                 regulatoryRepository,
                 regulatoryCountryMapper,
+                orgSummary.context.org_id,
                 {
                   shipmentId: shipment.id,
                   cnCode: line.cn_code,
