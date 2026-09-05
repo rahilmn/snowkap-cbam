@@ -32,14 +32,22 @@ import type {
  * this function doesn't know or care which set an item came from.
  *
  * A pathname that matches no item at all (e.g. /status,
- * /account/password, /design, /onboarding/setup) correctly returns
- * `undefined` -- no item highlighted, which is either the same as
- * today's behaviour (those pages already pass no matching label, or
- * one that doesn't correspond to a real nav item) or, for
- * /onboarding/setup specifically, a deliberate, small, documented
- * behaviour change from the one page that used to force "Dashboard"
- * for a route that isn't actually the dashboard (see that page's own
- * comment on why it still passes an explicit activeNavLabel).
+ * /account/password, /design) correctly returns `undefined` -- no
+ * item highlighted, matching what those pages already did before
+ * derivation existed (each passes no matching label, or none at all).
+ *
+ * S1 remediation (independent Opus 5 review, S1 finding #4):
+ * /onboarding/setup is NOT one of those pages, and this function's
+ * `undefined` result for it is never actually observed. That page
+ * still passes an explicit `activeNavLabel="Dashboard"` (see its own
+ * comment on that line), which -- per AppShell's own
+ * `activeNavLabel ?? deriveActiveNavLabel(...)` fallback -- means
+ * derivation never runs for that route at all. Nothing about that
+ * page's behaviour changed when this function was introduced; the
+ * explicit override was, and remains, a deliberate choice to KEEP the
+ * old "Dashboard" highlight specifically because deriving from
+ * /onboarding/setup's own pathname would produce no highlight, which
+ * its author considered the wrong call for that screen.
  */
 export function deriveActiveNavLabel(
   pathname: string,

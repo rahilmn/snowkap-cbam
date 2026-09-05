@@ -100,10 +100,22 @@ export type RoleKey =
  * the layering test enforces this for real). The three literal values
  * are therefore restated here directly, matching the application
  * type's own three members exactly -- there is no template-literal
- * shortcut available across that layer boundary, so this axis is the
- * one place a future new IncompleteLineReason member would NOT be
- * caught automatically by the type system; a review of that type is
- * the fallback for keeping the two in sync.
+ * shortcut available across that layer boundary, so THIS FILE alone
+ * would not catch a future new IncompleteLineReason member at compile
+ * time.
+ *
+ * That gap is closed mechanically, not by manual review, in
+ * tests/architecture/incomplete-line-reason-key-exhaustiveness.test.ts
+ * -- a type-only Equals<IncompleteLineReasonKey,
+ * `incomplete_line.${IncompleteLineReason}`> assertion living outside
+ * the layering graph entirely (tests/architecture/** is never scanned
+ * by checkLayering's "actual repository" check), so it can safely
+ * cross-reference both layers' types without src/domain importing
+ * anything and without weakening the layering rule itself. If
+ * IncompleteLineReason ever drifts from the three literals below,
+ * `pnpm typecheck` fails there, before this axis's own runtime
+ * exhaustive-switch (axis-keys.ts's incompleteLineReasonKey) would
+ * otherwise be the only thing to catch it, and only at runtime.
  */
 export type IncompleteLineReasonKey =
   | "incomplete_line.NO_DETERMINATION"

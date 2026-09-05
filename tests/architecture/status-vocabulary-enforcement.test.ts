@@ -99,22 +99,70 @@ const RECORD_OF_VOCABULARY_TYPE =
     `Record<\\s*(${VOCABULARY_SOURCE_TYPE_NAMES.join("|")})\\b[^,]*,\\s*(?:string\\b|BadgeProps\\[|")`,
   );
 
-// Exact receiver expressions this scan does not flag for pattern B --
-// reviewed case by case (see this file's own header comment). Adding
-// an entry here is a deliberate, visible decision, not a silent
-// bypass: each one names the property being humanized and why it is
-// not a status/reason/methodology/role value.
-const REPLACE_UNDERSCORE_ALLOWLIST: string[] =
+interface ReplaceUnderscoreAllowlistEntry {
+  // Repo-relative path (matching a scanned file's own `.path`), not a
+  // glob -- deliberately exact, so adding an entry is a decision about
+  // one specific file, never a pattern that could later match a file
+  // nobody reviewed.
+  file: string;
+  expression: string;
+}
+
+// Exact (file, receiver-expression) pairs this scan does not flag for
+// pattern B -- reviewed case by case (see this file's own header
+// comment). Adding an entry here is a deliberate, visible decision
+// about one named file, not a silent bypass: each one names the
+// property being humanized and why it is not a status/reason/
+// methodology/role value.
+//
+// S1 remediation (independent Opus 5 review, S1 finding #2): this used
+// to be a bare `string[]` matched by `match[0].startsWith(allowed)`
+// with NO file scoping at all -- any file anywhere under app/** or
+// components/** that happened to name a variable `key` (or a nested
+// `step.step`) and call `.replace(/_/g, " ")` on it would silently
+// pass this scan, whether or not it was actually humanizing a real
+// enum VALUE rather than a field name. Scoping each entry to the one
+// file it was reviewed against (isReplaceUnderscoreAllowed below)
+// closes that bypass without touching the ban itself.
+const REPLACE_UNDERSCORE_ALLOWLIST: ReplaceUnderscoreAllowlistEntry[] =
   [
     // why-this-number-panel.tsx: a calculation-trace step's `inputs`
     // object key (e.g. "direct_specific" -> "direct specific") -- a
     // field NAME, not an enum VALUE.
-    "key.replace(",
+    {
+      file: "app/(importer)/shipments/[id]/why-this-number-panel.tsx",
+      expression: "key.replace(",
+    },
     // why-this-number-panel.tsx: a calculation-trace step's own
     // `step` field (e.g. "multiply_by_factor") -- an engine step
     // name, not a StatusKey axis.
-    "step.step.replace(",
+    {
+      file: "app/(importer)/shipments/[id]/why-this-number-panel.tsx",
+      expression: "step.step.replace(",
+    },
   ];
+
+/**
+ * Whether one specific matched `.replace(/_/g, " ")` call site, found
+ * in one specific file, is on the reviewed allowlist. Exported as its
+ * own function (rather than inlined into the scan loop) so the
+ * file-scoping boundary itself is directly unit-testable against
+ * synthetic (file, expression) pairs -- see this file's own tests
+ * below -- independent of whatever files happen to exist in the tree
+ * right now.
+ */
+function isReplaceUnderscoreAllowed(
+  filePath: string,
+  matchedExpression: string,
+): boolean {
+  return REPLACE_UNDERSCORE_ALLOWLIST.some(
+    (allowed) =>
+      allowed.file === filePath &&
+      matchedExpression.startsWith(
+        allowed.expression,
+      ),
+  );
+}
 
 const REPLACE_UNDERSCORE_PATTERN =
   /[\w.]+\.replace\(\s*\/_\/g,\s*["'] ["']\s*\)/g;
@@ -314,11 +362,9 @@ describe(
             )
           ) {
             const isAllowed =
-              REPLACE_UNDERSCORE_ALLOWLIST.some(
-                (allowed) =>
-                  match[0].startsWith(
-                    allowed,
-                  ),
+              isReplaceUnderscoreAllowed(
+                file.path,
+                match[0],
               );
 
             if (!isAllowed) {
@@ -336,6 +382,67 @@ describe(
           `Found ${violations.length} raw-enum-humanizing .replace() call(s):\n${violations.join("\n")}`,
         ).toEqual(
           [],
+        );
+      },
+    );
+
+    describe(
+      "isReplaceUnderscoreAllowed (file/path-scoped allowlist boundary -- S1 remediation, finding #2)",
+      () => {
+        it(
+          "allows the exact reviewed file+expression pair",
+          () => {
+            expect(
+              isReplaceUnderscoreAllowed(
+                "app/(importer)/shipments/[id]/why-this-number-panel.tsx",
+                "key.replace(/_/g, \" \")",
+              ),
+            ).toBe(
+              true,
+            );
+          },
+        );
+
+        it(
+          "does NOT allow the same expression prefix in a different, unreviewed file -- this is exactly the bypass an unscoped (bare-string) allowlist had",
+          () => {
+            expect(
+              isReplaceUnderscoreAllowed(
+                "app/(importer)/some-other-file.tsx",
+                "key.replace(/_/g, \" \")",
+              ),
+            ).toBe(
+              false,
+            );
+          },
+        );
+
+        it(
+          "does NOT allow an unrelated expression in the one reviewed file",
+          () => {
+            expect(
+              isReplaceUnderscoreAllowed(
+                "app/(importer)/shipments/[id]/why-this-number-panel.tsx",
+                "status.replace(/_/g, \" \")",
+              ),
+            ).toBe(
+              false,
+            );
+          },
+        );
+
+        it(
+          "does NOT allow the second reviewed expression (step.step.replace) inside a different file",
+          () => {
+            expect(
+              isReplaceUnderscoreAllowed(
+                "components/some-other-component.tsx",
+                "step.step.replace(/_/g, \" \")",
+              ),
+            ).toBe(
+              false,
+            );
+          },
         );
       },
     );

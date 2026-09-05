@@ -73,6 +73,12 @@ export default async function OnboardingSetupPage() {
       breadcrumbs={[
         { label: "Finish setup" },
       ]}
+      // Explicit on purpose (components/shell/derive-active-nav-label.ts's
+      // own doc comment references this line): /onboarding/setup's
+      // pathname matches no real nav item, so pathname-derivation alone
+      // would highlight nothing. This keeps the pre-derivation
+      // "Dashboard" highlight instead, unchanged since before derived
+      // navigation existed -- not a new decision made for this remediation.
       activeNavLabel="Dashboard"
     >
       <h1 className="mb-4 text-2xl font-semibold text-[var(--text-primary)]">

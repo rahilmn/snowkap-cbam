@@ -7,6 +7,10 @@ import {
   randomUUID,
 } from "node:crypto";
 
+import {
+  disabledNavItemNamePattern,
+} from "../support/disabled-nav-item-pattern";
+
 // Matches the same skip discipline used throughout the vitest suites
 // (see tests/integration/module-load.test.ts): the health check needs
 // live Supabase connectivity, which the no-secret public CI tier does
@@ -297,7 +301,7 @@ test.describe(
             role === "button"
               ? primaryNav.getByRole(
                   role,
-                  { name: new RegExp(`^${label} \(.+\)$`) },
+                  { name: disabledNavItemNamePattern(label) },
                 )
               : primaryNav.getByRole(
                   role,
