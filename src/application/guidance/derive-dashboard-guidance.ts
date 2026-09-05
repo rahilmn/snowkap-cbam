@@ -7,73 +7,53 @@ import type {
 } from "../organizations/org-context";
 
 import {
-  listDraftShipmentsWithLines,
-} from "../shipments/list-draft-shipments-with-lines";
+  deriveGuidanceItems,
+} from "./derive-guidance-items";
 
 import {
-  listDeclarations,
-} from "../declarations/list-declarations";
-
-import {
-  listGuidanceDismissals,
-} from "./list-guidance-dismissals";
-
-import {
-  deriveI19Items,
-} from "../../domain/guidance/i19";
-
-import {
-  runGuidancePipeline,
-} from "../../domain/guidance/pipeline";
-
-import type {
-  GuidanceCapResult,
+  capGuidanceItems,
+  type GuidanceCapResult,
 } from "../../domain/guidance/cap";
 
+export type GuidanceDashboardResult =
+  | { status: "OK"; cap: GuidanceCapResult }
+  | { status: "UNAVAILABLE" };
+
 /**
- * The dashboard work queue's single entry point: fetch real,
- * authoritative domain state (never audit events, never a persisted
- * "guidance state" -- there is none), derive every known rule's
- * candidate items, and run them through the shared pipeline.
+ * The dashboard work queue's single entry point: derive the org's
+ * complete guidance set (deriveGuidanceItems) and cap it to the
+ * compact dashboard tile (src/domain/guidance/cap.ts).
  *
- * Rules are concatenated here as a flat list before the pipeline runs
- * -- adding the rest of v2.1.1's catalog (I2/I3/I5/I16/I17, ...) once
- * their exact definitions are available means adding another
- * deriveIxxItems(...) call to this array, not touching the pipeline or
- * anything upstream of it.
+ * 2026-09-05 (S2 remediation, B1 + B3, fresh Opus 5 review). Return
+ * type changed from a bare GuidanceCapResult to a {status} union:
+ * UNAVAILABLE is a genuine fetch failure (see deriveGuidanceItems),
+ * distinguishable from OK-with-nothing-visible -- GuidanceWorkQueue
+ * renders the two very differently, since the whole point of this
+ * distinction is that a compliance work-queue must never show an
+ * affirmative "nothing needs your attention" when it actually just
+ * failed to find out.
  */
 export async function deriveDashboardGuidance(
   supabase: SupabaseClient,
   context: OrgContext,
-): Promise<GuidanceCapResult> {
-  const [draftShipments, declarations, dismissedItemIds] =
-    await Promise.all(
-      [
-        listDraftShipmentsWithLines(
-          supabase,
-          context.org_id,
-        ),
-        listDeclarations(
-          supabase,
-          context.org_id,
-        ),
-        listGuidanceDismissals(
-          supabase,
-          context.org_id,
-        ),
-      ],
+): Promise<GuidanceDashboardResult> {
+  const items =
+    await deriveGuidanceItems(
+      supabase,
+      context,
     );
 
-  const candidateItems =
-    [
-      ...deriveI19Items(
-        draftShipments,
-        declarations,
-      ),
-    ];
+  if (items.status === "UNAVAILABLE") {
+    return {
+      status: "UNAVAILABLE",
+    };
+  }
 
-  return runGuidancePipeline(
-    candidateItems,
-    dismissedItemIds,
-  );
+  return {
+    status: "OK",
+    cap:
+      capGuidanceItems(
+        items.items,
+      ),
+  };
 }

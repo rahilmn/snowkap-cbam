@@ -17,14 +17,25 @@ import {
 } from "./declaration-mapper";
 
 /**
- * The declarations list screen (master plan §27 screen 22): every
- * declaration -- DRAFT, READY, FILED_RECORDED, VOID, original or
+ * Every declaration -- DRAFT, READY, FILED_RECORDED, VOID, original or
  * amendment -- ever created for this org, newest first. Unfiltered by
- * status deliberately: the screen itself is the place a caller sees the
- * full history (a VOID row and a superseded original are both real
- * facts about this org's declarations, not noise to hide), matching
- * listSharingGrantsIssued's own "no status filter, the screen owns
- * that" posture (manage-sharing-grants.ts).
+ * status deliberately: a VOID row and a superseded original are both
+ * real facts about this org's declarations, not noise to hide,
+ * matching listSharingGrantsIssued's own "no status filter, the screen
+ * owns that" posture (manage-sharing-grants.ts).
+ *
+ * 2026-09-06 (S2 remediation, B3 follow-up, fresh Opus 5 adversarial
+ * pre-verification). This function's one real caller is
+ * deriveGuidanceItems, which centralizes "a genuine fetch failure must
+ * be distinguishable from a real empty result" for the whole guidance
+ * read path (derive-guidance-items.ts) -- but that guarantee is only
+ * as good as every fetch it wraps. This USED to swallow a real query
+ * error into `[]`, indistinguishable from "this org genuinely has no
+ * declarations," which deriveGuidanceItems's own try/catch could never
+ * see (nothing was thrown) -- silently forcing every I19 item's impact
+ * to APPROVAL org-wide with no signal anything failed. Matches this
+ * codebase's own "throw is for infrastructure failures" convention
+ * (CLAUDE.md), same as listDraftShipmentsWithLines.
  */
 export async function listDeclarations(
   supabase: SupabaseClient,
@@ -39,11 +50,13 @@ export async function listDeclarations(
       .eq("org_id", orgId)
       .order("created_at", { ascending: false });
 
-  if (error || !data) {
-    return [];
+  if (error) {
+    throw new Error(
+      `guidance: declarations fetch failed (${error.message}).`,
+    );
   }
 
-  return (data as DeclarationRow[]).map(
+  return ((data ?? []) as DeclarationRow[]).map(
     toDeclaration,
   );
 }

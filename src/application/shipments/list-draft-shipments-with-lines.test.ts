@@ -8,16 +8,29 @@ import {
   listDraftShipmentsWithLines,
 } from "./list-draft-shipments-with-lines";
 
+interface MockTableConfig {
+  // A function of the .range() window so a test can hand back
+  // different pages on successive calls (pagination) or inspect what
+  // was asked for (chunking) -- richer than a single static array.
+  respond: (
+    args: {
+      eqCalls: [string, unknown][];
+      inCall: [string, unknown] | undefined;
+      from: number;
+      to: number;
+    },
+  ) => { data: Record<string, unknown>[] | null; error: { message: string } | null };
+}
+
 function mockSupabase(
-  {
-    shipmentRows = [],
-    lineRows = [],
-  }: {
-    shipmentRows?: Record<string, unknown>[];
-    lineRows?: Record<string, unknown>[];
-  } = {},
+  tables: Record<string, MockTableConfig>,
 ) {
-  const calls: { table: string; eqCalls: [string, unknown][]; inCall?: [string, unknown] }[] =
+  const calls: {
+    table: string;
+    eqCalls: [string, unknown][];
+    inCall?: [string, unknown];
+    range?: [number, number];
+  }[] =
     [];
 
   return {
@@ -25,7 +38,12 @@ function mockSupabase(
       from: (
         table: string,
       ) => {
-        const call: { table: string; eqCalls: [string, unknown][]; inCall?: [string, unknown] } =
+        const call: {
+          table: string;
+          eqCalls: [string, unknown][];
+          inCall?: [string, unknown];
+          range?: [number, number];
+        } =
           { table, eqCalls: [] };
 
         calls.push(
@@ -51,22 +69,36 @@ function mockSupabase(
             call.inCall =
               [column, value];
 
+            return chain;
+          },
+          order: () => chain,
+          range: (
+            from: number,
+            to: number,
+          ) => {
+            call.range =
+              [from, to];
+
+            const config =
+              tables[table];
+
+            if (!config) {
+              return Promise.resolve(
+                { data: [], error: null },
+              );
+            }
+
             return Promise.resolve(
-              {
-                data: table === "shipment_lines" ? lineRows : shipmentRows,
-                error: null,
-              },
+              config.respond(
+                {
+                  eqCalls: call.eqCalls,
+                  inCall: call.inCall,
+                  from,
+                  to,
+                },
+              ),
             );
           },
-          then: (
-            resolve: (result: { data: unknown; error: null }) => void,
-          ) =>
-            resolve(
-              {
-                data: table === "shipments" ? shipmentRows : lineRows,
-                error: null,
-              },
-            ),
         };
 
         return chain;
@@ -119,6 +151,19 @@ function lineRow(
   };
 }
 
+// Fixed-single-page helper for the tests that don't care about
+// pagination/chunking themselves.
+function onePage(
+  rows: Record<string, unknown>[],
+): MockTableConfig {
+  return {
+    respond: ({ from }) => ({
+      data: from === 0 ? rows : [],
+      error: null,
+    }),
+  };
+}
+
 describe(
   "listDraftShipmentsWithLines",
   () => {
@@ -128,8 +173,8 @@ describe(
         const { client, getCalls } =
           mockSupabase(
             {
-              shipmentRows: [shipmentRow()],
-              lineRows: [lineRow(), lineRow({ id: "line-2", line_number: 2 })],
+              shipments: onePage([shipmentRow()]),
+              shipment_lines: onePage([lineRow(), lineRow({ id: "line-2", line_number: 2 })]),
             },
           );
 
@@ -160,7 +205,7 @@ describe(
         const { client, getCalls } =
           mockSupabase(
             {
-              shipmentRows: [],
+              shipments: onePage([]),
             },
           );
 
@@ -188,15 +233,15 @@ describe(
         const { client } =
           mockSupabase(
             {
-              shipmentRows: [
+              shipments: onePage([
                 shipmentRow({ id: "ship-1", reference: "SHIP-001" }),
                 shipmentRow({ id: "ship-2", reference: "SHIP-002" }),
-              ],
-              lineRows: [
+              ]),
+              shipment_lines: onePage([
                 lineRow({ id: "l2", shipment_id: "ship-1", line_number: 2 }),
                 lineRow({ id: "l1", shipment_id: "ship-1", line_number: 1 }),
                 lineRow({ id: "l3", shipment_id: "ship-2", line_number: 1 }),
-              ],
+              ]),
             },
           );
 
@@ -223,6 +268,178 @@ describe(
         ).toEqual(
           ["l3"],
         );
+      },
+    );
+
+    it(
+      "2026-09-05 (S2 remediation, B3): chunks the shipment_id .in() filter into batches of at most 100 ids, and merges lines from every chunk",
+      async () => {
+        const shipmentCount = 250;
+
+        const shipments =
+          Array.from(
+            { length: shipmentCount },
+            (_, index) => shipmentRow({ id: `ship-${index}`, reference: `SHIP-${index}` }),
+          );
+
+        const inCallSizes: number[] =
+          [];
+
+        const { client } =
+          mockSupabase(
+            {
+              shipments: onePage(shipments),
+              shipment_lines: {
+                respond: ({ inCall, from }) => {
+                  const ids =
+                    (inCall?.[1] as string[] | undefined) ?? [];
+
+                  inCallSizes.push(
+                    ids.length,
+                  );
+
+                  if (from > 0) {
+                    return { data: [], error: null };
+                  }
+
+                  return {
+                    data: ids.map(
+                      (id) => lineRow({ id: `line-${id}`, shipment_id: id }),
+                    ),
+                    error: null,
+                  };
+                },
+              },
+            },
+          );
+
+        const result =
+          await listDraftShipmentsWithLines(
+            client,
+            "org-1" as never,
+          );
+
+        // Every .in() call stayed at or under the 100-id chunk size --
+        // never one request carrying all 250 ids (the exact shape that
+        // fails with HTTP 414 past ~220 live).
+        expect(
+          inCallSizes.every((size) => size <= 100),
+        ).toBe(
+          true,
+        );
+
+        expect(
+          inCallSizes.length,
+        ).toBeGreaterThan(
+          1,
+        );
+
+        expect(
+          inCallSizes.reduce((a, b) => a + b, 0),
+        ).toBe(
+          shipmentCount,
+        );
+
+        // Every shipment across every chunk kept its own line.
+        expect(result).toHaveLength(
+          shipmentCount,
+        );
+
+        expect(
+          result.every((s) => s.lines.length === 1),
+        ).toBe(
+          true,
+        );
+      },
+    );
+
+    it(
+      "2026-09-05 (S2 remediation, B3): paginates via .range() until a page shorter than the page size signals completion, rather than trusting a single page to be the whole result",
+      async () => {
+        const PAGE_SIZE =
+          1000;
+
+        // 1500 draft shipments: page 1 is a full 1000-row page (which
+        // alone would look like "maybe there's more" -- exactly what
+        // PostgREST's silent max_rows truncation exploits), page 2 is
+        // the remaining 500.
+        const allShipments =
+          Array.from(
+            { length: 1500 },
+            (_, index) => shipmentRow({ id: `ship-${index}`, reference: `SHIP-${index}` }),
+          );
+
+        const { client } =
+          mockSupabase(
+            {
+              shipments: {
+                respond: ({ from }) => ({
+                  data: allShipments.slice(from, from + PAGE_SIZE),
+                  error: null,
+                }),
+              },
+              shipment_lines: onePage([]),
+            },
+          );
+
+        const result =
+          await listDraftShipmentsWithLines(
+            client,
+            "org-1" as never,
+          );
+
+        expect(result).toHaveLength(
+          1500,
+        );
+      },
+    );
+
+    it(
+      "2026-09-05 (S2 remediation, B3): a real query error on the shipments fetch THROWS, rather than degrading into an empty ('nothing to do') result",
+      async () => {
+        const { client } =
+          mockSupabase(
+            {
+              shipments: {
+                respond: () => ({
+                  data: null,
+                  error: { message: "URI too long" },
+                }),
+              },
+            },
+          );
+
+        await expect(
+          listDraftShipmentsWithLines(
+            client,
+            "org-1" as never,
+          ),
+        ).rejects.toThrow();
+      },
+    );
+
+    it(
+      "2026-09-05 (S2 remediation, B3): a real query error on the shipment_lines fetch THROWS, rather than degrading into an empty ('nothing to do') result",
+      async () => {
+        const { client } =
+          mockSupabase(
+            {
+              shipments: onePage([shipmentRow()]),
+              shipment_lines: {
+                respond: () => ({
+                  data: null,
+                  error: { message: "URI too long" },
+                }),
+              },
+            },
+          );
+
+        await expect(
+          listDraftShipmentsWithLines(
+            client,
+            "org-1" as never,
+          ),
+        ).rejects.toThrow();
       },
     );
   },

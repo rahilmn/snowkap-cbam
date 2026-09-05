@@ -51,41 +51,38 @@ function sameReportingPeriod(
 }
 
 /**
- * The I22 condition, exactly: "D DRAFT with blockers." There is no
- * separate I22 guidance item/card -- this is a predicate other rules
- * (I19 here; I2/I3/I5/I16/I17 are out of this implementation's scope,
- * pending their own exact v2.1.1 definitions) consult to adjust their
- * OWN item's impact, never a card of its own.
- */
-function hasI22Condition(
-  declaration: Declaration,
-): boolean {
-  return (
-    declaration.status === "DRAFT" &&
-    declaration.completeness_report !== null &&
-    !declaration.completeness_report.complete
-  );
-}
-
-/**
- * The ONLY cross-item priority/impact relation v2.1.1 specifies: when
- * the I22 condition holds for a declaration D, every I19 item for a
- * shipment that is a NON-MEMBER of D (i.e. not in D's own persisted
+ * The ONLY cross-item priority/impact relation v2.1.1 specifies (I22):
+ * every I19 item for a shipment that is a NON-MEMBER of a declaration D
+ * covering its reporting period (i.e. not in D's own persisted
  * `member_shipment_ids` -- a real, concrete fact: member_shipment_ids
  * is a snapshot taken when the draft was last generated/refreshed, not
  * a live query, so a shipment created or matching the period after
  * that snapshot is genuinely absent from it) keeps priority REQUIRED
  * but has its impact forced from FILING back to APPROVAL -- it is NOT
  * suppressed, NOT merged into anything, NOT downgraded to RECOMMENDED,
- * and its action remains "Mark ready".
+ * and its action remains "Mark ready". There is no separate I22
+ * guidance item/card -- this is purely a predicate I19 (and, pending
+ * their own exact v2.1.1 definitions, I2/I3/I5/I16/I17 in a future
+ * slice) consults to adjust its OWN item's impact.
+ *
+ * 2026-09-05 (S2 remediation, B2, fresh Opus 5 review). This USED to
+ * additionally require the declaration itself be DRAFT with an
+ * incomplete completeness report -- a precondition v2.1.1 does not
+ * specify. That gate meant a non-member of a FILED_RECORDED
+ * declaration, or a DRAFT one whose completeness report had never been
+ * generated, wrongly kept FILING: the exact false reassurance this
+ * relation exists to prevent ("marking this shipment ready keeps it
+ * eligible to be included when that declaration is filed", said about
+ * a declaration whose own member snapshot excludes it). The rule is
+ * unconditional on D's own status or completeness -- non-membership
+ * alone forces APPROVAL.
  */
-function isNonMemberOfBlockedDeclaration(
+function isNonMemberOfDeclarationInPeriod(
   shipmentId: Shipment["id"],
   declarationsInPeriod: Declaration[],
 ): boolean {
   return declarationsInPeriod.some(
     (declaration) =>
-      hasI22Condition(declaration) &&
       !declaration.member_shipment_ids.includes(
         shipmentId,
       ),
@@ -129,7 +126,7 @@ export function deriveI19Items(
       declarationsInPeriod.length > 0;
 
     const forcedToApproval =
-      isNonMemberOfBlockedDeclaration(
+      isNonMemberOfDeclarationInPeriod(
         shipment.id,
         declarationsInPeriod,
       );

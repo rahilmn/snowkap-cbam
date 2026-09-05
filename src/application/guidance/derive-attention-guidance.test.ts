@@ -5,8 +5,8 @@ import {
 } from "vitest";
 
 import {
-  deriveDashboardGuidance,
-} from "./derive-dashboard-guidance";
+  deriveAttentionGuidance,
+} from "./derive-attention-guidance";
 
 const context =
   {
@@ -57,24 +57,14 @@ function lineRow(
   };
 }
 
-/**
- * A minimal fake covering exactly the four tables this orchestrator
- * reads (via deriveGuidanceItems -- see that module's own more detailed
- * wiring/failure tests). This test only proves deriveDashboardGuidance
- * itself correctly caps the result and surfaces UNAVAILABLE.
- */
 function mockSupabase(
   {
     shipmentRows = [],
     lineRows = [],
-    declarationRows = [],
-    dismissalRows = [],
     shipmentsError = null,
   }: {
     shipmentRows?: Record<string, unknown>[];
     lineRows?: Record<string, unknown>[];
-    declarationRows?: Record<string, unknown>[];
-    dismissalRows?: { item_key: string }[];
     shipmentsError?: { message: string } | null;
   } = {},
 ) {
@@ -114,18 +104,10 @@ function mockSupabase(
         },
         then: (
           resolve: (result: { data: unknown; error: null }) => void,
-        ) => {
-          const data =
-            table === "declarations"
-              ? declarationRows
-              : table === "guidance_dismissals"
-                ? dismissalRows
-                : [];
-
-          return resolve(
-            { data, error: null },
-          );
-        },
+        ) =>
+          resolve(
+            { data: [], error: null },
+          ),
       };
 
       return chain;
@@ -134,64 +116,13 @@ function mockSupabase(
 }
 
 describe(
-  "deriveDashboardGuidance",
+  "deriveAttentionGuidance",
   () => {
     it(
-      "derives an I19 item for a real, complete DRAFT shipment and returns it capped for the dashboard tile",
+      "2026-09-05 (S2 remediation, B1): returns the COMPLETE ranked set, uncapped -- more than DASHBOARD_GUIDANCE_CAP REQUIRED items all remain present",
       async () => {
         const result =
-          await deriveDashboardGuidance(
-            mockSupabase(
-              {
-                shipmentRows: [shipmentRow()],
-                lineRows: [lineRow()],
-              },
-            ),
-            context,
-          );
-
-        expect(result.status).toBe("OK");
-
-        if (result.status !== "OK") {
-          throw new Error("expected OK");
-        }
-
-        expect(result.cap.visible).toHaveLength(1);
-        expect(result.cap.visible[0]?.rule).toBe("I19");
-        expect(result.cap.visible[0]?.title).toBe("Mark SHIP-001 ready");
-      },
-    );
-
-    it(
-      "returns no items when there are no draft shipments",
-      async () => {
-        const result =
-          await deriveDashboardGuidance(
-            mockSupabase(),
-            context,
-          );
-
-        expect(result.status).toBe("OK");
-
-        if (result.status !== "OK") {
-          throw new Error("expected OK");
-        }
-
-        expect(result.cap.visible).toEqual(
-          [],
-        );
-
-        expect(result.cap.requiredOverflowCount).toBe(
-          0,
-        );
-      },
-    );
-
-    it(
-      "2026-09-05 (S2 remediation, B1 + B3): more than 3 REQUIRED items caps the visible dashboard set to 3, exposing the exact requiredOverflowCount",
-      async () => {
-        const result =
-          await deriveDashboardGuidance(
+          await deriveAttentionGuidance(
             mockSupabase(
               {
                 shipmentRows: Array.from(
@@ -213,16 +144,17 @@ describe(
           throw new Error("expected OK");
         }
 
-        expect(result.cap.visible).toHaveLength(3);
-        expect(result.cap.requiredOverflowCount).toBe(2);
+        // All 5 REQUIRED I19 items are present -- the dashboard's own
+        // 3-card cap has no bearing here.
+        expect(result.items).toHaveLength(5);
       },
     );
 
     it(
-      "2026-09-05 (S2 remediation, B3): a real fetch failure surfaces as UNAVAILABLE, never as an empty ('nothing to do') result",
+      "2026-09-05 (S2 remediation, B3): a real fetch failure surfaces as UNAVAILABLE here too, not an empty result",
       async () => {
         const result =
-          await deriveDashboardGuidance(
+          await deriveAttentionGuidance(
             mockSupabase(
               {
                 shipmentsError: { message: "URI too long" },

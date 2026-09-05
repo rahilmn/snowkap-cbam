@@ -35,7 +35,7 @@ describe(
   "runGuidancePipeline",
   () => {
     it(
-      "applies aggregate -> rank -> deduplicate -> dismiss -> cap, in that exact order",
+      "applies aggregate -> rank -> deduplicate -> dismiss, in that exact order, returning the complete (uncapped) ranked set",
       () => {
         const items =
           [
@@ -64,7 +64,7 @@ describe(
           );
 
         const ids =
-          result.visible.map((i) => i.id);
+          result.map((i) => i.id);
 
         // The 4 line items collapsed into one aggregate (REQUIRED,
         // since L4 was REQUIRED -- most-severe-member).
@@ -100,13 +100,32 @@ describe(
     );
 
     it(
-      "returns an empty visible list for an empty input",
+      "returns an empty list for an empty input",
       () => {
         expect(
-          runGuidancePipeline([], new Set()).visible,
+          runGuidancePipeline([], new Set()),
         ).toEqual(
           [],
         );
+      },
+    );
+
+    it(
+      "does not cap -- more than DASHBOARD_GUIDANCE_CAP items all remain in the result (capping is the dashboard's own separate step, see cap.ts)",
+      () => {
+        const items =
+          Array.from(
+            { length: 10 },
+            (_, index) => item(`r${index}`, { priority: "REQUIRED" }),
+          );
+
+        const result =
+          runGuidancePipeline(
+            items,
+            new Set(),
+          );
+
+        expect(result).toHaveLength(10);
       },
     );
   },

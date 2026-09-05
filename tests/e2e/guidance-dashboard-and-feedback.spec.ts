@@ -324,6 +324,155 @@ test.describe(
         expect(overflow).toBe(false);
       },
     );
+
+    test(
+      "2026-09-05 (S2 remediation, B1): more than 3 REQUIRED items cap the dashboard at exactly 3 cards, show a REQUIRED-specific overflow control with the exact count, and /attention#required exposes the complete list",
+      async (
+        {
+          page,
+          importerOrgSession,
+          isMobile,
+        },
+      ) => {
+        test.skip(
+          isMobile,
+          "primary nav is hidden below md -- shipment creation needs desktop width",
+        );
+
+        const CN_CODE =
+          "25232100";
+
+        const SHIPMENT_COUNT =
+          4;
+
+        const primaryNav =
+          page.getByRole(
+            "navigation",
+            { name: "Primary" },
+          );
+
+        const references: string[] =
+          [];
+
+        for (
+          let index = 0;
+          index < SHIPMENT_COUNT;
+          index += 1
+        ) {
+          const reference =
+            `SHIP-OVERFLOW-${importerOrgSession.runId}-${index}`;
+
+          references.push(
+            reference,
+          );
+
+          await page.goto(
+            "/shipments",
+          );
+
+          await page.getByRole(
+            "link",
+            { name: "New shipment" },
+          ).click();
+
+          await page.getByLabel("Reference").fill(reference);
+          await page.getByLabel("Release date").fill("2026-01-15");
+
+          await page.getByRole(
+            "button",
+            { name: "Create shipment" },
+          ).click();
+
+          await expect(page).toHaveURL(/\/shipments\/[0-9a-f-]{36}$/);
+
+          await page.getByPlaceholder(
+            "Search by code or description, e.g. 25232100 or cement",
+          ).fill(CN_CODE);
+
+          await page.getByRole(
+            "option",
+          ).filter({ hasText: CN_CODE }).click();
+
+          await page.getByLabel("Origin country").fill("CN");
+          await page.getByLabel("Quantity", { exact: true }).fill("100");
+
+          await page.getByRole(
+            "button",
+            { name: "Add line" },
+          ).click();
+
+          await page.getByRole(
+            "button",
+            { name: "Resolve default value" },
+          ).click();
+
+          await expect(
+            page.locator('[data-status-key="resolution.EXACT_CN8_MATCH"]'),
+          ).toBeVisible();
+        }
+
+        await page.goto(
+          "/",
+        );
+
+        const guidanceSection =
+          page.getByRole(
+            "region",
+            { name: "Needs your attention" },
+          );
+
+        await expect(guidanceSection).toBeVisible();
+
+        // Exactly DASHBOARD_GUIDANCE_CAP (3) cards, never all 4 -- the
+        // exact defect the fresh Opus 5 review found (every REQUIRED
+        // item rendered uncapped).
+        await expect(
+          guidanceSection.getByRole(
+            "link",
+            { name: /^Mark SHIP-OVERFLOW-/ },
+          ),
+        ).toHaveCount(
+          3,
+        );
+
+        const overflowControl =
+          guidanceSection.getByRole(
+            "link",
+            { name: "1 more required item needs your attention →" },
+          );
+
+        await expect(overflowControl).toBeVisible();
+        await expect(overflowControl).toHaveAttribute(
+          "href",
+          "/attention#required",
+        );
+
+        await overflowControl.click();
+
+        await expect(page).toHaveURL(
+          /\/attention#required$/,
+        );
+
+        // The complete ranked set is on /attention -- all 4, not just
+        // the dashboard's own 3-card preview.
+        const requiredSection =
+          page.getByRole(
+            "region",
+            { name: "Required" },
+          );
+
+        for (
+          const reference of references
+        ) {
+          await expect(
+            requiredSection.getByRole(
+              "link",
+              { name: `Mark ${reference} ready` },
+            ),
+          ).toBeVisible();
+        }
+      },
+    );
   },
 );
 

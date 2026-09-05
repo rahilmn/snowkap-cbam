@@ -241,7 +241,7 @@ describe(
         );
 
         it(
-          "I22 does not apply when the declaration is not DRAFT (e.g. READY) -- impact stays FILING regardless of membership",
+          "the relation is unconditional on D's own status -- a non-member of a READY declaration still gets impact forced to APPROVAL (2026-09-05 S2 remediation B2: previously gated on an invented DRAFT-only precondition not in v2.1.1)",
           () => {
             const nonMemberShipment =
               shipment({ id: "ship-2" as Shipment["id"], reference: "SHIP-002" });
@@ -266,12 +266,13 @@ describe(
               );
 
             expect(items).toHaveLength(1);
-            expect(items[0]?.impact).toBe("FILING");
+            expect(items[0]?.priority).toBe("REQUIRED");
+            expect(items[0]?.impact).toBe("APPROVAL");
           },
         );
 
         it(
-          "I22 does not apply when the DRAFT declaration has no blockers (complete: true) -- impact stays FILING regardless of membership",
+          "the relation is unconditional on completeness -- a non-member of a DRAFT declaration with a complete (blocker-free) report still gets impact forced to APPROVAL (2026-09-05 S2 remediation B2)",
           () => {
             const nonMemberShipment =
               shipment({ id: "ship-2" as Shipment["id"], reference: "SHIP-002" });
@@ -296,7 +297,67 @@ describe(
               );
 
             expect(items).toHaveLength(1);
-            expect(items[0]?.impact).toBe("FILING");
+            expect(items[0]?.priority).toBe("REQUIRED");
+            expect(items[0]?.impact).toBe("APPROVAL");
+          },
+        );
+
+        it(
+          "the relation is unconditional on the completeness report existing at all -- a non-member of a DRAFT declaration whose report was never generated (null) still gets impact forced to APPROVAL (2026-09-05 S2 remediation B2)",
+          () => {
+            const nonMemberShipment =
+              shipment({ id: "ship-2" as Shipment["id"], reference: "SHIP-002" });
+
+            const reportlessDraftDeclaration =
+              declaration({
+                status: "DRAFT",
+                member_shipment_ids: ["ship-1" as Declaration["member_shipment_ids"][number]],
+                completeness_report: null,
+              });
+
+            const items =
+              deriveI19Items(
+                [nonMemberShipment],
+                [reportlessDraftDeclaration],
+              );
+
+            expect(items).toHaveLength(1);
+            expect(items[0]?.priority).toBe("REQUIRED");
+            expect(items[0]?.impact).toBe("APPROVAL");
+          },
+        );
+
+        it(
+          "the relation is unconditional on D's status -- a non-member of a FILED_RECORDED declaration still gets impact forced to APPROVAL (2026-09-05 S2 remediation B2)",
+          () => {
+            const nonMemberShipment =
+              shipment({ id: "ship-2" as Shipment["id"], reference: "SHIP-002" });
+
+            const filedDeclaration =
+              declaration({
+                status: "FILED_RECORDED",
+                member_shipment_ids: ["ship-1" as Declaration["member_shipment_ids"][number]],
+                completeness_report: {
+                  generated_at: "2026-01-01T00:00:00Z" as CompletenessReport["generated_at"],
+                  shipment_count: 1,
+                  line_count: 1,
+                  complete: true,
+                  blockers: [],
+                },
+                filed_snapshot: {},
+                filed_reference: "REF-1",
+                filed_at: "2026-01-05T00:00:00Z" as Declaration["filed_at"],
+              });
+
+            const items =
+              deriveI19Items(
+                [nonMemberShipment],
+                [filedDeclaration],
+              );
+
+            expect(items).toHaveLength(1);
+            expect(items[0]?.priority).toBe("REQUIRED");
+            expect(items[0]?.impact).toBe("APPROVAL");
           },
         );
 

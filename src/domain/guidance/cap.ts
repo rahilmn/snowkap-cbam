@@ -5,16 +5,25 @@ import type {
 export const DASHBOARD_GUIDANCE_CAP = 3;
 
 export interface GuidanceCapResult {
+  // Exactly the first DASHBOARD_GUIDANCE_CAP ranked items -- never
+  // more, whatever their priority. The dashboard tile is a compact
+  // preview, not the complete work queue; the complete ranked set
+  // (including everything past the cap) is what /attention
+  // (app/attention/page.tsx) shows.
   visible: GuidanceItem[];
 
-  // How many REQUIRED items exceeded DASHBOARD_GUIDANCE_CAP -- 0 when
-  // REQUIRED alone fits within the cap. Never means anything was
-  // hidden: v2.1.1's own "preserve REQUIRED visibility / overflow
-  // control" is read literally here -- ALL REQUIRED items are always
-  // in `visible`, even past the cap. This count exists only so a
-  // caller can render an "overflow" affordance (a badge, a "+N" style
-  // indicator) when the required list grows past the nominal 3, not to
-  // gate what's shown.
+  // How many items beyond `visible` exist at all (any priority). A
+  // caller uses this to decide whether to render a generic "See all"
+  // overflow control at all -- 0 means `visible` already contains
+  // everything.
+  hiddenCount: number;
+
+  // Of `hiddenCount`, how many are REQUIRED. v2.1.1: required overflow
+  // must be explicit and reachable, never a silently dropped item --
+  // when this is > 0 a caller must render a REQUIRED-specific overflow
+  // control (distinct from a generic "See all") linking to
+  // /attention#required, since hidden REQUIRED work is the one case
+  // that must never look like "nothing else to do here."
   requiredOverflowCount: number;
 }
 
@@ -22,6 +31,19 @@ export interface GuidanceCapResult {
  * Assumes `items` is already ranked (rank.ts) so REQUIRED items sort
  * before RECOMMENDED/OPTIONAL and, within a tier, in the intended
  * display order -- capGuidanceItems does not re-sort.
+ *
+ * 2026-09-05 (S2 remediation, B1, fresh Opus 5 review). This USED to
+ * put every REQUIRED item into `visible` uncapped (reading v2.1.1's
+ * "preserve REQUIRED visibility" as "never hide a REQUIRED item"),
+ * while separately reporting requiredOverflowCount for the excess --
+ * so with 5 REQUIRED items the dashboard rendered all 5 cards AND a
+ * "(+2 more required)" label counting items already on screen. The cap
+ * is now a real cap: `visible` is always at most
+ * DASHBOARD_GUIDANCE_CAP items. "Preserve REQUIRED visibility" is
+ * honoured instead by requiredOverflowCount making any hidden REQUIRED
+ * work an explicit, reachable overflow control (never a silent drop)
+ * and by the complete ranked set staying available, uncapped, via
+ * /attention -- not by inflating the dashboard tile's own card count.
  *
  * "Do not create a 'prison' workflow where the user cannot continue
  * because optional work is incomplete" (v2.1.1): this function only
@@ -31,38 +53,23 @@ export interface GuidanceCapResult {
 export function capGuidanceItems(
   items: GuidanceItem[],
 ): GuidanceCapResult {
-  const required =
-    items.filter(
-      (item) => item.priority === "REQUIRED",
+  const visible =
+    items.slice(
+      0,
+      DASHBOARD_GUIDANCE_CAP,
     );
 
-  if (required.length >= DASHBOARD_GUIDANCE_CAP) {
-    return {
-      visible: required,
-      requiredOverflowCount:
-        Math.max(
-          0,
-          required.length - DASHBOARD_GUIDANCE_CAP,
-        ),
-    };
-  }
-
-  const nonRequired =
-    items.filter(
-      (item) => item.priority !== "REQUIRED",
+  const hidden =
+    items.slice(
+      DASHBOARD_GUIDANCE_CAP,
     );
-
-  const remainingSlots =
-    DASHBOARD_GUIDANCE_CAP - required.length;
 
   return {
-    visible: [
-      ...required,
-      ...nonRequired.slice(
-        0,
-        remainingSlots,
-      ),
-    ],
-    requiredOverflowCount: 0,
+    visible,
+    hiddenCount: hidden.length,
+    requiredOverflowCount:
+      hidden.filter(
+        (item) => item.priority === "REQUIRED",
+      ).length,
   };
 }

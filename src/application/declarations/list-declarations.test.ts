@@ -87,19 +87,16 @@ describe(
     );
 
     it(
-      "returns an empty array on error, never a partial or fabricated list",
+      "2026-09-06 (S2 remediation, B3 follow-up, fresh Opus 5 adversarial pre-verification): a real query error THROWS, never degrades into an empty ('no declarations') list -- this is guidance's own declarations fetch (its one real caller is deriveGuidanceItems), and a silently-empty result here forces every I19 item's impact to APPROVAL org-wide with no signal anything failed, exactly the false-all-clear pattern B3 exists to prevent",
       async () => {
-        const result =
-          await listDeclarations(
+        await expect(
+          listDeclarations(
             mockSupabase(
               { data: null, error: { message: "boom" } },
             ),
             "org-1" as never,
-          );
-
-        expect(result).toEqual(
-          [],
-        );
+          ),
+        ).rejects.toThrow();
       },
     );
   },

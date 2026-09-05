@@ -1,74 +1,49 @@
 import Link from "next/link";
 
 import {
-  Badge,
-  type BadgeProps,
-} from "../ui/badge";
-
-import {
-  dismissGuidanceItemAction,
-} from "../../app/guidance-actions";
+  GuidanceItemList,
+} from "./guidance-item-list";
 
 import type {
-  GuidanceCapResult,
-} from "../../src/domain/guidance/cap";
-
-import type {
-  GuidanceImpact,
-  GuidancePriority,
-} from "../../src/domain/guidance/types";
+  GuidanceDashboardResult,
+} from "../../src/application/guidance/derive-dashboard-guidance";
 
 /**
  * SME Experience v2.1.1, S2: the dashboard work queue -- "3 things
  * need your attention," not a static marketing tile. Renders whatever
  * deriveDashboardGuidance already ranked/deduplicated/dismissed/capped
  * (src/application/guidance/derive-dashboard-guidance.ts); this
- * component has no priority/ordering logic of its own.
- *
- * Priority/impact are NOT part of the StatusKey vocabulary
- * (src/domain/status-vocabulary) -- they are prioritisation metadata
- * about a guidance item, not a domain entity's own status/provenance,
- * so they are not run through StatusBadge/data-status-key. They ARE
- * rendered as plain, honest labels via the same Badge component
- * everything else uses, matching the precedent app/status/page.tsx's
- * own DATASET_STATUS_TONE already set for a status concept outside
- * that vocabulary's ten axes (confirmed exempt by
- * tests/architecture/status-vocabulary-enforcement.test.ts's own
- * scoping, which targets those ten source types by name).
+ * component has no priority/ordering logic of its own. Per-item card
+ * markup lives in guidance-item-list.tsx, shared with /attention's
+ * complete, uncapped view (app/attention/page.tsx).
  */
-
-const PRIORITY_LABEL: Record<GuidancePriority, string> =
-  {
-    REQUIRED: "Required",
-    RECOMMENDED: "Recommended",
-    OPTIONAL: "Optional",
-  };
-
-const PRIORITY_TONE: Record<GuidancePriority, BadgeProps["tone"]> =
-  {
-    REQUIRED: "danger",
-    RECOMMENDED: "warning",
-    OPTIONAL: "neutral",
-  };
-
-const IMPACT_LABEL: Record<GuidanceImpact, string> =
-  {
-    FILING: "Filing",
-    INTEGRITY: "Integrity",
-    APPROVAL: "Approval",
-    DATA_ENTRY: "Data entry",
-    SETUP: "Setup",
-    INFO: "Info",
-  };
-
 export function GuidanceWorkQueue(
   {
     result,
   }: {
-    result: GuidanceCapResult;
+    result: GuidanceDashboardResult;
   },
 ) {
-  if (result.visible.length === 0) {
+  // 2026-09-05 (S2 remediation, B3, fresh Opus 5 review). UNAVAILABLE
+  // is a genuine fetch failure -- rendered distinctly from a real empty
+  // queue, never silently collapsed into "Nothing needs your attention
+  // right now," which would be a false all-clear on a compliance tool.
+  if (result.status === "UNAVAILABLE") {
+    return (
+      <p
+        role="alert"
+        className="mb-6 text-sm text-[var(--color-danger-700)]"
+      >
+        Couldn&apos;t load your guidance right now. Try refreshing the
+        page.
+      </p>
+    );
+  }
+
+  const cap =
+    result.cap;
+
+  if (cap.visible.length === 0) {
     return (
       <p className="mb-6 text-sm text-[var(--text-tertiary)]">
         Nothing needs your attention right now.
@@ -83,70 +58,39 @@ export function GuidanceWorkQueue(
     >
       <h2 className="text-sm font-medium text-[var(--text-primary)]">
         Needs your attention
-        {result.requiredOverflowCount > 0 ? (
-          <span className="ml-1.5 font-normal text-[var(--text-tertiary)]">
-            (+{result.requiredOverflowCount} more required)
-          </span>
-        ) : null}
       </h2>
 
-      <ul className="flex flex-col gap-2">
-        {result.visible.map(
-          (item) => (
-            <li
-              key={item.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--surface-raised)] p-3"
-            >
-              <div className="flex min-w-0 flex-col gap-0.5">
-                {item.href ? (
-                  <Link
-                    href={item.href}
-                    className="text-sm font-medium text-[var(--text-primary)] hover:text-[var(--accent-interactive)]"
-                  >
-                    {item.title}
-                  </Link>
-                ) : (
-                  <span className="text-sm font-medium text-[var(--text-primary)]">
-                    {item.title}
-                  </span>
-                )}
+      <GuidanceItemList
+        items={cap.visible}
+      />
 
-                <span className="text-xs text-[var(--text-tertiary)]">
-                  {item.reason}
-                </span>
-              </div>
-
-              <div className="flex shrink-0 items-center gap-2">
-                <Badge tone={PRIORITY_TONE[item.priority]}>
-                  {PRIORITY_LABEL[item.priority]}
-                </Badge>
-
-                <Badge tone="neutral">
-                  {IMPACT_LABEL[item.impact]}
-                </Badge>
-
-                {item.priority !== "REQUIRED" ? (
-                  <form action={dismissGuidanceItemAction}>
-                    <input
-                      type="hidden"
-                      name="itemKey"
-                      value={item.id}
-                    />
-
-                    <button
-                      type="submit"
-                      className="rounded-[var(--radius-sm)] px-2 py-1 text-xs font-medium text-[var(--text-tertiary)] hover:bg-[var(--surface-sunken)] hover:text-[var(--text-secondary)]"
-                      aria-label={`Dismiss: ${item.title}`}
-                    >
-                      Dismiss
-                    </button>
-                  </form>
-                ) : null}
-              </div>
-            </li>
-          ),
-        )}
-      </ul>
+      {/*
+        2026-09-05 (S2 remediation, B1, fresh Opus 5 review). The
+        overflow control is part of the VISIBLE set, distinct from
+        `cap.visible`'s own (always at most 3) cards -- it never
+        inflates the card count, and it is always reachable rather than
+        a silent drop. requiredOverflowCount takes priority over a
+        generic "See all": hidden REQUIRED work is the one case that
+        must never look like "nothing else to do here."
+      */}
+      {cap.requiredOverflowCount > 0 ? (
+        <Link
+          href="/attention#required"
+          className="rounded-[var(--radius-md)] border border-[var(--color-danger-300)] bg-[var(--color-danger-50)] p-3 text-sm font-medium text-[var(--color-danger-700)] hover:bg-[var(--color-danger-100)]"
+        >
+          {cap.requiredOverflowCount === 1
+            ? "1 more required item needs your attention"
+            : `${cap.requiredOverflowCount} more required items need your attention`}
+          {" →"}
+        </Link>
+      ) : cap.hiddenCount > 0 ? (
+        <Link
+          href="/attention"
+          className="text-sm font-medium text-[var(--accent-interactive)] hover:text-[var(--accent-interactive-hover)]"
+        >
+          See all →
+        </Link>
+      ) : null}
     </section>
   );
 }

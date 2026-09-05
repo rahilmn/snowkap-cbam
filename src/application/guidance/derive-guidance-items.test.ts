@@ -5,8 +5,8 @@ import {
 } from "vitest";
 
 import {
-  deriveDashboardGuidance,
-} from "./derive-dashboard-guidance";
+  deriveGuidanceItems,
+} from "./derive-guidance-items";
 
 const context =
   {
@@ -59,9 +59,17 @@ function lineRow(
 
 /**
  * A minimal fake covering exactly the four tables this orchestrator
- * reads (via deriveGuidanceItems -- see that module's own more detailed
- * wiring/failure tests). This test only proves deriveDashboardGuidance
- * itself correctly caps the result and surfaces UNAVAILABLE.
+ * reads: shipments, shipment_lines, declarations, guidance_dismissals.
+ * Not a general-purpose Supabase mock -- see the individual services'
+ * own tests (list-draft-shipments-with-lines.test.ts,
+ * list-guidance-dismissals.test.ts, i19.test.ts) for their own
+ * detailed coverage; this test only proves the WIRING (and, since S2
+ * remediation B3, the failure -> UNAVAILABLE conversion) is correct.
+ *
+ * shipments/shipment_lines resolve via .order().range() (matching
+ * list-draft-shipments-with-lines.ts's own paginated shape);
+ * declarations/guidance_dismissals resolve via the plain thenable
+ * chain their own simpler queries already use.
  */
 function mockSupabase(
   {
@@ -70,12 +78,14 @@ function mockSupabase(
     declarationRows = [],
     dismissalRows = [],
     shipmentsError = null,
+    declarationsError = null,
   }: {
     shipmentRows?: Record<string, unknown>[];
     lineRows?: Record<string, unknown>[];
     declarationRows?: Record<string, unknown>[];
     dismissalRows?: { item_key: string }[];
     shipmentsError?: { message: string } | null;
+    declarationsError?: { message: string } | null;
   } = {},
 ) {
   return {
@@ -113,14 +123,18 @@ function mockSupabase(
           );
         },
         then: (
-          resolve: (result: { data: unknown; error: null }) => void,
+          resolve: (result: { data: unknown; error: unknown }) => void,
         ) => {
+          if (table === "declarations") {
+            return resolve(
+              { data: declarationsError ? null : declarationRows, error: declarationsError },
+            );
+          }
+
           const data =
-            table === "declarations"
-              ? declarationRows
-              : table === "guidance_dismissals"
-                ? dismissalRows
-                : [];
+            table === "guidance_dismissals"
+              ? dismissalRows
+              : [];
 
           return resolve(
             { data, error: null },
@@ -134,13 +148,13 @@ function mockSupabase(
 }
 
 describe(
-  "deriveDashboardGuidance",
+  "deriveGuidanceItems",
   () => {
     it(
-      "derives an I19 item for a real, complete DRAFT shipment and returns it capped for the dashboard tile",
+      "derives an I19 item for a real, complete DRAFT shipment",
       async () => {
         const result =
-          await deriveDashboardGuidance(
+          await deriveGuidanceItems(
             mockSupabase(
               {
                 shipmentRows: [shipmentRow()],
@@ -156,73 +170,32 @@ describe(
           throw new Error("expected OK");
         }
 
-        expect(result.cap.visible).toHaveLength(1);
-        expect(result.cap.visible[0]?.rule).toBe("I19");
-        expect(result.cap.visible[0]?.title).toBe("Mark SHIP-001 ready");
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0]?.rule).toBe("I19");
+        expect(result.items[0]?.title).toBe("Mark SHIP-001 ready");
       },
     );
 
     it(
-      "returns no items when there are no draft shipments",
+      "returns OK with an empty item list when there are no draft shipments (a genuine empty queue)",
       async () => {
         const result =
-          await deriveDashboardGuidance(
+          await deriveGuidanceItems(
             mockSupabase(),
             context,
           );
 
-        expect(result.status).toBe("OK");
-
-        if (result.status !== "OK") {
-          throw new Error("expected OK");
-        }
-
-        expect(result.cap.visible).toEqual(
-          [],
-        );
-
-        expect(result.cap.requiredOverflowCount).toBe(
-          0,
+        expect(result).toEqual(
+          { status: "OK", items: [] },
         );
       },
     );
 
     it(
-      "2026-09-05 (S2 remediation, B1 + B3): more than 3 REQUIRED items caps the visible dashboard set to 3, exposing the exact requiredOverflowCount",
+      "2026-09-05 (S2 remediation, B3): a real fetch failure returns UNAVAILABLE, never an empty OK result indistinguishable from a genuine empty queue",
       async () => {
         const result =
-          await deriveDashboardGuidance(
-            mockSupabase(
-              {
-                shipmentRows: Array.from(
-                  { length: 5 },
-                  (_, index) => shipmentRow({ id: `ship-${index}`, reference: `SHIP-${index}` }),
-                ),
-                lineRows: Array.from(
-                  { length: 5 },
-                  (_, index) => lineRow({ id: `line-${index}`, shipment_id: `ship-${index}` }),
-                ),
-              },
-            ),
-            context,
-          );
-
-        expect(result.status).toBe("OK");
-
-        if (result.status !== "OK") {
-          throw new Error("expected OK");
-        }
-
-        expect(result.cap.visible).toHaveLength(3);
-        expect(result.cap.requiredOverflowCount).toBe(2);
-      },
-    );
-
-    it(
-      "2026-09-05 (S2 remediation, B3): a real fetch failure surfaces as UNAVAILABLE, never as an empty ('nothing to do') result",
-      async () => {
-        const result =
-          await deriveDashboardGuidance(
+          await deriveGuidanceItems(
             mockSupabase(
               {
                 shipmentsError: { message: "URI too long" },
@@ -234,6 +207,52 @@ describe(
         expect(result).toEqual(
           { status: "UNAVAILABLE" },
         );
+      },
+    );
+
+    it(
+      "2026-09-06 (S2 remediation, B3 follow-up, fresh Opus 5 adversarial pre-verification): a real DECLARATIONS fetch failure also returns UNAVAILABLE -- listDeclarations used to silently swallow its own errors into [], which would have forced every I19 item's impact to APPROVAL org-wide with no signal anything failed",
+      async () => {
+        const result =
+          await deriveGuidanceItems(
+            mockSupabase(
+              {
+                shipmentRows: [shipmentRow()],
+                lineRows: [lineRow()],
+                declarationsError: { message: "boom" },
+              },
+            ),
+            context,
+          );
+
+        expect(result).toEqual(
+          { status: "UNAVAILABLE" },
+        );
+      },
+    );
+
+    it(
+      "threads the dismissal set through to the pipeline (I19 is always REQUIRED, so a dismissal of it has no visible effect -- proving the set reaches the pipeline rather than being fetched and ignored)",
+      async () => {
+        const result =
+          await deriveGuidanceItems(
+            mockSupabase(
+              {
+                shipmentRows: [shipmentRow()],
+                lineRows: [lineRow()],
+                dismissalRows: [{ item_key: "I19:ship-1" }],
+              },
+            ),
+            context,
+          );
+
+        expect(result.status).toBe("OK");
+
+        if (result.status !== "OK") {
+          throw new Error("expected OK");
+        }
+
+        expect(result.items).toHaveLength(1);
       },
     );
   },
