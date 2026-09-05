@@ -53,8 +53,18 @@ const test =
           use,
           workerInfo,
         ) => {
+          // browser.newContext() does NOT inherit playwright.config.ts's
+          // use.baseURL the way the built-in `context`/`page` fixtures
+          // do -- a context built directly from `browser` needs it
+          // passed explicitly, or a relative page.goto("/sign-up")
+          // below fails with "Cannot navigate to invalid URL" (found by
+          // actually running this suite, not assumed).
           const context =
-            await browser.newContext();
+            await browser.newContext(
+              {
+                baseURL: workerInfo.project.use.baseURL,
+              },
+            );
 
           const page =
             await context.newPage();
@@ -221,11 +231,14 @@ test.describe(
           "/",
         );
 
-        await expect(
+        const primaryNav =
           page.getByRole(
             "navigation",
             { name: "Primary" },
-          ),
+          );
+
+        await expect(
+          primaryNav,
         ).toBeVisible();
 
         // All nine importer nav items are present (docs/plans/MASTER_PLAN.md §7;
@@ -274,13 +287,19 @@ test.describe(
           // both are fully built and live inline on each dataset. So a
           // disabled item is matched by its label prefix, and the
           // presence of a reason is asserted rather than its wording.
+          //
+          // Scoped to primaryNav, not page-wide: now that this suite
+          // runs authenticated, app/page.tsx's own dashboard starting-
+          // point cards ALSO render a "Shipments" link in #main, so an
+          // unscoped page.getByRole(...) resolves to two elements
+          // (found by actually running this suite, not assumed).
           const control =
             role === "button"
-              ? page.getByRole(
+              ? primaryNav.getByRole(
                   role,
                   { name: new RegExp(`^${label} \(.+\)$`) },
                 )
-              : page.getByRole(
+              : primaryNav.getByRole(
                   role,
                   { name: label, exact: true },
                 );
