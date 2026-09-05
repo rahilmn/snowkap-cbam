@@ -127,7 +127,6 @@ export default async function EmissionDataPage() {
       breadcrumbs={[
         { label: "Emissions" },
       ]}
-      activeNavLabel="Emissions"
     >
       <h1 className="mb-4 text-2xl font-semibold text-[var(--text-primary)]">
         Emissions

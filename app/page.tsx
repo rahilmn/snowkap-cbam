@@ -39,6 +39,13 @@ interface StartingPoint {
   href: string;
   title: string;
   description: string;
+  // 2026-09-05 (SME plan v2.1.1, S1). Carries forward a fact that used
+  // to live on a disabled sidebar placeholder before the placeholder
+  // itself was removed (components/shell/sidebar.tsx no longer lists
+  // it): not every plausible-sounding screen exists, and the honest
+  // answer for where the thing actually happens belongs somewhere a
+  // user can find it, not nowhere.
+  note?: string;
 }
 
 const IMPORTER_STARTING_POINTS: StartingPoint[] =
@@ -48,6 +55,8 @@ const IMPORTER_STARTING_POINTS: StartingPoint[] =
       title: "Shipments",
       description:
         "Record imported goods, classify their CN codes, and resolve embedded emissions for each line.",
+      note:
+        "There is no separate calculations screen -- every line is calculated in place on its own shipment; open one and use \"Why this number?\" for the full trace.",
     },
     {
       href: "/emissions",
@@ -82,6 +91,8 @@ const PRODUCER_STARTING_POINTS: StartingPoint[] =
       title: "Emission data",
       description:
         "Record actual emissions per installation and period, attach evidence, and move them through internal review.",
+      note:
+        "There is no separate production-data screen -- production scope is recorded per emission-data record, as its CN codes and period.",
     },
     {
       href: "/sharing",
@@ -143,7 +154,6 @@ export default async function HomePage() {
           breadcrumbs={[
             { label: "Dashboard" },
           ]}
-          activeNavLabel="Dashboard"
         >
           <h1 className="mb-1 text-2xl font-semibold text-[var(--text-primary)]">
             Snowkap CBAM
@@ -237,7 +247,6 @@ export default async function HomePage() {
       breadcrumbs={[
         { label: "Dashboard" },
       ]}
-      activeNavLabel="Dashboard"
     >
       <h1 className="mb-1 text-2xl font-semibold text-[var(--text-primary)]">
         {orgSummary.organizationName}
@@ -277,11 +286,23 @@ export default async function HomePage() {
                 >
                   Open {point.title.toLowerCase()} →
                 </Link>
+
+                {point.note ? (
+                  <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+                    {point.note}
+                  </p>
+                ) : null}
               </CardContent>
             </Card>
           ),
         )}
       </div>
+
+      <p className="mt-6 max-w-4xl text-xs text-[var(--text-tertiary)]">
+        There is no separate settings screen -- organization details are
+        under Organization, and people are under Team (both reachable
+        from the top bar).
+      </p>
     </AppShell>
   );
 }

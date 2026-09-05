@@ -46,7 +46,6 @@ export default async function NewShipmentPage() {
         { label: "Shipments", href: "/shipments" },
         { label: "New" },
       ]}
-      activeNavLabel="Shipments"
     >
       <h1 className="mb-4 text-2xl font-semibold text-[var(--text-primary)]">
         New shipment

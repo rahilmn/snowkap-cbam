@@ -169,7 +169,6 @@ export default async function ActivityPage(
       breadcrumbs={[
         { label: "Activity" },
       ]}
-      activeNavLabel="Activity"
     >
       <div className="mb-4 flex items-start justify-between gap-4">
         <div className="flex max-w-2xl flex-col gap-1">

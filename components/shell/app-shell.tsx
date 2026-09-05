@@ -3,8 +3,16 @@ import type {
 } from "react";
 
 import {
+  headers,
+} from "next/headers";
+
+import {
   Topbar,
 } from "./topbar";
+
+import {
+  deriveActiveNavLabel,
+} from "./derive-active-nav-label";
 
 import {
   getPreferredOrgId,
@@ -16,6 +24,9 @@ import {
 
 import {
   Sidebar,
+  IMPORTER_NAV,
+  PRODUCER_NAV,
+  SETTINGS_NAV,
   type Experience,
 } from "./sidebar";
 
@@ -185,13 +196,28 @@ export async function AppShell(
     (orgSummary?.context.capabilities.includes("PRODUCER_OPERATOR") ?? false) &&
     (orgSummary?.context.capabilities.includes("IMPORTER_DECLARANT") ?? false);
 
+  // SME Experience v2.1.1, S1: derived navigation. An explicit
+  // `activeNavLabel` prop still wins outright (kept at the handful of
+  // call sites whose route doesn't map cleanly onto a nav item, e.g.
+  // /onboarding/setup) -- this only fills in when a screen passes
+  // none, using the pathname proxy.ts forwards on every request.
+  const resolvedActiveNavLabel =
+    activeNavLabel ??
+    deriveActiveNavLabel(
+      (await headers()).get("x-pathname") ?? "",
+      [
+        ...(resolvedExperience === "producer" ? PRODUCER_NAV : IMPORTER_NAV),
+        ...SETTINGS_NAV,
+      ],
+    );
+
   return (
     <div className="flex h-dvh flex-col bg-[var(--surface-page)]">
       <SkipLink />
 
       <Topbar
         experience={resolvedExperience}
-        activeNavLabel={activeNavLabel}
+        activeNavLabel={resolvedActiveNavLabel}
         organizationName={orgSummary?.organizationName ?? null}
         isSignedIn={user !== null}
         pendingInvitationCount={pendingInvitationCount}
@@ -210,7 +236,7 @@ export async function AppShell(
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           experience={resolvedExperience}
-          activeLabel={activeNavLabel}
+          activeLabel={resolvedActiveNavLabel}
         />
 
         <div className="flex flex-1 flex-col overflow-hidden">

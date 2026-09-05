@@ -172,7 +172,6 @@ export default async function AuditHistoryPage(
       breadcrumbs={[
         { label: "Audit history" },
       ]}
-      activeNavLabel="Audit"
     >
       <div className="mb-4 flex items-start justify-between gap-4">
         <div className="flex max-w-2xl flex-col gap-1">

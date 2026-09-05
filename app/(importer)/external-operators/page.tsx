@@ -126,7 +126,6 @@ export default async function ExternalOperatorsPage() {
       breadcrumbs={[
         { label: "External operators" },
       ]}
-      activeNavLabel="External operators"
     >
       <div className="mb-4 flex max-w-2xl flex-col gap-1">
         <h1 className="text-2xl font-semibold text-[var(--text-primary)]">

@@ -124,7 +124,6 @@ export default async function SharingPage() {
       breadcrumbs={[
         { label: "Sharing" },
       ]}
-      activeNavLabel="Sharing"
     >
       <div className="mb-4 flex max-w-2xl items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold text-[var(--text-primary)]">

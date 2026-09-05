@@ -61,7 +61,7 @@ test.describe(
           primaryNav,
         ).toBeVisible();
 
-        // All eight producer nav items (components/shell/sidebar.tsx's
+        // All seven producer nav items (components/shell/sidebar.tsx's
         // PRODUCER_NAV), each with the real accessible role that item
         // actually renders as: items with an href render as a <Link>
         // (role "link"); items without one render as a disabled
@@ -76,7 +76,6 @@ test.describe(
           [
             { label: "Dashboard", role: "link" },
             { label: "Installations", role: "link" },
-            { label: "Production data", role: "button" },
             { label: "Emissions", role: "link" },
             { label: "Evidence", role: "button" },
             { label: "Internal review", role: "button" },

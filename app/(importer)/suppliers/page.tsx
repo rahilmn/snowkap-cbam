@@ -59,7 +59,6 @@ export default async function SuppliersPage() {
       breadcrumbs={[
         { label: "Suppliers" },
       ]}
-      activeNavLabel="Suppliers"
     >
       <h1 className="mb-4 text-2xl font-semibold text-[var(--text-primary)]">
         Suppliers

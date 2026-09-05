@@ -424,6 +424,42 @@ describe(
     );
 
     it(
+      // SME Experience v2.1.1, S1: derived navigation. NextResponse.next
+      // forwards a mutated request header to the eventual Server
+      // Component render via x-middleware-request-<name> plus an
+      // x-middleware-override-headers manifest naming it (Next's own
+      // mechanism, not something this file constructs) -- AppShell reads
+      // it back out via headers() in components/shell/app-shell.tsx.
+      "carries the request pathname to the eventual Server Component render as x-pathname",
+      async () => {
+        getUserMock.mockResolvedValueOnce(
+          { data: { user: null }, error: null },
+        );
+
+        const response =
+          await proxy(
+            requestWithCookie(),
+          );
+
+        expect(
+          response.headers.get(
+            "x-middleware-request-x-pathname",
+          ),
+        ).toBe(
+          "/shipments",
+        );
+
+        expect(
+          response.headers.get(
+            "x-middleware-override-headers",
+          ),
+        ).toContain(
+          "x-pathname",
+        );
+      },
+    );
+
+    it(
       "runs on ordinary app routes but excludes static assets and image optimization",
       () => {
         expect(

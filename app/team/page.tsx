@@ -108,7 +108,6 @@ export default async function TeamPage() {
       breadcrumbs={[
         { label: "Team" },
       ]}
-      activeNavLabel="Team"
     >
       <h1 className="mb-4 text-2xl font-semibold text-[var(--text-primary)]">
         Team

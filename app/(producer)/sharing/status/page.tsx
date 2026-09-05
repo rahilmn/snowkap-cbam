@@ -94,7 +94,6 @@ export default async function SharedDataStatusPage() {
         { label: "Sharing", href: "/sharing" },
         { label: "Shared-data status" },
       ]}
-      activeNavLabel="Sharing"
     >
       <div className="mb-4 flex max-w-2xl flex-col gap-1">
         <h1 className="text-2xl font-semibold text-[var(--text-primary)]">

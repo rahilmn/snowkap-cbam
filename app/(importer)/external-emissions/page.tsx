@@ -154,7 +154,6 @@ export default async function ExternalEmissionsPage() {
       breadcrumbs={[
         { label: "External emissions" },
       ]}
-      activeNavLabel="External emissions"
     >
       <div className="mb-4 flex max-w-3xl flex-col gap-1">
         <h1 className="text-2xl font-semibold text-[var(--text-primary)]">

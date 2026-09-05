@@ -169,7 +169,6 @@ export default async function StatusPage() {
       breadcrumbs={[
         { label: "System status" },
       ]}
-      activeNavLabel="System status"
     >
       <div className="mb-4 flex flex-col gap-1">
         <h1 className="text-2xl font-semibold text-[var(--text-primary)]">

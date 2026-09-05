@@ -34,6 +34,24 @@ import {
 export async function proxy(
   request: NextRequest,
 ) {
+  // SME Experience v2.1.1, S1: derived navigation. Carries the current
+  // pathname to every Server Component via headers() (AppShell reads
+  // it to derive which nav item is active, replacing a caller-supplied
+  // activeNavLabel literal on most pages -- components/shell/derive-
+  // active-nav-label.ts). Set on `request.headers` BEFORE the first
+  // NextResponse.next({ request }) below, and before this same
+  // `request` object is reused by the cookie adapter's own
+  // NextResponse.next({ request }) call further down -- both calls
+  // read whatever is currently on `request` at the moment they run, so
+  // setting it here once, first, means every response Next.js builds
+  // from `request` in this function carries it. A presentation-only
+  // value (which nav item looks active), never an authorization input
+  // -- no route's own capability/membership guard reads it.
+  request.headers.set(
+    "x-pathname",
+    request.nextUrl.pathname,
+  );
+
   let response =
     NextResponse.next(
       {

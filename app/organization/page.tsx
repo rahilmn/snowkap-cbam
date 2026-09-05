@@ -71,7 +71,6 @@ export default async function OrganizationSettingsPage() {
       breadcrumbs={[
         { label: "Organization" },
       ]}
-      activeNavLabel="Organization"
     >
       <h1 className="mb-4 text-2xl font-semibold text-[var(--text-primary)]">
         Organization

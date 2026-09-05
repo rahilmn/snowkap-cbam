@@ -91,7 +91,6 @@ export default async function InstallationsPage() {
       breadcrumbs={[
         { label: "Installations" },
       ]}
-      activeNavLabel="Installations"
     >
       <h1 className="mb-4 text-2xl font-semibold text-[var(--text-primary)]">
         Installations

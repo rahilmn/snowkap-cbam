@@ -2,15 +2,12 @@ import {
   Activity,
   BarChart3,
   Building2,
-  Calculator,
   ClipboardCheck,
   FileCheck2,
   FileStack,
   Factory,
   LayoutDashboard,
-  Package,
   ScrollText,
-  Settings,
   Share2,
   Ship,
   Truck,
@@ -71,15 +68,6 @@ export const IMPORTER_NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/" },
   { label: "Shipments", icon: Ship, href: "/shipments" },
   { label: "Emissions", icon: BarChart3, href: "/emissions" },
-  {
-    label: "Calculations",
-    icon: Calculator,
-    // Not a missing feature. Every line is calculated in place on its
-    // own shipment, and "Why this number?" carries the full trace.
-    // There is no separate calculations screen to build.
-    unavailableReason:
-      "Calculations happen per line on each shipment -- open a shipment and use \"Why this number?\" for the full trace",
-  },
   { label: "Suppliers", icon: Truck, href: "/suppliers" },
   // 2026-09-03 (owner decision D2). "Installations" was a disabled
   // placeholder with the tooltip "Installations is not available yet",
@@ -97,15 +85,6 @@ export const IMPORTER_NAV: NavItem[] = [
 export const PRODUCER_NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/" },
   { label: "Installations", icon: Factory, href: "/installations" },
-  {
-    label: "Production data",
-    icon: Package,
-    // This one IS genuinely absent: no installation-level production
-    // route or scope concept exists in the schema. Said plainly rather
-    // than dressed up as "coming soon".
-    unavailableReason:
-      "Not built. Production scope is recorded per emission-data record, as its CN codes and period",
-  },
   { label: "Emissions", icon: BarChart3, href: "/emission-data" },
   {
     label: "Evidence",
@@ -131,12 +110,6 @@ export const PRODUCER_NAV: NavItem[] = [
 export const SETTINGS_NAV: NavItem[] = [
   { label: "Team", icon: Users, href: "/team" },
   { label: "Organization", icon: Building2, href: "/organization" },
-  {
-    label: "Settings",
-    icon: Settings,
-    unavailableReason:
-      "Not built. Organization details are under Organization, and people under Team",
-  },
 ];
 
 export function Sidebar(
