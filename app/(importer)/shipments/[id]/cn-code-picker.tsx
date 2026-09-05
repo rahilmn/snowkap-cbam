@@ -106,12 +106,21 @@ export function CnCodePicker(
     disabled,
     required,
     onSelectDescription,
+    onValueChange,
   }: {
     name: string;
     defaultValue?: string;
     disabled?: boolean;
     required?: boolean;
     onSelectDescription?: (description: string) => void;
+    /**
+     * The field's current text, whatever produced it (typed, pasted, or
+     * a picked result) -- exactly what the surrounding <form> will
+     * submit under `name`. Optional: existing callers that don't need
+     * to mirror this value elsewhere (e.g. a review step) are
+     * unaffected.
+     */
+    onValueChange?: (value: string) => void;
   },
 ) {
   const [query, setQuery] =
@@ -148,6 +157,43 @@ export function CnCodePicker(
     useRef(
       0,
     );
+
+  // 2026-09-06 (S3). cmdk keeps (or restores) focus on the underlying
+  // <input> across a CommandItem click -- confirmed live: the very
+  // next real click after selecting a result re-opens this panel
+  // (aria-expanded goes back to true, the just-picked item still
+  // marked [selected]), which then sits directly over whatever control
+  // comes next in a compact layout (add-line-wizard.tsx's "Next"
+  // button, placed immediately below this field) and swallows every
+  // click aimed at it. `open` alone can't tell "reopened right after a
+  // selection" apart from "the user is legitimately searching again",
+  // so this ref does: set the moment a result is picked, cleared the
+  // moment the user actually types (a real query edit), and consulted
+  // by `showPanel` regardless of what re-triggers `open`.
+  const justSelectedRef =
+    useRef(
+      false,
+    );
+
+  function handleQueryChange(
+    value: string,
+  ): void {
+    justSelectedRef.current =
+      false;
+
+    setQuery(
+      value,
+    );
+  }
+
+  useEffect(
+    () => {
+      onValueChange?.(
+        query,
+      );
+    },
+    [query, onValueChange],
+  );
 
   useEffect(
     () => {
@@ -270,6 +316,9 @@ export function CnCodePicker(
   function selectGood(
     good: CbamGoodOption,
   ) {
+    justSelectedRef.current =
+      true;
+
     setQuery(
       good.trade_code,
     );
@@ -284,7 +333,7 @@ export function CnCodePicker(
   }
 
   const showPanel =
-    open && query.trim().length >= 2;
+    open && query.trim().length >= 2 && !justSelectedRef.current;
 
   /**
    * WAI-ARIA combobox pattern: Escape, while the popup is open, closes
@@ -329,7 +378,7 @@ export function CnCodePicker(
             required={required}
             disabled={disabled}
             value={query}
-            onValueChange={setQuery}
+            onValueChange={handleQueryChange}
             onFocus={() => setOpen(true)}
             onKeyDown={handleInputKeyDown}
             autoComplete="off"

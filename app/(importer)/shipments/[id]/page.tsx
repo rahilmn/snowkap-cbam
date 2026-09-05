@@ -50,8 +50,8 @@ import {
 } from "../../../../src/domain/shared/reporting-period";
 
 import {
-  AddLineForm,
-} from "./add-line-form";
+  AddLineWizard,
+} from "./add-line-wizard";
 
 import {
   LinesTable,
@@ -272,7 +272,7 @@ export default async function ShipmentDetailPage(
             Add a line
           </h2>
 
-          <AddLineForm
+          <AddLineWizard
             shipmentId={shipment.id}
           />
         </Card>

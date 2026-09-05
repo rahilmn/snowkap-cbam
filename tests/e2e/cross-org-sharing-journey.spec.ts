@@ -601,10 +601,22 @@ test.describe(
               await expect(option).toBeVisible();
               await option.click();
 
+              await importerPage.getByRole("button", { name: "Next" }).click();
+
               await importerPage.getByLabel("Origin country").fill("CN");
+
+              await importerPage.getByRole("button", { name: "Next" }).click();
+
               await importerPage.getByLabel("Quantity", { exact: true }).fill("10");
 
-              await importerPage.getByRole("button", { name: "Add line" }).click();
+              await importerPage.getByRole("button", { name: "Next" }).click();
+
+              // force: true -- see the identical comment in
+              // actual-data-determination.spec.ts: addLineAction's
+              // in-place reset replaces this exact button with "Next",
+              // and Playwright's default actionability re-polling can
+              // misfire a second real click before that happens.
+              await importerPage.getByRole("button", { name: "Add line" }).click({ force: true });
 
               await expect(importerPage.getByRole("cell", { name: cnCode })).toBeVisible();
 

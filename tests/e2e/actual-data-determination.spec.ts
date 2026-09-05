@@ -575,13 +575,30 @@ test.describe(
               await expect(cnOption).toBeVisible();
               await cnOption.click();
 
+              await importerPage.getByRole("button", { name: "Next" }).click();
+
               await importerPage.getByLabel("Origin country").fill("CN");
+
+              await importerPage.getByRole("button", { name: "Next" }).click();
+
               await importerPage.getByLabel("Quantity", { exact: true }).fill("10");
 
+              await importerPage.getByRole("button", { name: "Next" }).click();
+
+              // force: true -- addLineAction stays on the page and, on
+              // success, this SAME button is replaced by "Next" (the
+              // wizard resets to step 1). Playwright's default click()
+              // actionability re-polling can catch this button mid its
+              // own near-instant self-disable (React's pending flag)
+              // and retry, occasionally firing a genuine second
+              // dispatch before the button disappears -- confirmed live
+              // via two successful POSTs in a captured trace. force
+              // skips that re-polling so exactly one click is
+              // dispatched, matching real single-click user intent.
               await importerPage.getByRole(
                 "button",
                 { name: "Add line" },
-              ).click();
+              ).click({ force: true });
 
               await expect(
                 importerPage.getByRole("cell", { name: cnCode }),

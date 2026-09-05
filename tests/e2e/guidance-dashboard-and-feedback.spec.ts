@@ -98,13 +98,25 @@ test.describe(
             await expect(option).toBeVisible();
             await option.click();
 
+            await page.getByRole("button", { name: "Next" }).click();
+
             await page.getByLabel("Origin country").fill("CN");
+
+            await page.getByRole("button", { name: "Next" }).click();
+
             await page.getByLabel("Quantity", { exact: true }).fill("100");
 
+            await page.getByRole("button", { name: "Next" }).click();
+
+            // force: true -- see B1's own comment further down this
+            // file: addLineAction's in-place reset replaces this exact
+            // button with "Next", and Playwright's default
+            // actionability re-polling can misfire a second real click
+            // before that happens.
             await page.getByRole(
               "button",
               { name: "Add line" },
-            ).click();
+            ).click({ force: true });
 
             await expect(
               page.getByRole("cell", { name: CN_CODE }),
@@ -269,13 +281,25 @@ test.describe(
 
         await page.getByRole("option").filter({ hasText: CN_CODE }).click();
 
+        await page.getByRole("button", { name: "Next" }).click();
+
         await page.getByLabel("Origin country").fill("CN");
+
+        await page.getByRole("button", { name: "Next" }).click();
+
         await page.getByLabel("Quantity", { exact: true }).fill("100");
 
+        await page.getByRole("button", { name: "Next" }).click();
+
+        // force: true -- addLineAction's in-place reset replaces this
+        // exact button with "Next", and Playwright's default
+        // actionability re-polling can misfire a second real click
+        // before that happens (confirmed live via two successful POSTs
+        // in a captured trace).
         await page.getByRole(
           "button",
           { name: "Add line" },
-        ).click();
+        ).click({ force: true });
 
         await page.getByRole(
           "button",
@@ -393,13 +417,25 @@ test.describe(
             "option",
           ).filter({ hasText: CN_CODE }).click();
 
+          await page.getByRole("button", { name: "Next" }).click();
+
           await page.getByLabel("Origin country").fill("CN");
+
+          await page.getByRole("button", { name: "Next" }).click();
+
           await page.getByLabel("Quantity", { exact: true }).fill("100");
 
+          await page.getByRole("button", { name: "Next" }).click();
+
+          // force: true -- addLineAction's in-place reset replaces
+          // this exact button with "Next", and Playwright's default
+          // actionability re-polling can misfire a second real click
+          // before that happens (confirmed live via two successful
+          // POSTs in a captured trace).
           await page.getByRole(
             "button",
             { name: "Add line" },
-          ).click();
+          ).click({ force: true });
 
           await page.getByRole(
             "button",

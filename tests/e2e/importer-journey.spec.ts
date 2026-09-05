@@ -152,12 +152,12 @@ test.describe(
         );
 
         await test.step(
-          "classify: add a line via the live CN/TARIC picker",
+          "classify: add a line through the guided line wizard (product -> origin -> quantity -> review)",
           async () => {
             // Not getByLabel: cmdk's CommandInput (cn-code-picker.tsx)
             // wires its own internal aria-labelledby onto the input,
             // which overrides the implicit <label>-wrapping association
-            // add-line-form.tsx otherwise relies on (confirmed live: the
+            // add-line-wizard.tsx otherwise relies on (confirmed live: the
             // rendered combobox has no accessible name at all) -- the
             // placeholder is the one stable, real identifier for this
             // field.
@@ -171,10 +171,29 @@ test.describe(
             await expect(option).toBeVisible();
             await option.click();
 
+            await page.getByRole("button", { name: "Next" }).click();
+
+            // Step 2: origin.
             await page.getByLabel("Origin country").fill(ORIGIN_COUNTRY);
+
+            await page.getByRole("button", { name: "Next" }).click();
+
+            // Step 3: quantity.
             await page.getByLabel("Quantity", { exact: true }).fill(QUANTITY_TONNES);
 
-            await page.getByRole("button", { name: "Add line" }).click();
+            await page.getByRole("button", { name: "Next" }).click();
+
+            // Step 4: review -- the real submit.
+            await expect(
+              page.getByRole("heading", { name: "Review this line" }),
+            ).toBeVisible();
+
+            // force: true -- see the identical comment in
+            // actual-data-determination.spec.ts: addLineAction's
+            // in-place reset replaces this exact button with "Next",
+            // and Playwright's default actionability re-polling can
+            // misfire a second real click before that happens.
+            await page.getByRole("button", { name: "Add line" }).click({ force: true });
 
             await expect(page.getByRole("cell", { name: CN_CODE })).toBeVisible();
           },
