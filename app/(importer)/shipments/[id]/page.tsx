@@ -33,6 +33,10 @@ import {
 } from "../../../../src/application/calculations/get-latest-calculations";
 
 import {
+  sumShipmentEmissions,
+} from "../../../../src/domain/calculations/sum-shipment-emissions";
+
+import {
   markActualOptionsForLine,
   type ActualEmissionDataOptionForLine,
 } from "../../../../src/application/emissions/mark-actual-options-for-line";
@@ -121,6 +125,18 @@ export default async function ShipmentDetailPage(
       supabase,
       orgSummary.context.org_id,
       shipment.id,
+    );
+
+  // S3 (v2.1.1 §6), prominent result: the one number a user actually
+  // came here for, summed from each line's own already-COMPUTED
+  // figure -- never a second calculation (see
+  // sum-shipment-emissions.ts's own doc comment).
+  const emissionsTotal =
+    sumShipmentEmissions(
+      Object.values(latestCalculations).map(
+        (calculation) => calculation.embedded_emissions_tco2e,
+      ),
+      shipment.lines.length,
     );
 
   // Per-line, not org-wide -- listAvailableActualEmissionData now filters
@@ -258,6 +274,35 @@ export default async function ShipmentDetailPage(
           lineCount={shipment.lines.length}
         />
       </div>
+
+      <Card className="mb-4 p-4">
+        <p className="text-xs font-medium text-[var(--text-tertiary)]">
+          Total embedded emissions
+        </p>
+
+        {emissionsTotal.status === "NONE" ? (
+          <p className="mt-1 text-lg font-medium text-[var(--text-secondary)]">
+            Not yet calculated
+          </p>
+        ) : (
+          <>
+            <p className="mt-1 text-3xl font-semibold tabular-nums text-[var(--text-primary)]">
+              {emissionsTotal.total_tco2e}
+              {" "}
+              <span className="text-base font-normal text-[var(--text-tertiary)]">
+                tCO2e
+              </span>
+            </p>
+
+            {emissionsTotal.status === "PARTIAL" ? (
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                {emissionsTotal.calculatedLineCount} of{" "}
+                {emissionsTotal.totalLineCount} lines calculated so far
+              </p>
+            ) : null}
+          </>
+        )}
+      </Card>
 
       <Card className="mb-4 p-4">
         <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
