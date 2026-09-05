@@ -15,6 +15,15 @@ import {
 } from "../../../../components/ui/badge";
 
 import {
+  StatusBadge,
+} from "../../../../components/ui/status-badge";
+
+import {
+  declarationStatusKey,
+  shipmentStatusKey,
+} from "../../../../src/domain/status-vocabulary";
+
+import {
   getServerSupabaseClient,
 } from "../../../../src/infrastructure/supabase/server-client";
 
@@ -38,14 +47,6 @@ import {
   formatReportingPeriod,
 } from "../../../../src/domain/shared/reporting-period";
 
-import type {
-  DeclarationStatus,
-} from "../../../../src/domain/declarations/types";
-
-import type {
-  ShipmentStatus,
-} from "../../../../src/domain/shipments/types";
-
 import {
   DeclarationActions,
 } from "./declaration-actions";
@@ -57,26 +58,6 @@ import {
 import {
   FiledSnapshotCard,
 } from "./filed-snapshot-card";
-
-const DECLARATION_STATUS_TONE: Record<
-  DeclarationStatus,
-  "neutral" | "brand" | "success" | "danger"
-> = {
-  DRAFT: "neutral",
-  READY: "brand",
-  FILED_RECORDED: "success",
-  VOID: "danger",
-};
-
-const SHIPMENT_STATUS_TONE: Record<
-  ShipmentStatus,
-  "neutral" | "brand" | "success" | "danger"
-> = {
-  DRAFT: "neutral",
-  READY: "brand",
-  LOCKED: "success",
-  VOID: "danger",
-};
 
 /**
  * Master plan §27 screen 22 detail view -- status, the completeness
@@ -120,7 +101,6 @@ export default async function DeclarationDetailPage(
           { label: "Declarations", href: "/declarations" },
           { label: "Detail" },
         ]}
-        activeNavLabel="Declarations"
       >
         <Card>
           <p className="p-6 text-sm text-[var(--text-secondary)]">
@@ -159,7 +139,6 @@ export default async function DeclarationDetailPage(
         { label: "Declarations", href: "/declarations" },
         { label: periodLabel },
       ]}
-      activeNavLabel="Declarations"
     >
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -167,9 +146,9 @@ export default async function DeclarationDetailPage(
             {periodLabel}
           </h1>
 
-          <Badge tone={DECLARATION_STATUS_TONE[declaration.status]}>
-            {declaration.status.replace(/_/g, " ")}
-          </Badge>
+          <StatusBadge
+            statusKey={declarationStatusKey(declaration.status)}
+          />
 
           {declaration.supersedes_declaration_id ? (
             <Badge tone="neutral">
@@ -207,7 +186,7 @@ export default async function DeclarationDetailPage(
                 >
                   the prior version
                 </Link>{" "}
-                ({supersedes.status.replace(/_/g, " ")}
+                (<StatusBadge statusKey={declarationStatusKey(supersedes.status)} />
                 {supersedes.filed_reference ? `, filed "${supersedes.filed_reference}"` : ""}).
               </p>
             ) : null}
@@ -221,7 +200,7 @@ export default async function DeclarationDetailPage(
                 >
                   a later amendment
                 </Link>{" "}
-                ({supersededBy.status.replace(/_/g, " ")}) -- this is no
+                (<StatusBadge statusKey={declarationStatusKey(supersededBy.status)} />) -- this is no
                 longer the current version of this period.
               </p>
             ) : null}
@@ -280,9 +259,9 @@ export default async function DeclarationDetailPage(
                         </td>
 
                         <td className="px-4 py-2">
-                          <Badge tone={SHIPMENT_STATUS_TONE[shipment.status]}>
-                            {shipment.status}
-                          </Badge>
+                          <StatusBadge
+                            statusKey={shipmentStatusKey(shipment.status)}
+                          />
                         </td>
                       </tr>
                     ),

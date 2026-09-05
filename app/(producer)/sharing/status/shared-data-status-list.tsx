@@ -1,6 +1,10 @@
 import {
-  Badge,
-} from "../../../../components/ui/badge";
+  StatusBadge,
+} from "../../../../components/ui/status-badge";
+
+import {
+  sharingGrantStatusKey,
+} from "../../../../src/domain/status-vocabulary";
 
 import {
   Card,
@@ -24,16 +28,6 @@ export interface SharedDataStatusRowView {
   status: "INVITED" | "ACTIVE" | "REVOKED" | "EXPIRED";
   events: SharedDataStatusEventView[];
 }
-
-const STATUS_TONE: Record<
-  SharedDataStatusRowView["status"],
-  "neutral" | "brand" | "success" | "warning" | "danger"
-> = {
-  INVITED: "warning",
-  ACTIVE: "success",
-  REVOKED: "danger",
-  EXPIRED: "neutral",
-};
 
 const DETERMINATION_KIND_LABEL: Record<string, string> = {
   DETERMINED: "Determined",
@@ -104,9 +98,9 @@ function SharedDataStatusCard(
                 {row.installationName}
               </CardTitle>
 
-              <Badge tone={STATUS_TONE[row.status]}>
-                {row.status}
-              </Badge>
+              <StatusBadge
+                statusKey={sharingGrantStatusKey(row.status)}
+              />
             </div>
 
             <span className="text-xs text-[var(--text-secondary)]">

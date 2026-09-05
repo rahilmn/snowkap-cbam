@@ -5,6 +5,10 @@ import {
 } from "../../../../components/ui/badge";
 
 import {
+  StatusBadge,
+} from "../../../../components/ui/status-badge";
+
+import {
   Card,
 } from "../../../../components/ui/card";
 
@@ -12,20 +16,9 @@ import type {
   CompletenessReport,
 } from "../../../../src/domain/declarations/types";
 
-const BLOCKER_LABEL: Record<string, string> = {
-  NO_SHIPMENTS_IN_PERIOD: "No shipments in this period",
-  SHIPMENT_NOT_LOCKABLE: "Shipment not READY or LOCKED",
-  SHIPMENT_HAS_NO_LINES: "Shipment has no lines",
-  LINE_NOT_DETERMINED: "Line not determined",
-  LINE_NOT_CALCULATED: "Line not calculated",
-  // P13 adversarial audit: a line can be determined AND calculated and
-  // still not be ready -- if it was redetermined after its last
-  // calculation without being recalculated, the calculation on file no
-  // longer matches what the line would file with. Surfaced here so this
-  // is visible before attempting to file, not only as a filing-time
-  // INCOMPLETE rejection from record_declaration_filed().
-  LINE_CALCULATION_STALE: "Calculation is stale -- recalculate after re-determination",
-};
+import {
+  blockerReasonKey,
+} from "../../../../src/domain/status-vocabulary";
 
 /**
  * Renders the completeness gate's own findings verbatim -- every
@@ -109,9 +102,9 @@ export function CompletenessReportCard(
                     </td>
 
                     <td className="px-4 py-2">
-                      <Badge tone="warning">
-                        {BLOCKER_LABEL[blocker.reason] ?? blocker.reason}
-                      </Badge>
+                      <StatusBadge
+                        statusKey={blockerReasonKey(blocker.reason)}
+                      />
                     </td>
                   </tr>
                 ),

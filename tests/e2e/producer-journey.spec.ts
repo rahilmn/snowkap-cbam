@@ -3,6 +3,10 @@ import {
   expect,
 } from "./fixtures/authenticated-producer";
 
+import {
+  assertNoRawEnumsVisible,
+} from "./support/assert-no-raw-enums-visible";
+
 /**
  * The producer journey (P13 follow-up work, sibling of
  * importer-journey.spec.ts): onboard -> installations -> data ->
@@ -271,11 +275,18 @@ test.describe(
 
             await expect(
               page.getByText(
-                `Direct ${directSpecific} / Indirect ${indirectSpecific} ${emissionUnit} · EU METHOD`,
+                `Direct ${directSpecific} / Indirect ${indirectSpecific} ${emissionUnit}`,
               ),
             ).toBeVisible();
 
-            await expect(page.getByText("DRAFT", { exact: true })).toBeVisible();
+            await expect(
+              page.locator('[data-status-key="methodology.EU_METHOD"]'),
+            ).toBeVisible();
+
+            await expect(
+              page.locator('[data-status-key="emission_record.DRAFT"]'),
+            ).toBeVisible();
+
             await expect(page.getByText("Not yet reviewed", { exact: true })).toBeVisible();
 
             // Live, re-derived completeness (checkEmissionDataEvidenceCompleteness)
@@ -284,6 +295,10 @@ test.describe(
             await expect(page.getByText("Incomplete", { exact: true })).toBeVisible();
             await expect(page.getByText("No evidence attached.")).toBeVisible();
             await expect(page.getByText(EVIDENCE_INCOMPLETE_NOTICE)).toBeVisible();
+
+            // v2.1.1 §9.6 layer 3: this screen renders emission-record
+            // status, review status, and methodology together.
+            await assertNoRawEnumsVisible(page);
           },
         );
 
@@ -441,7 +456,11 @@ test.describe(
               page.getByText(`Invited: ${importerEmail}`),
             ).toBeVisible();
 
-            await expect(page.getByText("INVITED", { exact: true })).toBeVisible();
+            await expect(
+              page.locator('[data-status-key="sharing_grant.INVITED"]'),
+            ).toBeVisible();
+
+            await assertNoRawEnumsVisible(page);
 
             // canManage (OWNER) -> the revoke control genuinely renders
             // for an INVITED grant (issued-grants-list.tsx's canRevoke).

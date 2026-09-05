@@ -6,7 +6,6 @@ import {
 
 import {
   Badge,
-  type BadgeProps,
 } from "../../../components/ui/badge";
 
 import {
@@ -42,7 +41,9 @@ import {
 
 import {
   reviewBadgeFor,
-} from "../../../src/domain/status-vocabulary/review-badges";
+  emissionRecordStatusKey,
+  methodologyKey,
+} from "../../../src/domain/status-vocabulary";
 
 import {
   EVIDENCE_INCOMPLETE_NOTICE,
@@ -105,14 +106,6 @@ function describeMissingEvidenceField(
   return field;
 }
 
-const STATUS_TONE: Record<EmissionDataListItem["status"], BadgeProps["tone"]> =
-  {
-    DRAFT: "neutral",
-    ACTIVE: "success",
-    SUPERSEDED: "neutral",
-    DISCARDED: "danger",
-  };
-
 export function EmissionDataList(
   {
     records,
@@ -163,9 +156,9 @@ function EmissionDataRow(
               {record.installationName}
             </span>
 
-            <Badge tone={STATUS_TONE[record.status]}>
-              {record.status}
-            </Badge>
+            <StatusBadge
+              statusKey={emissionRecordStatusKey(record.status)}
+            />
 
             <StatusBadge
               statusKey={reviewBadgeFor(record.verificationStatus, record.provenance)}
@@ -192,8 +185,9 @@ function EmissionDataRow(
             {record.periodLabel} · {record.cnScope.join(", ") || "no CN codes"} · v{record.version}
           </span>
 
-          <span className="text-xs text-[var(--text-secondary)]">
-            Direct {record.directSpecific} / Indirect {record.indirectSpecific} {record.emissionUnit} · {record.methodology.replace(/_/g, " ")}
+          <span className="flex items-center gap-1 text-xs text-[var(--text-secondary)]">
+            Direct {record.directSpecific} / Indirect {record.indirectSpecific} {record.emissionUnit} ·{" "}
+            <StatusBadge statusKey={methodologyKey(record.methodology)} />
           </span>
 
           {record.rejectionReason ? (

@@ -23,8 +23,12 @@ import {
 } from "../../components/ui/card";
 
 import {
-  RegulatoryStatusBadge,
-} from "../../components/ui/regulatory-status-badge";
+  StatusBadge,
+} from "../../components/ui/status-badge";
+
+import {
+  resolutionReasonKey,
+} from "../../src/domain/status-vocabulary";
 
 import type {
   ResolutionReason,
@@ -270,9 +274,9 @@ export default function DesignGalleryPage() {
           <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--surface-raised)] p-4">
             {ALL_RESOLUTION_REASONS.map(
               (reason) => (
-                <RegulatoryStatusBadge
+                <StatusBadge
                   key={reason}
-                  reason={reason}
+                  statusKey={resolutionReasonKey(reason)}
                 />
               ),
             )}

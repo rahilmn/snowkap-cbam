@@ -6,8 +6,8 @@ import {
 } from "react";
 
 import {
-  Badge,
-} from "../../../../components/ui/badge";
+  StatusBadge,
+} from "../../../../components/ui/status-badge";
 
 import {
   ConfirmSubmitButton,
@@ -40,13 +40,9 @@ import type {
   DeclarationStatus,
 } from "../../../../src/domain/declarations/types";
 
-const BLOCKER_LABEL: Record<string, string> = {
-  NO_SHIPMENTS_IN_PERIOD: "No shipments in this period",
-  SHIPMENT_NOT_LOCKABLE: "Shipment not READY or LOCKED",
-  SHIPMENT_HAS_NO_LINES: "Shipment has no lines",
-  LINE_NOT_DETERMINED: "Line not determined",
-  LINE_NOT_CALCULATED: "Line not calculated",
-};
+import {
+  blockerReasonKey,
+} from "../../../../src/domain/status-vocabulary";
 
 /**
  * Every mutating action master plan §27 screen 22 names (generate/
@@ -219,9 +215,9 @@ function MarkReadyForm(
                       {blocker.line_number ? ` · line ${blocker.line_number}` : ""}
                     </span>
 
-                    <Badge tone="danger">
-                      {BLOCKER_LABEL[blocker.reason] ?? blocker.reason}
-                    </Badge>
+                    <StatusBadge
+                      statusKey={blockerReasonKey(blocker.reason)}
+                    />
                   </li>
                 ),
               )}

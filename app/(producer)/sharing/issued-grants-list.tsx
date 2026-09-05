@@ -17,8 +17,12 @@ import {
 } from "../../../components/ui/button";
 
 import {
-  Badge,
-} from "../../../components/ui/badge";
+  StatusBadge,
+} from "../../../components/ui/status-badge";
+
+import {
+  sharingGrantStatusKey,
+} from "../../../src/domain/status-vocabulary";
 
 import {
   revokeSharingGrantAction,
@@ -43,16 +47,6 @@ export interface IssuedGrantRow {
   status: "INVITED" | "ACTIVE" | "REVOKED" | "EXPIRED";
   canManage: boolean;
 }
-
-const STATUS_TONE: Record<
-  IssuedGrantRow["status"],
-  "neutral" | "brand" | "success" | "warning" | "danger"
-> = {
-  INVITED: "warning",
-  ACTIVE: "success",
-  REVOKED: "danger",
-  EXPIRED: "neutral",
-};
 
 export function IssuedGrantsList(
   {
@@ -113,9 +107,9 @@ function IssuedGrantListItem(
               {grant.installationName}
             </span>
 
-            <Badge tone={STATUS_TONE[grant.status]}>
-              {grant.status}
-            </Badge>
+            <StatusBadge
+              statusKey={sharingGrantStatusKey(grant.status)}
+            />
           </div>
 
           <span className="text-xs text-[var(--text-secondary)]">

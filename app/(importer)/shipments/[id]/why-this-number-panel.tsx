@@ -5,8 +5,14 @@ import {
 } from "react";
 
 import {
-  Badge,
-} from "../../../../components/ui/badge";
+  StatusBadge,
+} from "../../../../components/ui/status-badge";
+
+import {
+  valueStatusKey,
+  calculationStatusKey,
+  methodologyKey,
+} from "../../../../src/domain/status-vocabulary";
 
 import {
   Button,
@@ -40,14 +46,6 @@ import {
   checkCalculationCurrency,
 } from "../../../../src/domain/emissions/check-calculation-currency";
 
-const VALUE_STATUS_TONE = {
-  AVAILABLE: "success" as const,
-  REFERENCE_REQUIRED: "warning" as const,
-  UNAVAILABLE: "neutral" as const,
-  NOT_APPLICABLE: "neutral" as const,
-  SOURCE_TEXT: "neutral" as const,
-};
-
 function ValuePill(
   {
     label,
@@ -68,9 +66,7 @@ function ValuePill(
           {value.value}
         </span>
       ) : (
-        <Badge tone={VALUE_STATUS_TONE[value.status]}>
-          {value.status.replace(/_/g, " ")}
-        </Badge>
+        <StatusBadge statusKey={valueStatusKey(value.status)} />
       )}
     </div>
   );
@@ -336,7 +332,7 @@ function ReproducibilityCheck(
           This line has been reclassified since this result was
           calculated -- recomputing it from the line&apos;s current
           classification no longer produces a value at all (engine
-          status: {result.recomputedStatus}), so there is nothing to
+          status: <StatusBadge statusKey={calculationStatusKey(result.recomputedStatus)} />), so there is nothing to
           compare against the stored result. This is not a mismatch or
           an error: calculation results are never edited or deleted, so
           this one still reflects exactly what was calculated at the
@@ -528,7 +524,7 @@ export function WhyThisNumberPanel(
             </div>
 
             <p className="text-[11px] text-[var(--text-tertiary)]">
-              Methodology {actualSnapshot.methodology.replace(/_/g, " ")} ·{" "}
+              Methodology <StatusBadge statusKey={methodologyKey(actualSnapshot.methodology)} /> ·{" "}
               {actualSnapshot.sharing_grant_id !== null
                 ? "via a shared installation"
                 : "from your organization's own data"}

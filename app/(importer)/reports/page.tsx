@@ -13,6 +13,14 @@ import {
 } from "../../../components/ui/badge";
 
 import {
+  StatusBadge,
+} from "../../../components/ui/status-badge";
+
+import {
+  incompleteLineReasonKey,
+} from "../../../src/domain/status-vocabulary";
+
+import {
   PeriodPicker,
 } from "../../../components/reporting/period-picker";
 
@@ -137,7 +145,6 @@ export default async function ReportsPage(
       breadcrumbs={[
         { label: "Reports" },
       ]}
-      activeNavLabel="Reports"
     >
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <div className="flex max-w-2xl flex-col gap-1">
@@ -467,11 +474,9 @@ function IncompleteLinesCard(
                     </td>
 
                     <td className="px-4 py-2">
-                      <Badge tone="warning">
-                        {line.reason === "NO_DETERMINATION"
-                          ? "Not determined"
-                          : "Not calculated"}
-                      </Badge>
+                      <StatusBadge
+                        statusKey={incompleteLineReasonKey(line.reason)}
+                      />
                     </td>
                   </tr>
                 ),

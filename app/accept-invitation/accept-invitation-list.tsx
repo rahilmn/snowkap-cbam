@@ -24,6 +24,14 @@ import {
   formatDate,
 } from "../../lib/utils";
 
+import {
+  StatusBadge,
+} from "../../components/ui/status-badge";
+
+import {
+  roleKey,
+} from "../../src/domain/status-vocabulary";
+
 export interface AcceptableInvitation {
   invitationId: string;
   organizationName: string;
@@ -78,7 +86,7 @@ function AcceptInvitationItem(
           </span>
 
           <span className="text-sm text-[var(--text-secondary)]">
-            Invited as {invitation.role}
+            Invited as <StatusBadge statusKey={roleKey(invitation.role)} />
           </span>
 
           <span className="text-xs text-[var(--text-tertiary)]">

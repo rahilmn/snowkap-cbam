@@ -9,8 +9,8 @@ import {
 } from "../../../../components/ui/card";
 
 import {
-  Badge,
-} from "../../../../components/ui/badge";
+  StatusBadge,
+} from "../../../../components/ui/status-badge";
 
 import {
   getServerSupabaseClient,
@@ -61,12 +61,9 @@ import {
   TransitionActions,
 } from "./transition-actions";
 
-const STATUS_BADGE_TONE = {
-  DRAFT: "neutral" as const,
-  READY: "brand" as const,
-  LOCKED: "success" as const,
-  VOID: "danger" as const,
-};
+import {
+  shipmentStatusKey,
+} from "../../../../src/domain/status-vocabulary";
 
 export default async function ShipmentDetailPage(
   {
@@ -187,7 +184,6 @@ export default async function ShipmentDetailPage(
         { label: "Shipments", href: "/shipments" },
         { label: shipment.reference },
       ]}
-      activeNavLabel="Shipments"
     >
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -195,11 +191,9 @@ export default async function ShipmentDetailPage(
             {shipment.reference}
           </h1>
 
-          <Badge
-            tone={STATUS_BADGE_TONE[shipment.status]}
-          >
-            {shipment.status}
-          </Badge>
+          <StatusBadge
+            statusKey={shipmentStatusKey(shipment.status)}
+          />
         </div>
 
         <TransitionActions

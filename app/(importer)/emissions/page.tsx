@@ -15,6 +15,14 @@ import {
 } from "../../../components/ui/badge";
 
 import {
+  StatusBadge,
+} from "../../../components/ui/status-badge";
+
+import {
+  methodologyKey,
+} from "../../../src/domain/status-vocabulary";
+
+import {
   getServerSupabaseClient,
 } from "../../../src/infrastructure/supabase/server-client";
 
@@ -44,15 +52,6 @@ const PROVENANCE_TONE = {
   OWN: "neutral" as const,
   SHARED: "brand" as const,
 };
-
-function formatMethodology(
-  methodology: string,
-): string {
-  return methodology.replace(
-    /_/g,
-    " ",
-  );
-}
 
 export default async function EmissionsPage() {
   const supabase =
@@ -106,7 +105,6 @@ export default async function EmissionsPage() {
       breadcrumbs={[
         { label: "Emissions" },
       ]}
-      activeNavLabel="Emissions"
     >
       <div className="mb-4">
         <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
@@ -242,9 +240,7 @@ function DeterminedLinesTable(
                 </td>
 
                 <td className="px-4 py-2.5 text-[var(--text-secondary)]">
-                  {formatMethodology(
-                    line.methodology,
-                  )}
+                  <StatusBadge statusKey={methodologyKey(line.methodology)} />
                 </td>
 
                 <td className="px-4 py-2.5">
@@ -375,9 +371,7 @@ function SharedInDataTable(
                 </td>
 
                 <td className="px-4 py-2.5 text-[var(--text-secondary)]">
-                  {formatMethodology(
-                    option.methodology,
-                  )}
+                  <StatusBadge statusKey={methodologyKey(option.methodology)} />
                 </td>
 
                 <td className="px-4 py-2.5 tabular-nums text-[var(--text-secondary)]">

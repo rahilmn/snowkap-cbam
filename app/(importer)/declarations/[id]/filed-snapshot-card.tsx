@@ -3,12 +3,44 @@ import {
 } from "../../../../components/ui/badge";
 
 import {
+  StatusBadge,
+} from "../../../../components/ui/status-badge";
+
+import {
   Card,
 } from "../../../../components/ui/card";
 
 import {
   formatTimestamp,
 } from "../../../../lib/utils";
+
+import {
+  shipmentStatusKey,
+} from "../../../../src/domain/status-vocabulary";
+
+import type {
+  ShipmentStatus,
+} from "../../../../src/domain/shipments/types";
+
+const KNOWN_SHIPMENT_STATUSES: readonly ShipmentStatus[] =
+  ["DRAFT", "READY", "LOCKED", "VOID"];
+
+/**
+ * filed_snapshot is authored in SQL and read entirely defensively (see
+ * this file's own doc comment below) -- status_at_filing is typed as a
+ * raw string, not ShipmentStatus, so an archived snapshot predating a
+ * future status change can never fail to render. This guard is what
+ * lets a KNOWN value still go through the vocabulary's StatusBadge
+ * instead of raw text, without asserting an unchecked cast for values
+ * that turn out not to match.
+ */
+function asShipmentStatus(
+  value: string,
+): ShipmentStatus | null {
+  return (KNOWN_SHIPMENT_STATUSES as readonly string[]).includes(value)
+    ? (value as ShipmentStatus)
+    : null;
+}
 
 interface FiledSnapshotTotals {
   shipment_count: number;
@@ -244,14 +276,22 @@ export function FiledSnapshotCard(
 
               <tbody className="divide-y divide-[var(--border-default)]">
                 {shipmentRows.map(
-                  (row) => (
+                  (row) => {
+                    const status =
+                      asShipmentStatus(row.status_at_filing);
+
+                    return (
                     <tr key={row.shipment_id}>
                       <td className="px-2 py-1.5 text-[var(--text-primary)]">
                         {row.reference}
                       </td>
 
                       <td className="px-2 py-1.5 text-[var(--text-secondary)]">
-                        {row.status_at_filing}
+                        {status ? (
+                          <StatusBadge statusKey={shipmentStatusKey(status)} />
+                        ) : (
+                          row.status_at_filing
+                        )}
                       </td>
 
                       <td className="px-2 py-1.5 tabular-nums text-[var(--text-secondary)]">
@@ -262,7 +302,8 @@ export function FiledSnapshotCard(
                         {row.embedded_emissions_tco2e}
                       </td>
                     </tr>
-                  ),
+                    );
+                  },
                 )}
               </tbody>
             </table>

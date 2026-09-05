@@ -11,10 +11,6 @@ import {
 } from "../../../components/ui/card";
 
 import {
-  Badge,
-} from "../../../components/ui/badge";
-
-import {
   getServerSupabaseClient,
 } from "../../../src/infrastructure/supabase/server-client";
 
@@ -42,23 +38,17 @@ import {
   formatTimestamp,
 } from "../../../lib/utils";
 
-import type {
-  DeclarationStatus,
-} from "../../../src/domain/declarations/types";
-
 import {
   StartDeclarationForm,
 } from "./start-declaration-form";
 
-const STATUS_BADGE_TONE: Record<
-  DeclarationStatus,
-  "neutral" | "brand" | "success" | "warning" | "danger"
-> = {
-  DRAFT: "neutral",
-  READY: "brand",
-  FILED_RECORDED: "success",
-  VOID: "danger",
-};
+import {
+  StatusBadge,
+} from "../../../components/ui/status-badge";
+
+import {
+  declarationStatusKey,
+} from "../../../src/domain/status-vocabulary";
 
 /**
  * Master plan §27 screen 22 ("Declaration preparation" -- ADMIN+). Gated
@@ -94,7 +84,6 @@ export default async function DeclarationsPage() {
         breadcrumbs={[
           { label: "Declarations" },
         ]}
-        activeNavLabel="Declarations"
       >
         <h1 className="mb-4 text-2xl font-semibold text-[var(--text-primary)]">
           Declarations
@@ -122,7 +111,6 @@ export default async function DeclarationsPage() {
       breadcrumbs={[
         { label: "Declarations" },
       ]}
-      activeNavLabel="Declarations"
     >
       <div className="mb-4 flex max-w-3xl flex-col gap-1">
         <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
@@ -189,9 +177,9 @@ export default async function DeclarationsPage() {
                       </td>
 
                       <td className="px-4 py-2.5">
-                        <Badge tone={STATUS_BADGE_TONE[declaration.status]}>
-                          {declaration.status.replace(/_/g, " ")}
-                        </Badge>
+                        <StatusBadge
+                          statusKey={declarationStatusKey(declaration.status)}
+                        />
                       </td>
 
                       <td className="px-4 py-2.5 text-[var(--text-secondary)]">

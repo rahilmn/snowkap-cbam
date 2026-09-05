@@ -36,6 +36,14 @@ import {
   Badge,
 } from "../../components/ui/badge";
 
+import {
+  StatusBadge,
+} from "../../components/ui/status-badge";
+
+import {
+  roleKey,
+} from "../../src/domain/status-vocabulary";
+
 import type {
   InvitationDisplayState,
 } from "../../src/domain/organizations/invitation-state";
@@ -112,7 +120,7 @@ function PendingInvitationItem(
           <span className="text-[var(--text-primary)]">
             {invitation.email}
             <span className="ml-2 text-[var(--text-tertiary)]">
-              {invitation.role}
+              <StatusBadge statusKey={roleKey(invitation.role)} />
             </span>
           </span>
 

@@ -10,6 +10,14 @@ import {
 } from "../../../../components/ui/badge";
 
 import {
+  StatusBadge,
+} from "../../../../components/ui/status-badge";
+
+import {
+  resolutionReasonKey,
+} from "../../../../src/domain/status-vocabulary";
+
+import {
   ConfirmSubmitButton,
 } from "../../../../components/ui/confirm-submit-button";
 
@@ -48,19 +56,6 @@ import type {
 import type {
   ResolveEmissionsActionState,
 } from "./resolve-emissions-action-state";
-
-const REASON_TONE: Record<string, "success" | "warning" | "danger" | "neutral"> = {
-  EXACT_TARIC_MATCH: "success",
-  EXACT_CN8_MATCH: "success",
-  EXACT_HS6_MATCH: "success",
-  EXACT_HS4_MATCH: "success",
-  OTHER_COUNTRIES_FALLBACK: "warning",
-  REFERENCE_REQUIRED: "warning",
-  UNAVAILABLE: "neutral",
-  NOT_APPLICABLE: "neutral",
-  AMBIGUOUS: "danger",
-  NO_MATCH: "danger",
-};
 
 /**
  * The DEFAULT-path button was previously labeled generic "Determine"/
@@ -204,9 +199,7 @@ export function EmissionsCell(
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2">
         {resolution ? (
-          <Badge tone={REASON_TONE[resolution.reason] ?? "neutral"}>
-            {resolution.reason.replace(/_/g, " ")}
-          </Badge>
+          <StatusBadge statusKey={resolutionReasonKey(resolution.reason)} />
         ) : actualSnapshot ? (
           <Badge tone="success">
             Actual data

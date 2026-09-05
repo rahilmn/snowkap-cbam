@@ -8,6 +8,10 @@ import {
   randomUUID,
 } from "node:crypto";
 
+import {
+  assertNoRawEnumsVisible,
+} from "./support/assert-no-raw-enums-visible";
+
 /**
  * P13: the third and final major E2E journey, cross-organization this
  * time -- grant -> consume -> revoke -> history-intact. Sibling of
@@ -389,7 +393,9 @@ test.describe(
                 producerPage.getByText(`Invited: ${importerEmail}`),
               ).toBeVisible();
 
-              await expect(producerPage.getByText("INVITED", { exact: true })).toBeVisible();
+              await expect(
+                producerPage.locator('[data-status-key="sharing_grant.INVITED"]'),
+              ).toBeVisible();
             },
           );
 
@@ -502,7 +508,7 @@ test.describe(
                 producerPage.getByRole("listitem").filter({ hasText: installationName });
 
               await expect(
-                grantItem.getByText("ACTIVE", { exact: true }),
+                grantItem.locator('[data-status-key="sharing_grant.ACTIVE"]'),
               ).toBeVisible();
 
               // granteeLabel on THIS screen is deliberately always
@@ -658,7 +664,7 @@ test.describe(
               await expect(revokeDialog).toBeHidden();
 
               await expect(
-                grantItem.getByText("ACTIVE", { exact: true }),
+                grantItem.locator('[data-status-key="sharing_grant.ACTIVE"]'),
               ).toBeVisible();
 
               await producerPage.getByRole(
@@ -675,7 +681,7 @@ test.describe(
               ).click();
 
               await expect(
-                grantItem.getByText("REVOKED", { exact: true }),
+                grantItem.locator('[data-status-key="sharing_grant.REVOKED"]'),
               ).toBeVisible();
 
               // canRevoke (issued-grants-list.tsx) is only true for
@@ -687,6 +693,9 @@ test.describe(
                   { name: `Revoke access for ${installationName}` },
                 ),
               ).toHaveCount(0);
+
+              // v2.1.1 §9.6 layer 3.
+              await assertNoRawEnumsVisible(producerPage);
             },
           );
 
@@ -762,7 +771,7 @@ test.describe(
               ).toBeVisible();
 
               await expect(
-                producerPage.getByText("REVOKED", { exact: true }),
+                producerPage.locator('[data-status-key="sharing_grant.REVOKED"]'),
               ).toBeVisible();
 
               // 2026-09-03 (P14). This assertion previously expected

@@ -3,6 +3,10 @@ import {
   expect,
 } from "./fixtures/authenticated-importer";
 
+import {
+  assertNoRawEnumsVisible,
+} from "./support/assert-no-raw-enums-visible";
+
 /**
  * The full importer journey (P13 follow-up work tracked in
  * tests/e2e/shell.spec.ts's own "full Playwright E2E coverage of the
@@ -141,7 +145,9 @@ test.describe(
               page.getByRole("heading", { name: shipmentReference }),
             ).toBeVisible();
 
-            await expect(page.getByText("DRAFT", { exact: true })).toBeVisible();
+            await expect(
+              page.locator('[data-status-key="shipment.DRAFT"]'),
+            ).toBeVisible();
           },
         );
 
@@ -179,7 +185,9 @@ test.describe(
           async () => {
             await page.getByRole("button", { name: "Resolve default value" }).click();
 
-            await expect(page.getByText("EXACT CN8 MATCH")).toBeVisible();
+            await expect(
+              page.locator('[data-status-key="resolution.EXACT_CN8_MATCH"]'),
+            ).toBeVisible();
           },
         );
 
@@ -215,6 +223,11 @@ test.describe(
             await page.getByRole("button", { name: "Check reproducibility" }).click();
 
             await expect(page.getByText(/^Reproducible/)).toBeVisible();
+
+            // v2.1.1 §9.6 layer 3: this screen renders shipment,
+            // resolution, and calculation status together -- a good
+            // checkpoint for the runtime sweep.
+            await assertNoRawEnumsVisible(page);
           },
         );
 
@@ -223,7 +236,9 @@ test.describe(
           async () => {
             await page.getByRole("button", { name: "Mark ready" }).click();
 
-            await expect(page.getByText("READY", { exact: true })).toBeVisible();
+            await expect(
+              page.locator('[data-status-key="shipment.READY"]'),
+            ).toBeVisible();
           },
         );
 
@@ -310,7 +325,9 @@ test.describe(
               { name: "Record filed (locks shipments)" },
             ).click();
 
-            await expect(page.getByText("FILED RECORDED")).toBeVisible();
+            await expect(
+              page.locator('[data-status-key="declaration.FILED_RECORDED"]'),
+            ).toBeVisible();
 
             await expect(
               page.getByText(`${EXPECTED_EMBEDDED_EMISSIONS_TCO2E} tCO2e`).first(),
@@ -323,11 +340,15 @@ test.describe(
           async () => {
             await page.goto(shipmentUrl);
 
-            await expect(page.getByText("LOCKED", { exact: true })).toBeVisible();
+            await expect(
+              page.locator('[data-status-key="shipment.LOCKED"]'),
+            ).toBeVisible();
 
             await expect(
               page.getByRole("heading", { name: "Add a line" }),
             ).toHaveCount(0);
+
+            await assertNoRawEnumsVisible(page);
           },
         );
 

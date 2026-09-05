@@ -23,6 +23,15 @@ import {
 } from "../../components/ui/badge";
 
 import {
+  StatusBadge,
+} from "../../components/ui/status-badge";
+
+import {
+  STATUS_LABEL,
+  roleKey,
+} from "../../src/domain/status-vocabulary";
+
+import {
   FieldError,
 } from "../../components/ui/field-error";
 
@@ -221,7 +230,7 @@ function TeamMemberListItem(
                       key={role}
                       value={role}
                     >
-                      {role}
+                      {STATUS_LABEL[roleKey(role)]}
                     </option>
                   ),
                 )}
@@ -306,7 +315,7 @@ function TeamMemberListItem(
           </div>
         ) : (
           <span className="shrink-0 text-sm text-[var(--text-secondary)]">
-            {member.role}
+            <StatusBadge statusKey={roleKey(member.role)} />
           </span>
         )}
       </div>

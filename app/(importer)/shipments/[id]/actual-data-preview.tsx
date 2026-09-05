@@ -11,6 +11,10 @@ import {
 } from "../../../../src/domain/status-vocabulary/review-badges";
 
 import {
+  methodologyKey,
+} from "../../../../src/domain/status-vocabulary";
+
+import {
   formatReportingPeriod,
 } from "../../../../src/domain/shared/reporting-period";
 
@@ -108,7 +112,7 @@ export function ActualDataPreview(
         </dt>
 
         <dd className="text-[var(--text-primary)]">
-          {option.methodology.replace(/_/g, " ")}
+          <StatusBadge statusKey={methodologyKey(option.methodology)} />
         </dd>
 
         <dt className="text-[var(--text-tertiary)]">

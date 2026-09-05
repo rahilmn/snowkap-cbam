@@ -15,8 +15,8 @@ import {
 } from "../../../components/ui/card";
 
 import {
-  Badge,
-} from "../../../components/ui/badge";
+  StatusBadge,
+} from "../../../components/ui/status-badge";
 
 import {
   Button,
@@ -42,19 +42,9 @@ import {
   formatReportingPeriod,
 } from "../../../src/domain/shared/reporting-period";
 
-import type {
-  ShipmentStatus,
-} from "../../../src/domain/shipments/types";
-
-const STATUS_BADGE_TONE: Record<
-  ShipmentStatus,
-  "neutral" | "brand" | "success" | "warning" | "danger"
-> = {
-  DRAFT: "neutral",
-  READY: "brand",
-  LOCKED: "success",
-  VOID: "danger",
-};
+import {
+  shipmentStatusKey,
+} from "../../../src/domain/status-vocabulary";
 
 export default async function ShipmentsPage() {
   const supabase =
@@ -83,7 +73,6 @@ export default async function ShipmentsPage() {
       breadcrumbs={[
         { label: "Shipments" },
       ]}
-      activeNavLabel="Shipments"
     >
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
@@ -157,11 +146,9 @@ export default async function ShipmentsPage() {
                       </td>
 
                       <td className="px-4 py-2.5">
-                        <Badge
-                          tone={STATUS_BADGE_TONE[shipment.status]}
-                        >
-                          {shipment.status}
-                        </Badge>
+                        <StatusBadge
+                          statusKey={shipmentStatusKey(shipment.status)}
+                        />
                       </td>
                     </tr>
                   ),

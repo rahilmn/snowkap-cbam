@@ -8,6 +8,10 @@ import {
   randomUUID,
 } from "node:crypto";
 
+import {
+  assertNoRawEnumsVisible,
+} from "./support/assert-no-raw-enums-visible";
+
 /**
  * The one journey no other spec can run: a producer's actual emissions
  * data taken all the way to VERIFIED and ACTIVE, shared, and then used
@@ -434,8 +438,11 @@ test.describe(
               ).click();
 
               await expect(
-                producerPage.getByText("ACTIVE", { exact: true }),
+                producerPage.locator('[data-status-key="emission_record.ACTIVE"]'),
               ).toBeVisible();
+
+              // v2.1.1 §9.6 layer 3.
+              await assertNoRawEnumsVisible(producerPage);
             },
           );
 
@@ -700,7 +707,7 @@ test.describe(
               ).click();
 
               await expect(
-                producerPage.getByText("REVOKED", { exact: true }),
+                producerPage.locator('[data-status-key="sharing_grant.REVOKED"]'),
               ).toBeVisible();
             },
           );
