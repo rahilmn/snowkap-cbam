@@ -89,6 +89,17 @@ const createOrganizationSchema =
           1,
           "Choose at least one.",
         ),
+
+    // Optional -- unlike capabilities, an org can create itself with no
+    // sectors declared yet and set them later (here, in settings, or
+    // via /onboarding/setup's own retry path). Mirrors that path's own
+    // setupSchema exactly: ELECTRICITY is a real CbamSector member but
+    // rejected here too, for the same reason (no default emission
+    // values are loaded for it in v1).
+    sectors:
+      z.array(
+        z.enum(["CEMENT", "FERTILISERS", "IRON_STEEL", "ALUMINIUM", "HYDROGEN"]),
+      ),
   });
 
 export async function createOrganizationAction(
@@ -119,6 +130,7 @@ export async function createOrganizationAction(
         name: formData.get("name"),
         slug: formData.get("slug"),
         capabilities: formData.getAll("capabilities"),
+        sectors: formData.getAll("sectors"),
       },
     );
 
@@ -230,16 +242,14 @@ export async function createOrganizationAction(
 
   // Idempotent upsert (org_id is organization_profiles' own primary
   // key) establishing the SME personalisation row for the org this
-  // action just created. No sectors are collected on this form yet
-  // (the three-section onboarding -- capabilities / sectors / details
-  // -- is not yet built; /onboarding/setup is where sectors are
-  // actually declared today), so this call's only job right now is to
-  // pin updated_by_user_id/updated_at honestly rather than leave the
-  // org without a profile row at all. Failure here is NOT fatal to
-  // org creation, which already committed -- redirect to "/" exactly
-  // as a clean success would, matching the plan's own "on failure,
-  // redirect to /" (a future guidance item, not built yet, is where
-  // the gap would be surfaced).
+  // action just created, with whatever sectors were selected on THIS
+  // form (SME plan v2.1.1, S1 -- previously always []; /onboarding/
+  // setup remains the retry/finish path for an org that skips this or
+  // whose write here failed). Failure here is NOT fatal to org
+  // creation, which already committed -- redirect to "/" exactly as a
+  // clean success would, matching the plan's own "on failure, redirect
+  // to /" (a future guidance item, not built yet, is where the gap
+  // would be surfaced).
   if (org) {
     const ownerContext =
       {
@@ -252,7 +262,7 @@ export async function createOrganizationAction(
     await upsertOrganizationSmeProfile(
       supabase,
       ownerContext,
-      [],
+      parsed.data.sectors,
     );
   }
 

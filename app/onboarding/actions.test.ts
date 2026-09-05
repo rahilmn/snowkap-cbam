@@ -382,6 +382,87 @@ describe(
             expect(upsertOrganizationSmeProfileMock).toHaveBeenCalledTimes(
               1,
             );
+
+            // Previously hardcoded to [] regardless of the form (SME
+            // plan v2.1.1, S1) -- validFormData() sets no sectors, so
+            // an empty array is still the correct call here.
+            expect(upsertOrganizationSmeProfileMock).toHaveBeenCalledWith(
+              expect.anything(),
+              expect.anything(),
+              [],
+            );
+          },
+        );
+
+        it(
+          "passes the form's selected sectors through to the SME profile upsert, not a hardcoded empty array",
+          async () => {
+            checkMock.mockReturnValueOnce(
+              { allowed: true, retryAfterMs: 0 },
+            );
+
+            getUserMock.mockResolvedValueOnce(
+              { data: { user: { id: "user-1" } } },
+            );
+
+            membershipQueryResults =
+              [
+                { data: [], error: null },
+              ];
+
+            rpcMock.mockResolvedValueOnce(
+              { data: { id: "org-1" }, error: null },
+            );
+
+            await expect(
+              createOrganizationAction(
+                { status: "idle" },
+                formData(
+                  {
+                    name: "Acme Imports",
+                    slug: "acme-imports",
+                    capabilities: ["IMPORTER_DECLARANT"],
+                    sectors: ["CEMENT", "ALUMINIUM"],
+                  },
+                ),
+              ),
+            ).rejects.toBe(
+              REDIRECT_SENTINEL,
+            );
+
+            expect(upsertOrganizationSmeProfileMock).toHaveBeenCalledWith(
+              expect.anything(),
+              expect.anything(),
+              ["CEMENT", "ALUMINIUM"],
+            );
+          },
+        );
+
+        it(
+          "rejects ELECTRICITY as a sector -- no default emission values are loaded for it in v1 (mirrors /onboarding/setup's own setupSchema)",
+          async () => {
+            checkMock.mockReturnValueOnce(
+              { allowed: true, retryAfterMs: 0 },
+            );
+
+            const result =
+              await createOrganizationAction(
+                { status: "idle" },
+                formData(
+                  {
+                    name: "Acme Imports",
+                    slug: "acme-imports",
+                    capabilities: ["IMPORTER_DECLARANT"],
+                    sectors: ["ELECTRICITY"],
+                  },
+                ),
+              );
+
+            expect(result.status).toBe(
+              "error",
+            );
+
+            expect(getServerSupabaseClientMock).not.toHaveBeenCalled();
           },
         );
 

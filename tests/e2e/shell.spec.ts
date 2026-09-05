@@ -1,7 +1,11 @@
 import {
+  test as base,
   expect,
-  test,
 } from "@playwright/test";
+
+import {
+  randomUUID,
+} from "node:crypto";
 
 // Matches the same skip discipline used throughout the vitest suites
 // (see tests/integration/module-load.test.ts): the health check needs
@@ -14,26 +18,161 @@ const hasSupabaseEnvironment =
       process.env.SUPABASE_SERVICE_ROLE_KEY,
   );
 
+/**
+ * 2026-09-05 (SME plan v2.1.1, S1). This whole file used to assert
+ * signed-OUT shell content at "/" -- which stopped existing once
+ * app/page.tsx started redirecting a genuinely signed-out visitor to
+ * /sign-in (closing the gap that redirect itself exists to close).
+ * Every test below is re-based onto a real, authenticated importer
+ * session instead of being deleted or left permanently fixme'd.
+ *
+ * One real sign-up -> onboarding flow (the same genuine UI interaction
+ * tests/e2e/fixtures/authenticated-importer.ts already does for the
+ * journey specs) runs ONCE PER WORKER via the `sharedImporterAuth`
+ * fixture below, not once per test -- this file only needs one
+ * authenticated importer org to exist, shared across every test that
+ * asserts shell chrome, not a fresh one per assertion. The resulting
+ * storage state is written to a per-worker file and wired back in as
+ * this file's own `storageState`, so every test's `page` fixture is
+ * already signed in by the time the test body runs.
+ */
+interface SharedImporterAuth {
+  storageStatePath: string;
+  organizationName: string;
+}
+
+const test =
+  base.extend<
+    {},
+    { sharedImporterAuth: SharedImporterAuth }
+  >(
+    {
+      sharedImporterAuth: [
+        async (
+          { browser },
+          use,
+          workerInfo,
+        ) => {
+          const context =
+            await browser.newContext();
+
+          const page =
+            await context.newPage();
+
+          const runId =
+            randomUUID().slice(
+              0,
+              8,
+            );
+
+          const email =
+            `e2e-shell-${runId}@example.com`;
+
+          const password =
+            "Password123!";
+
+          const organizationName =
+            `E2E Shell Org ${runId}`;
+
+          // --- Sign up (app/(auth)/sign-up/sign-up-form.tsx) ---
+
+          await page.goto(
+            "/sign-up",
+          );
+
+          await page.getByLabel(
+            "Email",
+            { exact: true },
+          ).fill(
+            email,
+          );
+
+          await page.getByLabel(
+            "Password",
+            { exact: true },
+          ).fill(
+            password,
+          );
+
+          await page.getByRole(
+            "button",
+            { name: "Create account" },
+          ).click();
+
+          // Local Supabase has enable_confirmations = false, so
+          // signUpAction gets a session immediately and redirects
+          // straight to /onboarding (no email click-through).
+          await expect(
+            page,
+          ).toHaveURL(
+            /\/onboarding$/,
+          );
+
+          // --- Onboarding (app/onboarding/onboarding-form.tsx) ---
+
+          await page.getByLabel(
+            "Organization name",
+          ).fill(
+            organizationName,
+          );
+
+          await page.getByRole(
+            "checkbox",
+            { name: /Importer \/ Declarant/ },
+          ).check();
+
+          await page.getByRole(
+            "button",
+            { name: "Create organization" },
+          ).click();
+
+          // createOrganizationAction redirects to "/" on success.
+          await expect(
+            page,
+          ).toHaveURL(
+            "/",
+          );
+
+          const storageStatePath =
+            `test-results/.auth/shell-importer-${workerInfo.workerIndex}.json`;
+
+          await context.storageState(
+            {
+              path: storageStatePath,
+            },
+          );
+
+          await context.close();
+
+          await use(
+            {
+              storageStatePath,
+              organizationName,
+            },
+          );
+        },
+        { scope: "worker" },
+      ],
+
+      storageState: async (
+        { sharedImporterAuth },
+        use,
+      ) => {
+        await use(
+          sharedImporterAuth.storageStatePath,
+        );
+      },
+    },
+  );
+
 test.describe(
   "application shell",
   () => {
     test(
       "home page renders the shell (topbar, breadcrumbs, main) on every viewport",
-      async ({ page }) => {
-        // 2026-09-05 (SME plan v2.1.1, S1). "/" now redirects a
-        // genuinely signed-out visitor to /sign-in (app/page.tsx),
-        // closing the exact gap this file's own former header comment
-        // named. This test (and the other six test.fixme()s in this
-        // file) asserted signed-OUT shell content at "/", which no
-        // longer exists to assert -- re-basing them onto a real
-        // authenticated session (the importer/producer E2E fixtures)
-        // is tracked, scoped follow-up work, not attempted here in the
-        // same change as the redirect itself.
-        test.fixme(
-          true,
-          "needs re-basing onto an authenticated session now that \"/\" redirects a signed-out visitor to /sign-in",
-        );
-
+      async (
+        { page, sharedImporterAuth },
+      ) => {
         // The primary nav is intentionally hidden below `md` (see the
         // dedicated "responsive" tests below) -- this test only asserts
         // the parts of the shell that are universal across viewports.
@@ -54,17 +193,21 @@ test.describe(
           ),
         ).toBeVisible();
 
+        // A signed-in user with an org sees their own organization's
+        // name as the page heading (app/page.tsx), not the generic
+        // "Snowkap CBAM" wordmark -- that literal only ever renders for
+        // a signed-in user with NO org yet, which this session is not.
         await expect(
           page.getByRole(
             "heading",
-            { name: "Snowkap CBAM" },
+            { name: sharedImporterAuth.organizationName },
           ),
         ).toBeVisible();
       },
     );
 
     test(
-      "all ten importer nav items are present in the primary sidebar (desktop)",
+      "all nine importer nav items are present in the primary sidebar (desktop)",
       async ({
         page,
         isMobile,
@@ -72,13 +215,6 @@ test.describe(
         test.skip(
           isMobile,
           "primary nav is hidden below md -- covered by the responsive tests",
-        );
-
-        // See the fixme comment on this file's first test -- same
-        // cause, same tracked follow-up.
-        test.fixme(
-          true,
-          "needs re-basing onto an authenticated session now that \"/\" redirects a signed-out visitor to /sign-in",
         );
 
         await page.goto(
@@ -92,31 +228,38 @@ test.describe(
           ),
         ).toBeVisible();
 
-        // All ten importer nav items are present (docs/plans/MASTER_PLAN.md §7;
-        // the tenth arrived with owner decision D2).
+        // All nine importer nav items are present (docs/plans/MASTER_PLAN.md §7;
+        // the ninth arrived with owner decision D2; Calculations was
+        // removed as a genuinely nonexistent placeholder -- SME plan
+        // v2.1.1, S1).
         // Items with a real route (components/shell/sidebar.tsx's
         // IMPORTER_NAV `href`) render as a <Link> (role "link");
         // not-yet-built items with no href render as a disabled
         // placeholder <button> (role "button") -- matching each item to
         // its actual rendered role here, rather than asserting "button"
         // for all of them, is what makes this test describe reality.
-        for (
-          const { label, role } of [
-            { label: "Dashboard", role: "link" as const },
-            { label: "Shipments", role: "link" as const },
-            { label: "Emissions", role: "link" as const },
-            { label: "Calculations", role: "button" as const },
-            { label: "Suppliers", role: "link" as const },
+        const importerNavItems: {
+          label: string;
+          role: "link" | "button";
+        }[] =
+          [
+            { label: "Dashboard", role: "link" },
+            { label: "Shipments", role: "link" },
+            { label: "Emissions", role: "link" },
+            { label: "Suppliers", role: "link" },
             // 2026-09-03 (owner decision D2): "Installations" was a
             // disabled placeholder because an importer genuinely had
             // nowhere to record the operators behind its imports. It
             // now has two real destinations, and they are links.
-            { label: "External operators", role: "link" as const },
-            { label: "External emissions", role: "link" as const },
-            { label: "Audit", role: "link" as const },
-            { label: "Reports", role: "link" as const },
-            { label: "Declarations", role: "link" as const },
-          ]
+            { label: "External operators", role: "link" },
+            { label: "External emissions", role: "link" },
+            { label: "Audit", role: "link" },
+            { label: "Reports", role: "link" },
+            { label: "Declarations", role: "link" },
+          ];
+
+        for (
+          const { label, role } of importerNavItems
         ) {
           // Disabled nav items carry an sr-only " (not available yet)"
           // suffix (components/shell/sidebar.tsx), so that IS their
@@ -168,7 +311,9 @@ test.describe(
         //    runs.
         //
         // So the useful assertion is the inverse one: the gate holds in
-        // the same kind of build we deploy.
+        // the same kind of build we deploy. Unaffected by this file's
+        // shared authenticated session -- the gate applies regardless of
+        // who is signed in.
         const response =
           await page.goto(
             "/design",
@@ -208,26 +353,15 @@ test.describe(
           },
         );
 
-        // 2026-09-05 (SME plan v2.1.1, S1). "/" now redirects a signed-
-        // out visitor straight to /sign-in (app/page.tsx), so this
-        // test's second navigation -- explicitly to /sign-in right
-        // after the first one already lands there via the redirect --
-        // reproducibly aborts (`net::ERR_ABORTED`), not a flake. Same
-        // tracked follow-up as this file's other fixme()s: once re-
-        // based onto an authenticated session, "/" stays on "/" and
-        // this two-route sweep is meaningful again as written.
-        test.fixme(
-          true,
-          "\"/\" now redirects to /sign-in for a signed-out visitor, so navigating there and then explicitly to /sign-in aborts -- needs re-basing onto an authenticated session",
-        );
-
+        // 2026-09-05 (SME plan v2.1.1, S1). Now that this session is
+        // authenticated, "/" no longer redirects -- both navigations
+        // below land on real, distinct pages (the dashboard, then the
+        // standalone sign-in card, which renders unconditionally
+        // regardless of session state; see app/(auth)/sign-in/page.tsx).
         await page.goto(
           "/",
         );
 
-        // Was "/design" -- that route is gated out of production builds
-        // now (MASTER_PLAN.md §26), so this sweep uses a real product
-        // route instead, which is a better subject for it anyway.
         await page.goto(
           "/sign-in",
         );
@@ -290,13 +424,6 @@ test.describe(
     test(
       "switches between light and dark and the choice persists across reload",
       async ({ page }) => {
-        // See the fixme comment on "application shell"'s first test --
-        // same cause, same tracked follow-up.
-        test.fixme(
-          true,
-          "needs re-basing onto an authenticated session now that \"/\" redirects a signed-out visitor to /sign-in",
-        );
-
         // Was "/design"; that route is gated out of production builds
         // now. "/" is the right substitute: the toggle lives in the
         // topbar (components/shell/topbar.tsx), which only AppShell
@@ -405,14 +532,9 @@ test.describe(
   () => {
     test(
       "mobile viewport hides the persistent sidebar/search/org-switcher and has no horizontal overflow",
-      async ({ page }) => {
-        // See the fixme comment on "application shell"'s first test --
-        // same cause, same tracked follow-up.
-        test.fixme(
-          true,
-          "needs re-basing onto an authenticated session now that \"/\" redirects a signed-out visitor to /sign-in",
-        );
-
+      async (
+        { page, sharedImporterAuth },
+      ) => {
         await page.setViewportSize(
           {
             width: 375,
@@ -435,6 +557,16 @@ test.describe(
           page.getByRole(
             "button",
             { name: "Search (coming soon)" },
+          ),
+        ).toBeHidden();
+
+        // The org-switcher lives in the topbar's desktop-only region
+        // (components/shell/topbar.tsx) -- hidden below `sm`, same as
+        // the primary nav below `md`.
+        await expect(
+          page.getByRole("banner").getByRole(
+            "button",
+            { name: sharedImporterAuth.organizationName },
           ),
         ).toBeHidden();
 
@@ -461,7 +593,7 @@ test.describe(
         await expect(
           page.getByRole(
             "heading",
-            { name: "Snowkap CBAM" },
+            { name: sharedImporterAuth.organizationName },
           ),
         ).toBeVisible();
       },
@@ -469,16 +601,9 @@ test.describe(
 
     test(
       "desktop viewport shows the sidebar",
-      async ({ page }) => {
-        // See the fixme comment on "application shell"'s first test --
-        // same cause, same tracked follow-up (which this test's own
-        // pre-existing comment below already named before the redirect
-        // existed).
-        test.fixme(
-          true,
-          "needs re-basing onto an authenticated session now that \"/\" redirects a signed-out visitor to /sign-in",
-        );
-
+      async (
+        { page, sharedImporterAuth },
+      ) => {
         await page.setViewportSize(
           {
             width: 1280,
@@ -497,24 +622,21 @@ test.describe(
           ),
         ).toBeVisible();
 
-        // The org-switcher renders only for a signed-in user with an
-        // organization (components/shell/topbar.tsx) -- this suite
-        // runs signed out, so it must be absent, not showing a stale
-        // placeholder name. The real, signed-in case is covered by
-        // tests/integration/organizations-isolation.test.ts (local
-        // Supabase) and was manually verified end-to-end (sign up ->
-        // onboard -> real org name in the topbar -> sign out -> sign
-        // back in) -- full Playwright E2E coverage of the auth flow
-        // itself, against local Supabase specifically, is tracked as
-        // follow-up work, not yet wired into this suite.
+        // 2026-09-05 (SME plan v2.1.1, S1). This test used to assert the
+        // org-switcher's ABSENCE, because the suite ran entirely signed
+        // out (components/shell/topbar.tsx only renders it for a
+        // signed-in user with a real org) -- that was a true fact about
+        // a signed-out visitor, not a statement that the org-switcher
+        // doesn't work. Now that this file runs against a real
+        // authenticated importer org, the meaningful assertion is the
+        // other direction: the switcher shows the REAL org name created
+        // moments ago by sharedImporterAuth, not a stale placeholder.
         await expect(
           page.getByRole("banner").getByRole(
             "button",
-            { name: /Acme|Importers/ },
+            { name: sharedImporterAuth.organizationName },
           ),
-        ).toHaveCount(
-          0,
-        );
+        ).toBeVisible();
       },
     );
   },
@@ -526,13 +648,6 @@ test.describe(
     test(
       "every nav item and the theme toggle is reachable and operable by keyboard",
       async ({ page }) => {
-        // See the fixme comment on "application shell"'s first test --
-        // same cause, same tracked follow-up.
-        test.fixme(
-          true,
-          "needs re-basing onto an authenticated session now that \"/\" redirects a signed-out visitor to /sign-in",
-        );
-
         await page.goto(
           "/",
         );
@@ -572,13 +687,6 @@ test.describe(
     test(
       "reduced motion is respected",
       async ({ page }) => {
-        // See the fixme comment on "application shell"'s first test --
-        // same cause, same tracked follow-up.
-        test.fixme(
-          true,
-          "needs re-basing onto an authenticated session now that \"/\" redirects a signed-out visitor to /sign-in",
-        );
-
         await page.emulateMedia(
           {
             reducedMotion: "reduce",

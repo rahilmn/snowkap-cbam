@@ -38,6 +38,25 @@ import {
   initialOnboardingActionState,
 } from "./action-state";
 
+import type {
+  CbamSector,
+} from "../../src/domain/organizations/types";
+
+// Mirrors app/onboarding/setup/setup-form.tsx's own SECTOR_OPTIONS --
+// ELECTRICITY is a real CbamSector member but is shown disabled here
+// too, for the same reason: no default emission values are loaded for
+// electricity yet (see that file's own doc comment, and
+// createOrganizationSchema's sectors field in ./actions.ts, which
+// rejects it the same way setupSchema does).
+const SECTOR_OPTIONS: { value: CbamSector; label: string }[] =
+  [
+    { value: "CEMENT", label: "Cement" },
+    { value: "FERTILISERS", label: "Fertilisers" },
+    { value: "IRON_STEEL", label: "Iron & steel" },
+    { value: "ALUMINIUM", label: "Aluminium" },
+    { value: "HYDROGEN", label: "Hydrogen" },
+  ];
+
 function slugify(
   value: string,
 ): string {
@@ -245,6 +264,60 @@ export function OnboardingForm() {
             );
           },
         )}
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-sm font-medium text-[var(--text-primary)]">
+          Which sectors do you work in?
+        </legend>
+
+        <p className="mb-1 text-xs text-[var(--text-tertiary)]">
+          Optional -- shapes suggestions on the goods picker, never a
+          requirement. You can set this later in settings.
+        </p>
+
+        {SECTOR_OPTIONS.map(
+          (option) => (
+            <label
+              key={option.value}
+              className="flex cursor-pointer items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-default)] p-3 transition-colors duration-150 hover:border-[var(--border-strong)]"
+            >
+              <input
+                type="checkbox"
+                name="sectors"
+                value={option.value}
+                className="size-4 accent-[var(--accent-interactive)]"
+              />
+
+              <span className="text-sm font-medium text-[var(--text-primary)]">
+                {option.label}
+              </span>
+            </label>
+          ),
+        )}
+
+        <div
+          className="flex cursor-not-allowed items-start gap-3 rounded-[var(--radius-md)] border border-[var(--border-default)] p-3 opacity-60"
+          title="Not supported in this release -- no default values are loaded for electricity"
+        >
+          <input
+            type="checkbox"
+            disabled
+            aria-disabled="true"
+            className="mt-0.5 size-4"
+          />
+
+          <span className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium text-[var(--text-primary)]">
+              Electricity
+            </span>
+
+            <span className="text-xs text-[var(--text-secondary)]">
+              Not supported in this release -- no default values are
+              loaded for electricity.
+            </span>
+          </span>
+        </div>
       </fieldset>
 
       <FieldError id="onboarding-form-error">
