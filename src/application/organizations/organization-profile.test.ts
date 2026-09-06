@@ -5,6 +5,7 @@ import {
 } from "vitest";
 
 import {
+  getOrganizationProfile,
   updateOrganizationProfile,
 } from "./organization-profile";
 
@@ -63,6 +64,95 @@ function mockSupabase(
       capturedPayload as { capabilities: string[] },
   };
 }
+
+function mockSelectSupabase(
+  result: { data: unknown; error: unknown },
+) {
+  return {
+    from: () => (
+      {
+        select: () => (
+          {
+            eq: () => (
+              {
+                maybeSingle: () =>
+                  Promise.resolve(
+                    result,
+                  ),
+              }
+            ),
+          }
+        ),
+      }
+    ),
+  } as never;
+}
+
+describe(
+  "getOrganizationProfile",
+  () => {
+    it(
+      "maps the row to an Organization",
+      async () => {
+        const result =
+          await getOrganizationProfile(
+            mockSelectSupabase(
+              {
+                data: {
+                  id: "org-1",
+                  name: "Acme",
+                  slug: "acme",
+                  capabilities: ["IMPORTER_DECLARANT"],
+                  eori_number: null,
+                  cbam_declarant_status: "NOT_REGISTERED",
+                  acts_as_indirect_representative: false,
+                  country_of_establishment: null,
+                  created_at: "2026-01-01T00:00:00Z",
+                },
+                error: null,
+              },
+            ),
+            "org-1" as never,
+          );
+
+        expect(result?.name).toBe(
+          "Acme",
+        );
+      },
+    );
+
+    it(
+      "returns null when the org doesn't exist (or isn't visible via RLS)",
+      async () => {
+        const result =
+          await getOrganizationProfile(
+            mockSelectSupabase(
+              { data: null, error: null },
+            ),
+            "org-1" as never,
+          );
+
+        expect(result).toBeNull();
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 5, finding S5R5-A): throws on a genuine query error, distinct from a null row with no error",
+      async () => {
+        await expect(
+          getOrganizationProfile(
+            mockSelectSupabase(
+              { data: null, error: { message: "connection terminated unexpectedly" } },
+            ),
+            "org-1" as never,
+          ),
+        ).rejects.toThrow(
+          "connection terminated unexpectedly",
+        );
+      },
+    );
+  },
+);
 
 describe(
   "updateOrganizationProfile",

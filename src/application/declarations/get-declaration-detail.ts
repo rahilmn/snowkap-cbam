@@ -168,7 +168,7 @@ const MEMBER_ID_BATCH_SIZE =
 async function fetchMemberShipments(
   supabase: SupabaseClient,
   memberIds: readonly string[],
-): Promise<ShipmentSummaryRow[] | null> {
+): Promise<ShipmentSummaryRow[]> {
   if (memberIds.length === 0) {
     return [];
   }
@@ -193,8 +193,18 @@ async function fetchMemberShipments(
         .select("id, reference, status")
         .in("id", batch);
 
+    // 2026-09-07 (S5 review round 5, finding S5R5-A). THROWS on a
+    // genuine query error rather than folding it into the same null
+    // the caller previously used for "fail closed, a declaration's own
+    // membership is the substance of the record" -- that fail-closed
+    // posture is right for the concept but the wrong TOOL: it made a
+    // real, existing declaration whose member-shipments fetch merely
+    // hit a transient failure indistinguishable from "doesn't exist,"
+    // silently redirecting a user away from a real compliance record.
     if (error || !data) {
-      return null;
+      throw new Error(
+        `declarations: member shipments fetch failed (${error?.message ?? "no rows"}).`,
+      );
     }
 
     rows.push(
@@ -340,7 +350,20 @@ export async function getDeclarationDetail(
       .eq("id", declarationId)
       .maybeSingle();
 
-  if (error || !row) {
+  // 2026-09-07 (S5 review round 5, finding S5R5-A). THROWS on a genuine
+  // query error -- distinct from `!row`, which stays a null return (a
+  // caller who supplied the wrong org, or an id that genuinely does
+  // not exist, should learn nothing about which case it was). A
+  // transport failure previously collapsed into the SAME null,
+  // silently redirecting a user away from a real, existing declaration
+  // as though it had vanished.
+  if (error) {
+    throw new Error(
+      `declarations: declaration fetch failed (${error.message}).`,
+    );
+  }
+
+  if (!row) {
     return null;
   }
 
@@ -387,13 +410,11 @@ export async function getDeclarationDetail(
       ],
     );
 
-  // Fail CLOSED. A declaration is a compliance record and its own
-  // membership is the substance of it -- a partial list is worse than
-  // no page at all, because it reads as complete.
-  if (memberShipmentRows === null) {
-    return null;
-  }
-
+  // 2026-09-07 (S5 review round 5, finding S5R5-A). fetchMemberShipments
+  // now throws on its own fetch error rather than returning null for
+  // this function to fold into an identical "not found" -- see its own
+  // doc comment. memberShipmentRows is therefore always a real
+  // (possibly empty) array here.
   const memberShipments: DeclarationMemberShipmentSummary[] =
     memberShipmentRows
       .map(

@@ -67,7 +67,21 @@ export async function getOrganizationProfile(
       )
       .maybeSingle();
 
-  if (error || !data) {
+  // 2026-09-07 (S5 review round 5, finding S5R5-A). THROWS on a genuine
+  // query error -- distinct from `!data`, which stays a null return
+  // (RLS-hidden and genuinely-nonexistent must remain indistinguishable
+  // from each other). The one caller (app/organization/page.tsx, no
+  // try/catch) previously redirected to / on ANY falsy result,
+  // silently bouncing a user away from their own org's settings screen
+  // on a transient transport failure, indistinguishable from the org
+  // itself having vanished.
+  if (error) {
+    throw new Error(
+      `organization-profile: organization fetch failed (${error.message}).`,
+    );
+  }
+
+  if (!data) {
     return null;
   }
 

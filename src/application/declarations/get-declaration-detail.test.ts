@@ -192,6 +192,25 @@ describe(
     );
 
     it(
+      "2026-09-07 (S5 review round 5, finding S5R5-A): throws on a genuine header-query error, distinct from a null row with no error",
+      async () => {
+        await expect(
+          getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: { data: null, error: { message: "connection terminated unexpectedly" } },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          ),
+        ).rejects.toThrow(
+          "connection terminated unexpectedly",
+        );
+      },
+    );
+
+    it(
       "returns null (not the row) when the declaration belongs to a different org -- audit-attribution guard",
       async () => {
         const result =
@@ -687,23 +706,26 @@ describe(
     );
 
     it(
-      "returns null, never a short member list, when a member batch fails (P14)",
+      "2026-09-07 (S5 review round 5, finding S5R5-A): throws, never a short/empty member list, when a member batch fails",
       async () => {
         /**
          * The defect this closes, and the more important half.
          *
-         * The query's `error` was never destructured and its result went
-         * through `?? []`. So a refused request produced an EMPTY member
-         * list, and a FILED_RECORDED declaration rendered "No member
-         * shipments yet." on its own provenance screen -- the one page
-         * whose entire job is to show what was filed.
+         * The query's `error` was originally never destructured and its
+         * result went through `?? []`. So a refused request produced an
+         * EMPTY member list, and a FILED_RECORDED declaration rendered
+         * "No member shipments yet." on its own provenance screen -- the
+         * one page whose entire job is to show what was filed.
          *
          * A partial or empty membership list is worse than no page,
-         * because it reads as complete. Failing closed is the only
-         * honest option for a compliance record.
+         * because it reads as complete. Throwing (P14's original "return
+         * null" was itself later found, round 5, to fold this into the
+         * SAME null a genuinely nonexistent/invisible declaration uses --
+         * silently redirecting a user away from a real compliance record)
+         * is the only honest option for a genuine infrastructure failure.
          */
-        const result =
-          await getDeclarationDetail(
+        await expect(
+          getDeclarationDetail(
             makeMockSupabase(
               {
                 declarations: [
@@ -719,9 +741,10 @@ describe(
             ),
             orgId as never,
             "decl-1" as never,
-          );
-
-        expect(result).toBeNull();
+          ),
+        ).rejects.toThrow(
+          "URI too long",
+        );
       },
     );
   },

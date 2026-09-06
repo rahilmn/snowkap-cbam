@@ -285,6 +285,26 @@ describe(
       },
     );
 
+    it(
+      "2026-09-07 (S5 review round 5, finding S5R5-A): throws on a genuine header-query error, distinct from a null shipmentRow with no error",
+      async () => {
+        await expect(
+          getShipmentDetail(
+            mockSupabase(
+              {
+                shipmentResult: { data: null, error: { message: "connection terminated unexpectedly" } },
+                linesResult: { data: [], error: null },
+              },
+            ),
+            "org-1" as never,
+            "ship-1" as never,
+          ),
+        ).rejects.toThrow(
+          "connection terminated unexpectedly",
+        );
+      },
+    );
+
     /**
      * 2026-09-03 (P14). shipments_select_own_org admits every org the
      * USER belongs to (app.user_org_ids()), which is not the same as the

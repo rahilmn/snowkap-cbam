@@ -40,7 +40,25 @@ export async function getShipmentDetail(
       .eq("id", shipmentId)
       .maybeSingle();
 
-  if (shipmentError || !shipmentRow) {
+  // 2026-09-07 (S5 review round 5, finding S5R5-A). THROWS on a genuine
+  // query error -- distinct from `!shipmentRow`, which stays a null
+  // return (see the doc comment just below on why not-found and
+  // not-visible must remain indistinguishable from each other). A
+  // transport failure previously collapsed into the SAME null as
+  // "doesn't exist," and the one caller (app/(importer)/shipments/
+  // [id]/page.tsx, no try/catch) silently redirected to /shipments as
+  // though a real, existing shipment the user was just looking at had
+  // vanished -- the identical failure round 4's own commit 10b7a1e
+  // already fixed for this function's OTHER query (the shipment_lines
+  // fetch, 40 lines below), whose own doc comment states the reasoning
+  // this now applies here too.
+  if (shipmentError) {
+    throw new Error(
+      `get-shipment-detail: shipment fetch failed (${shipmentError.message}).`,
+    );
+  }
+
+  if (!shipmentRow) {
     return null;
   }
 
