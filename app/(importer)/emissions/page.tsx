@@ -347,9 +347,12 @@ function SharedInDataTable(
             (option) => (
               <tr key={option.emission_data_id}>
                 <td className="px-4 py-2.5">
-                  <span className="font-medium text-[var(--text-primary)]">
+                  <Link
+                    href={`/emissions/shared/${option.emission_data_id}`}
+                    className="font-medium text-[var(--text-primary)] hover:underline"
+                  >
                     {option.installation_name}
-                  </span>
+                  </Link>
 
                   <span className="block text-xs text-[var(--text-tertiary)]">
                     {option.installation_country}
