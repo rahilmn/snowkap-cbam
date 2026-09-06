@@ -98,8 +98,22 @@ export async function getShipmentDetail(
         .order("line_number", { ascending: true })
         .range(offset, offset + LINE_PAGE_SIZE - 1);
 
+    // 2026-09-07 (S5 review round 4, finding S5R4-A-B2). THROWS on a
+    // genuine query error rather than degrading to null -- this is a
+    // DIFFERENT case from the shipment-header not-found/not-visible
+    // checks above, which are deliberately indistinguishable from each
+    // other for the same not-found-not-forbidden reason
+    // getDeclarationDetail uses. A lines-fetch infrastructure failure
+    // is neither: it made an existing, visible shipment appear
+    // not-found, silently redirecting the user to /shipments
+    // (page.tsx) as though the shipment they were just looking at had
+    // vanished, and -- per this function's own doc comment above --
+    // fed a truncated/absent line set straight into
+    // getShipmentEmissionsTotal's headline sum.
     if (linesError) {
-      return null;
+      throw new Error(
+        `get-shipment-detail: shipment_lines fetch failed (${linesError.message}).`,
+      );
     }
 
     const page =

@@ -124,8 +124,32 @@ export async function getLatestCalculationsByShipment(
         .order("id", { ascending: true })
         .range(offset, offset + CALCULATION_PAGE_SIZE - 1);
 
-    if (error || !data) {
-      return {};
+    // 2026-09-07 (S5 review round 4, finding S5R4-A-B2). THROWS on a
+    // genuine query error rather than degrading to {} -- a page other
+    // than the first failing previously discarded every row already
+    // collected from earlier successfully-fetched pages, and the
+    // return type gave the caller no way to distinguish "genuinely no
+    // calculations exist" from "the fetch failed." The one caller,
+    // app/(importer)/shipments/[id]/page.tsx, is a plain server
+    // component that already throws on an equivalent regulatory_
+    // datasets fetch error 20 lines below this call -- this now
+    // matches that established convention instead of contradicting it.
+    // An empty result here previously fed straight into
+    // getShipmentEmissionsTotal, which treats every line absent from
+    // the record as "never calculated," turning a genuine
+    // infrastructure failure into the S3 flagship prominent-total
+    // feature silently reading "not yet calculated" for a shipment
+    // that is, in reality, fully calculated.
+    if (error) {
+      throw new Error(
+        `get-latest-calculations: latest_calculation_results fetch failed (${error.message}).`,
+      );
+    }
+
+    if (!data) {
+      throw new Error(
+        "get-latest-calculations: latest_calculation_results fetch returned no data.",
+      );
     }
 
     rows.push(

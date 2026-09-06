@@ -116,37 +116,35 @@ describe(
   "getLatestCalculationsByShipment",
   () => {
     it(
-      "returns an empty object when the query errors -- an error case renders as 'not yet calculated', never a thrown error",
+      "2026-09-07 (S5 review round 4, finding S5R4-A-B2): throws on a query error rather than degrading to {} -- an error case must never render as 'not yet calculated' on the S3 flagship prominent-total feature",
       async () => {
-        const result =
-          await getLatestCalculationsByShipment(
+        await expect(
+          getLatestCalculationsByShipment(
             mockSupabase(
               { data: null, error: { message: "boom" } },
             ),
             "org-1" as never,
             "ship-1" as never,
-          );
-
-        expect(result).toEqual(
-          {},
+          ),
+        ).rejects.toThrow(
+          "boom",
         );
       },
     );
 
     it(
-      "returns an empty object when data is null even without an error",
+      "2026-09-07 (S5 review round 4, finding S5R4-A-B2): throws when data is null even without an error",
       async () => {
-        const result =
-          await getLatestCalculationsByShipment(
+        await expect(
+          getLatestCalculationsByShipment(
             mockSupabase(
               { data: null, error: null },
             ),
             "org-1" as never,
             "ship-1" as never,
-          );
-
-        expect(result).toEqual(
-          {},
+          ),
+        ).rejects.toThrow(
+          "no data",
         );
       },
     );
