@@ -73,6 +73,9 @@ describe.skipIf(!localSupabaseReachable)(
     let emissionDataId: string;
     let contextId: string;
     let precursorId: string;
+    let secondEmissionDataId: string | undefined;
+    let lockedEmissionDataId: string;
+    let lockedContextId: string;
 
     let clientA: SupabaseClient;
     let clientB: SupabaseClient;
@@ -284,28 +287,32 @@ describe.skipIf(!localSupabaseReachable)(
     });
 
     afterAll(async () => {
-      await serviceClient
-        .from("emission_data_precursors")
-        .delete()
-        .eq(
-          "emission_data_id",
-          emissionDataId,
-        );
-
-      await serviceClient
-        .from("emission_data_declaration_context")
-        .delete()
-        .eq(
-          "emission_data_id",
-          emissionDataId,
-        );
-
+      // emission_data FIRST, relying on ON DELETE CASCADE for the two
+      // dossier tables -- not the other way around. The "post-
+      // verification lock" tests below deliberately walk emissionDataId
+      // to ACTIVE+VERIFIED, at which point app.enforce_dossier_lock
+      // (20260906200000, S4 remediation, closes B2) permanently refuses
+      // direct UPDATE/DELETE on its declaration_context/precursor rows.
+      // Deleting the parent first works: by the time the FK cascade
+      // reaches the child rows, this same transaction has already
+      // removed the parent, so the trigger's own "parent no longer
+      // exists -- not a lock to enforce here" branch applies (see that
+      // function's comment). secondEmissionDataId (created only by the
+      // emission_data_id-immutability test below) never gained any
+      // dossier rows of its own, so a plain delete is enough for it.
+      // lockedEmissionDataId is the separate ACTIVE+VERIFIED fixture the
+      // lock tests create -- its own context/precursor rows are locked
+      // the same way, so it needs the same parent-first deletion order.
       await serviceClient
         .from("emission_data")
         .delete()
-        .eq(
+        .in(
           "id",
-          emissionDataId,
+          [
+            emissionDataId,
+            ...(secondEmissionDataId ? [secondEmissionDataId] : []),
+            ...(lockedEmissionDataId ? [lockedEmissionDataId] : []),
+          ],
         );
 
       await serviceClient
@@ -645,6 +652,354 @@ describe.skipIf(!localSupabaseReachable)(
         expect(data).toHaveLength(
           1,
         );
+      },
+    );
+
+    // ------------------------------------------------------------
+    // S4 remediation (20260906200000), Blocking Finding B1: every S4
+    // audit event (declaration_context.upserted, precursor.added,
+    // precursor.removed) was silently refused by audit_events_insert_
+    // own_org_as_self's own event_type allowlist -- a catalog separate
+    // from, and never widened alongside, the aggregate_type CHECK
+    // 20260906180000 did widen. Proven live: org A's own member,
+    // exactly as recordAuditEvent (src/application/audit/record-audit-
+    // event.ts) does it on the real client-side write path.
+    // ------------------------------------------------------------
+    it(
+      "org A's own member can record a declaration_context.upserted audit event -- the S4 event types are in the catalog",
+      async () => {
+        const { error } =
+          await clientA
+            .from("audit_events")
+            .insert(
+              {
+                org_id: orgAId,
+                actor_type: "USER",
+                actor_user_id: memberAId,
+                event_type: "declaration_context.upserted",
+                aggregate_type: "DECLARATION_CONTEXT",
+                aggregate_id: contextId,
+                payload: {},
+              },
+            );
+
+        expect(error).toBeNull();
+      },
+    );
+
+    it(
+      "org A's own member can record a precursor.added audit event",
+      async () => {
+        const { error } =
+          await clientA
+            .from("audit_events")
+            .insert(
+              {
+                org_id: orgAId,
+                actor_type: "USER",
+                actor_user_id: memberAId,
+                event_type: "precursor.added",
+                aggregate_type: "PRECURSOR",
+                aggregate_id: crypto.randomUUID(),
+                payload: {},
+              },
+            );
+
+        expect(error).toBeNull();
+      },
+    );
+
+    it(
+      "org A's own member can record a precursor.removed audit event",
+      async () => {
+        const { error } =
+          await clientA
+            .from("audit_events")
+            .insert(
+              {
+                org_id: orgAId,
+                actor_type: "USER",
+                actor_user_id: memberAId,
+                event_type: "precursor.removed",
+                aggregate_type: "PRECURSOR",
+                aggregate_id: crypto.randomUUID(),
+                payload: {},
+              },
+            );
+
+        expect(error).toBeNull();
+      },
+    );
+
+    // ------------------------------------------------------------
+    // S4 remediation (20260906200000), Blocking Finding B2: an ordinary
+    // member of the owning org could UPDATE a declared verifier-report
+    // claim or DELETE a declared precursor outright on a record that
+    // had genuinely walked to ACTIVE+VERIFIED -- the app-layer check
+    // (verifyEmissionDataEditable) is the only wall that existed;
+    // app.enforce_dossier_lock adds the second one, mirroring app.
+    // enforce_emission_data_lineage_lock's own durable-marker design one
+    // level down. Proven live, in this order, against the SAME
+    // emissionDataId/contextId used by the editable-state tests above --
+    // deliberately run last in this file so the lock this section
+    // applies does not interfere with any of the "still editable" cases
+    // above it.
+    // ------------------------------------------------------------
+    it(
+      "a producer cannot repoint an existing declaration context at a different emission_data row -- emission_data_id is immutable",
+      async () => {
+        const { data: secondRow, error: secondRowError } =
+          await serviceClient
+            .from("emission_data")
+            .insert(
+              {
+                installation_id: installationId,
+                entered_by_org_id: orgAId,
+                cn_scope: ["25231000"],
+                reporting_period_kind: "ANNUAL",
+                reporting_period_year: 2027,
+                direct_specific: "1.0",
+                indirect_specific: "0.5",
+                emission_unit: "tCO2e/t",
+                methodology: "EU_METHOD",
+                status: "DRAFT",
+                verification_status: "UNVERIFIED",
+                version: 1,
+              },
+            )
+            .select("id")
+            .single();
+
+        if (secondRowError || !secondRow) {
+          throw new Error(
+            `Failed to create second emission_data row: ${secondRowError?.message}`,
+          );
+        }
+
+        secondEmissionDataId = secondRow.id;
+
+        const { data, error } =
+          await clientA
+            .from("emission_data_declaration_context")
+            .update(
+              { emission_data_id: secondEmissionDataId },
+            )
+            .eq(
+              "id",
+              contextId,
+            )
+            .select(
+              "id",
+            );
+
+        expect(error).not.toBeNull();
+        expect(data).toBeNull();
+
+        const { data: unchanged } =
+          await serviceClient
+            .from("emission_data_declaration_context")
+            .select(
+              "emission_data_id",
+            )
+            .eq(
+              "id",
+              contextId,
+            )
+            .single();
+
+        expect(unchanged?.emission_data_id).toBe(
+          emissionDataId,
+        );
+      },
+    );
+
+    // The remaining lock tests use a SEPARATE, freshly-inserted
+    // emission_data row that is ACTIVE+VERIFIED from birth, rather than
+    // flipping emissionDataId's own status via UPDATE. An UPDATE-based
+    // transition would also cross app.enforce_emission_data_verification_
+    // gate's ADMIN-or-OWNER check (20260829480000) -- correct for a real
+    // client, but this suite signs in only plain MEMBERs, and the
+    // service-role client has no auth.uid() to satisfy it either. A
+    // direct INSERT with status/verification_status already set (the
+    // same shape dossier-context-shared-access.test.ts's own fixture
+    // uses) reaches the identical end state -- app.enforce_emission_
+    // data_lineage_lock stamps verified_active_at on INSERT too -- without
+    // exercising that unrelated gate at all.
+    it(
+      "once a record is ACTIVE and VERIFIED, its declaration context can no longer be edited by anyone in the owning org -- not just a stranger",
+      async () => {
+        const { data: lockedRow, error: lockedRowError } =
+          await serviceClient
+            .from("emission_data")
+            .insert(
+              {
+                installation_id: installationId,
+                entered_by_org_id: orgAId,
+                cn_scope: ["25231000"],
+                reporting_period_kind: "ANNUAL",
+                reporting_period_year: 2028,
+                direct_specific: "1.0",
+                indirect_specific: "0.5",
+                emission_unit: "tCO2e/t",
+                methodology: "EU_METHOD",
+                status: "ACTIVE",
+                verification_status: "VERIFIED",
+                verifier_user_id: memberAId,
+                version: 1,
+              },
+            )
+            .select("id")
+            .single();
+
+        if (lockedRowError || !lockedRow) {
+          throw new Error(
+            `Failed to create a locked emission_data row: ${lockedRowError?.message}`,
+          );
+        }
+
+        lockedEmissionDataId = lockedRow.id;
+
+        const { data: lockedContext, error: lockedContextError } =
+          await serviceClient
+            .from("emission_data_declaration_context")
+            .insert(
+              {
+                org_id: orgAId,
+                emission_data_id: lockedEmissionDataId,
+                production_process_description: "Kiln-fired at 900C, already verified",
+              },
+            )
+            .select("id")
+            .single();
+
+        if (lockedContextError || !lockedContext) {
+          throw new Error(
+            `Failed to create the locked row's declaration context: ${lockedContextError?.message}`,
+          );
+        }
+
+        lockedContextId = lockedContext.id;
+
+        const { data, error } =
+          await clientA
+            .from("emission_data_declaration_context")
+            .update(
+              { production_process_description: "Tampered after verification" },
+            )
+            .eq(
+              "id",
+              lockedContextId,
+            )
+            .select(
+              "id",
+            );
+
+        expect(error).not.toBeNull();
+        expect(data).toBeNull();
+
+        const { data: unchanged } =
+          await serviceClient
+            .from("emission_data_declaration_context")
+            .select(
+              "production_process_description",
+            )
+            .eq(
+              "id",
+              lockedContextId,
+            )
+            .single();
+
+        expect(unchanged?.production_process_description).toBe(
+          "Kiln-fired at 900C, already verified",
+        );
+      },
+    );
+
+    it(
+      "...and its declaration context can no longer be deleted either",
+      async () => {
+        const { data, error } =
+          await clientA
+            .from("emission_data_declaration_context")
+            .delete()
+            .eq(
+              "id",
+              lockedContextId,
+            )
+            .select(
+              "id",
+            );
+
+        expect(error).not.toBeNull();
+        expect(data).toBeNull();
+
+        const { data: stillThere } =
+          await serviceClient
+            .from("emission_data_declaration_context")
+            .select(
+              "id",
+            )
+            .eq(
+              "id",
+              lockedContextId,
+            )
+            .maybeSingle();
+
+        expect(stillThere).not.toBeNull();
+      },
+    );
+
+    it(
+      "...and a precursor declared against it can no longer be deleted, even one added after the lock took effect",
+      async () => {
+        const { data: newPrecursor, error: newPrecursorError } =
+          await serviceClient
+            .from("emission_data_precursors")
+            .insert(
+              {
+                org_id: orgAId,
+                emission_data_id: lockedEmissionDataId,
+                material_description: "Precursor added after verification, for the lock regression test",
+                provenance: "UNKNOWN",
+              },
+            )
+            .select("id")
+            .single();
+
+        if (newPrecursorError || !newPrecursor) {
+          throw new Error(
+            `Failed to create precursor for the lock test: ${newPrecursorError?.message}`,
+          );
+        }
+
+        const { data, error } =
+          await clientA
+            .from("emission_data_precursors")
+            .delete()
+            .eq(
+              "id",
+              newPrecursor.id,
+            )
+            .select(
+              "id",
+            );
+
+        expect(error).not.toBeNull();
+        expect(data).toBeNull();
+
+        const { data: stillThere } =
+          await serviceClient
+            .from("emission_data_precursors")
+            .select(
+              "id",
+            )
+            .eq(
+              "id",
+              newPrecursor.id,
+            )
+            .maybeSingle();
+
+        expect(stillThere).not.toBeNull();
       },
     );
   },

@@ -391,22 +391,19 @@ describe.skipIf(!localSupabaseReachable)(
           installationId,
         );
 
-      await serviceClient
-        .from("emission_data_precursors")
-        .delete()
-        .in(
-          "emission_data_id",
-          [activeVerifiedEmissionDataId, draftUnverifiedEmissionDataId],
-        );
-
-      await serviceClient
-        .from("emission_data_declaration_context")
-        .delete()
-        .in(
-          "emission_data_id",
-          [activeVerifiedEmissionDataId, draftUnverifiedEmissionDataId],
-        );
-
+      // emission_data FIRST, relying on ON DELETE CASCADE for the two
+      // dossier tables -- not the other way around. As of 20260906200000
+      // (S4 remediation, closes B2), activeVerifiedEmissionDataId's own
+      // declaration_context/precursor rows are permanently locked
+      // against direct UPDATE/DELETE (it is ACTIVE+VERIFIED from the
+      // moment it was inserted, per app.enforce_emission_data_lineage_
+      // lock's own INSERT-time stamp). Deleting the child rows directly,
+      // as this afterAll did before that migration existed, is refused
+      // by app.enforce_dossier_lock. Deleting the parent first works: by
+      // the time the FK cascade reaches the child rows, this same
+      // transaction has already removed the parent, so the trigger's own
+      // "parent no longer exists -- not a lock to enforce here" branch
+      // applies (see that function's comment).
       await serviceClient
         .from("emission_data")
         .delete()
