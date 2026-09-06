@@ -278,6 +278,59 @@ describe(
     );
 
     it(
+      "returns VALUE_UNAVAILABLE (never throws) for a legacy-shape DEFAULT determination frozen before `resolution` existed -- S5 review round 3, finding S5R3-A-B1, reproduced against three real rows in the local database ({\"method\":\"DEFAULT\",\"resolved_value_id\":null}, no `resolution` key at all)",
+      () => {
+        const legacyShapeDetermination =
+          {
+            method: "DEFAULT",
+            resolved_value_id: null,
+          } as unknown as EmissionDetermination;
+
+        const result =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10.5" as never,
+              quantity_mwh: null,
+              emission_determination: legacyShapeDetermination,
+            },
+          );
+
+        expect(result).toEqual(
+          {
+            status: "VALUE_UNAVAILABLE",
+            engine_version: ENGINE_VERSION,
+          },
+        );
+      },
+    );
+
+    it(
+      "returns VALUE_UNAVAILABLE (never throws) for a legacy-shape ACTUAL determination that carries no `snapshot` key -- S5R3-A-B1, prophylactic: no such row exists today, but the same unchecked-jsonb-cast gap applies symmetrically to the ACTUAL branch",
+      () => {
+        const legacyShapeDetermination =
+          {
+            method: "ACTUAL",
+          } as unknown as EmissionDetermination;
+
+        const result =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10.5" as never,
+              quantity_mwh: null,
+              emission_determination: legacyShapeDetermination,
+            },
+          );
+
+        expect(result).toEqual(
+          {
+            status: "VALUE_UNAVAILABLE",
+            engine_version: ENGINE_VERSION,
+          },
+        );
+      },
+    );
+
+    it(
       "computes embedded emissions for a mass good from an ACTUAL determination (RULE-EE-009: quantity x (direct_specific + indirect_specific))",
       () => {
         const result =

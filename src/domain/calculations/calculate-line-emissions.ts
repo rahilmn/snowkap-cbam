@@ -233,6 +233,33 @@ function calculateFromDefaultDetermination(
   quantity: DecimalString,
   netMassTonnes: DecimalString | null,
 ): LineEmissionsCalculation {
+  // 2026-09-07 (S5 review round 3, finding S5R3-A-B1). `resolution` is
+  // typed as required on the DEFAULT branch of EmissionDetermination,
+  // but -- exactly as determinationDatasetIsCurrent's own comment
+  // documents for the same field
+  // (src/domain/emissions/determination-dataset-currency.ts) -- that
+  // promise is a compile-time fiction for a row frozen before this
+  // field existed: EmissionDetermination round-trips through
+  // shipment_lines.emission_determination jsonb (no CHECK constraint)
+  // and back through an unchecked cast. Live-reproduced against three
+  // real rows in the local database that carry
+  // {"method":"DEFAULT","resolved_value_id":null} with no `resolution`
+  // key at all: calling this engine against any of them previously
+  // threw "Cannot destructure property 'values' of 'undefined'" --
+  // an unhandled exception out of the pure calculation engine itself,
+  // from the primary Calculate/Recalculate Server Action, for exactly
+  // the kind of state this file's own CalculationStatus contract
+  // (src/domain/calculations/types.ts) says must come back as a named
+  // outcome, never a thrown error. VALUE_UNAVAILABLE is the same
+  // status this function already returns for a resolved-but-not-
+  // AVAILABLE total -- an unresolved legacy shape belongs in the same
+  // bucket, not a crash.
+  if (!resolution?.values?.total) {
+    return noValueResult(
+      "VALUE_UNAVAILABLE",
+    );
+  }
+
   const { total } =
     resolution.values;
 
@@ -315,6 +342,21 @@ function calculateFromActualDetermination(
   netMassTonnes: DecimalString | null,
   goodSector: string | null,
 ): LineEmissionsCalculation {
+  // 2026-09-07 (S5 review round 3, finding S5R3-A-B1, prophylactic --
+  // no legacy-shape ACTUAL row exists in the local database today, but
+  // the same "compile-time-only" gap the DEFAULT branch just closed
+  // above applies symmetrically here: `snapshot` is typed as required
+  // on the ACTUAL branch of EmissionDetermination, and that promise is
+  // equally a compile-time fiction for the same unchecked-jsonb-cast
+  // reason. Guarding here rather than waiting for a real row to prove
+  // it, since the failure mode (an unhandled exception from a pure
+  // engine) is identical either way.
+  if (!snapshot?.verification) {
+    return noValueResult(
+      "VALUE_UNAVAILABLE",
+    );
+  }
+
   if (snapshot.verification.status !== "VERIFIED") {
     return noValueResult(
       "VALUE_UNAVAILABLE",
