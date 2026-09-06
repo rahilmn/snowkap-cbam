@@ -276,9 +276,37 @@ function DeterminedLinesTable(
                 </td>
 
                 <td className="px-4 py-2.5">
+                  {/*
+                    2026-09-07 (S5 review round 3, finding S5R3-VOCAB-B3).
+                    checkActualSnapshotStaleness's own doc comment is
+                    explicit that it "fails toward the quieter result"
+                    when currentEmissionData is null -- CURRENT there
+                    means "no evidence of staleness found," not "provably
+                    current." For a SHARED row whose grant has since been
+                    revoked or expired, currentEmissionData is null
+                    because this org can no longer see the producer's
+                    installation at all (checkActualDeterminationStaleness
+                    only admits ACTIVE, unexpired grants) -- not because
+                    the frozen figure was actually re-verified as current.
+                    Rendering the plain green "Current" badge there
+                    asserted a fact this screen has no basis for, right
+                    next to "Access since revoked" two cells to the left
+                    on the SAME row -- the screen was contradicting
+                    itself. A STALE result stays unambiguous either way:
+                    it can only ever be reached while currentEmissionData
+                    is non-null, i.e. while access is still live.
+                  */}
                   {line.staleness === "STALE" ? (
                     <Badge tone="warning">
                       Stale — newer data available
+                    </Badge>
+                  ) : line.sharing_grant_status === "REVOKED" ? (
+                    <Badge tone="neutral">
+                      Can't verify — access revoked
+                    </Badge>
+                  ) : line.sharing_grant_status === "EXPIRED" ? (
+                    <Badge tone="neutral">
+                      Can't verify — access expired
                     </Badge>
                   ) : (
                     <Badge tone="success">
