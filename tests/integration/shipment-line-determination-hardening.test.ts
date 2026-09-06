@@ -228,6 +228,15 @@ function actualDeterminationFrom(
       dataset_reporting_period: { kind: "ANNUAL", year: 2026 },
       emission_unit: record.emission_unit,
       values: { direct_specific: record.direct_specific, indirect_specific: record.indirect_specific },
+      // 2026-09-06 (S5 cross-phase hardening). Same reasoning as
+      // record_provenance/dataset_reporting_period above: the snapshot
+      // claims a declaration context and precursor list, and the
+      // validator now checks both against the record's own live
+      // emission_data_declaration_context/emission_data_precursors rows
+      // -- none of this suite's seeded records has either, so the
+      // genuine, matching claim is null/[].
+      declaration_context: null,
+      precursors: [],
     },
   };
 }
@@ -1693,6 +1702,77 @@ describe.skipIf(!localSupabaseReachable)(
             .method,
         ).toBe(
           "ACTUAL",
+        );
+      },
+    );
+
+    it(
+      "S5 cross-phase hardening (20260906220000): rejects an otherwise-genuine ACTUAL snapshot whose declaration_context claims a verifier report exists when the real source record has none -- an importer forging a producer's own declared claim onto their own line",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const forged =
+          actualDeterminationFrom(
+            realEmissionData,
+            sharingGrantId,
+          ) as { snapshot: Record<string, unknown> };
+
+        forged.snapshot.declaration_context =
+          {
+            production_process_description: "Kiln-fired",
+            uses_purchased_precursors: false,
+            verifier_report_declared: true,
+            verifier_report_description: "FORGED: TUV Rheinland accredited verifier report 2026",
+          };
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: forged },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
+        );
+      },
+    );
+
+    it(
+      "S5 cross-phase hardening (20260906220000): rejects an otherwise-genuine ACTUAL snapshot missing the declaration_context/precursors keys entirely -- presence is required for new writes, matching record_provenance/dataset_reporting_period's own posture",
+      async () => {
+        const lineId =
+          await insertLine();
+
+        const incomplete =
+          actualDeterminationFrom(
+            realEmissionData,
+            sharingGrantId,
+          ) as { snapshot: Record<string, unknown> };
+
+        delete incomplete.snapshot.declaration_context;
+        delete incomplete.snapshot.precursors;
+
+        const { error } =
+          await clientMember
+            .from("shipment_lines")
+            .update(
+              { emission_determination: incomplete },
+            )
+            .eq(
+              "id",
+              lineId,
+            );
+
+        expect(error).not.toBeNull();
+        expect(error?.code).toBe(
+          "42501",
         );
       },
     );
