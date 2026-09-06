@@ -924,7 +924,7 @@ describe(
     );
 
     it(
-      "does not report OK when RLS silently filters the metadata DELETE to zero rows -- and never touches storage, closing the S5R5-AUTHZ-Y2 race by construction",
+      "reports EMISSION_DATA_VERIFIED for a zero-rows metadata DELETE only once a follow-up read confirms the row still exists -- and never touches storage, closing the S5R5-AUTHZ-Y2 race by construction",
       async () => {
         // 2026-08-31 (P13 final round). PostgREST returns NO error for a
         // DELETE that RLS filters to zero rows, so `deleteError` was
@@ -940,14 +940,15 @@ describe(
         // manage-membership.ts:236-243 already carries the fix pattern
         // (.select("id") + zero-rows guard) for exactly this hazard.
         //
-        // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y2). Now
-        // that the metadata delete runs BEFORE storage, this exact
-        // zero-rows outcome is reported as EMISSION_DATA_VERIFIED
-        // (the array update just above already ruled out every other
-        // realistic cause) rather than the generic PERSIST_FAILED it
-        // used to fall through to -- and storage is never even reached,
-        // so there is no longer a way for this scenario to strand a
-        // deleted object behind a surviving row, or vice versa.
+        // 2026-09-07 (S5 review round 6, finding S5R6-AUTHZ-1). The
+        // array update succeeding does NOT, by itself, rule out every
+        // other cause of a zero-rows delete (remove_evidence_file_id is
+        // a plain idempotent no-op on a second call) -- so this branch
+        // now takes one more read to confirm the row is genuinely still
+        // there (proving the VERIFIED cause) before reporting
+        // EMISSION_DATA_VERIFIED, rather than assuming it unconditionally
+        // the way the S5R5-AUTHZ-Y2 fix did. See the next test for the
+        // sibling case where that follow-up read finds nothing.
         const recorder =
           makeRecorder();
 
@@ -959,6 +960,10 @@ describe(
                   { data: evidenceFileRow, error: null },
                   // The DELETE: no error, and no rows.
                   { data: [], error: null },
+                  // The disambiguation follow-up read: the row is
+                  // still there -- the DELETE was genuinely blocked,
+                  // not racing a second removal.
+                  { data: evidenceFileRow, error: null },
                 ],
                 emission_data: [
                   { data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1"] }, error: null },
@@ -973,6 +978,54 @@ describe(
 
         expect(result).toEqual(
           { status: "REJECTED", reason: "EMISSION_DATA_VERIFIED" },
+        );
+
+        expect(recorder.storageOps).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 6, finding S5R6-AUTHZ-1): reports NOT_FOUND, never the false EMISSION_DATA_VERIFIED claim, when a zero-rows metadata DELETE turns out to mean a concurrent duplicate removal already deleted the row -- not a VERIFIED lock",
+      async () => {
+        // Live-reproduced (real psql, two callers racing the full real
+        // statement sequence): the loser of a genuine concurrent
+        // double-removal gets this exact zero-rows signature while
+        // verification_status stays UNVERIFIED throughout. Reporting
+        // EMISSION_DATA_VERIFIED here -- as the S5R5-AUTHZ-Y2 fix did
+        // unconditionally -- would tell the user their perfectly fine
+        // DRAFT+UNVERIFIED record is locked and prompt them toward an
+        // irreversible DISCARD it never needed.
+        const recorder =
+          makeRecorder();
+
+        const result =
+          await removeEvidenceFile(
+            makeMockSupabase(
+              {
+                evidence_files: [
+                  { data: evidenceFileRow, error: null },
+                  // The DELETE: no error, and no rows -- a second,
+                  // independent removal already won the race.
+                  { data: [], error: null },
+                  // The disambiguation follow-up read: the row is
+                  // genuinely gone.
+                  { data: null, error: null },
+                ],
+                emission_data: [
+                  { data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1"] }, error: null },
+                ],
+              },
+              {},
+              recorder,
+            ),
+            memberContext(),
+            "evidence-file-1" as never,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "NOT_FOUND" },
         );
 
         expect(recorder.storageOps).toEqual(

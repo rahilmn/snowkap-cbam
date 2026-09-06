@@ -551,13 +551,25 @@ export type RemoveEvidenceFileResult =
  * for the storage delete that follows to leave dangling. A zero-rows
  * metadata delete (the same PostgREST-reports-no-error-on-an-RLS-
  * filtered-DELETE hazard manage-membership.ts:236-243 already guards
- * against) is now reported as EMISSION_DATA_VERIFIED rather than the
- * generic PERSIST_FAILED it used to fall through to: given the array
- * update above just succeeded, the only realistic way evidence_files_
- * delete_own_org's own `verification_status <> 'VERIFIED'` clause
- * filters this DELETE to zero rows moments later is a concurrent
- * VERIFY committing in that narrow window -- the same treatment the
- * array update's own error already gets, for the identical reason.
+ * against) is genuinely ambiguous, not uniquely explained by a
+ * concurrent VERIFY: remove_evidence_file_id is a plain idempotent
+ * array_remove UPDATE, so the array update above succeeding rules out
+ * nothing about whether a SECOND, independent removeEvidenceFile call
+ * for the same evidenceFileId already deleted the row moments earlier
+ * (two org members, or two tabs of the same admin, racing the same
+ * evidence row -- this function's several sequential round-trips leave
+ * a real window for that). 2026-09-07 (S5 review round 6, finding
+ * S5R6-AUTHZ-1, live-reproduced): the original S5R5-AUTHZ-Y2 fix
+ * assumed the array update's success ruled this out and reported every
+ * zero-rows outcome as EMISSION_DATA_VERIFIED unconditionally; a race
+ * loser's verification_status was confirmed UNVERIFIED throughout. Now
+ * disambiguated with one more read (evidence_files_select_own_org
+ * carries no verification_status clause, so it still finds the row iff
+ * it still exists): EMISSION_DATA_VERIFIED only when the row is
+ * confirmed still present, NOT_FOUND when it's confirmed gone, and the
+ * generic PERSIST_FAILED -- the sibling pattern this code originally
+ * cited as its origin (manage-membership.ts:236-243) -- when that
+ * follow-up read itself fails and the cause genuinely can't be known.
  *
  * The storage delete that follows a successful metadata delete is
  * best-effort: by that point the record no longer cites this file at
@@ -700,9 +712,59 @@ export async function removeEvidenceFile(
   }
 
   if (!deleted || deleted.length === 0) {
+    // 2026-09-07 (S5 review round 6, finding S5R6-AUTHZ-1). A zero-rows
+    // metadata delete is genuinely ambiguous, and this branch used to
+    // pick the wrong cause unconditionally: either (a) a concurrent
+    // VERIFY made evidence_files_delete_own_org's own
+    // `verification_status <> 'VERIFIED'` clause filter this DELETE, or
+    // (b) the row was already deleted by a second, independent
+    // removeEvidenceFile call whose own DELETE won the race -- two org
+    // members, or two tabs of the same admin, both clicking Remove on
+    // the same evidence row within the same short window (this function
+    // makes several sequential round-trips before its own delete, so
+    // both callers can pass every earlier check before either deletes).
+    // remove_evidence_file_id is a plain idempotent array_remove UPDATE,
+    // so the array-update succeeding just above rules out nothing about
+    // which of these two caused THIS specific zero-rows result -- the
+    // premise the original S5R5-AUTHZ-Y2 fix relied on. Live-
+    // reproduced (real psql, two callers racing the full real statement
+    // sequence): the loser's verification_status was confirmed
+    // UNVERIFIED throughout, yet this branch would have told them
+    // otherwise.
+    //
+    // Disambiguate with one more read: evidence_files_select_own_org
+    // (unlike the DELETE policy) carries no verification_status clause
+    // at all, so it still finds the row if -- and only if -- it still
+    // exists. A row that's gone means a concurrent removal won the
+    // race, not a VERIFIED lock -- NOT_FOUND is both true and matches
+    // the exact reason this function already returns for "no such
+    // evidence file" everywhere else. Only a row that's still there
+    // (SELECT succeeds, DELETE didn't) proves the VERIFIED cause. A
+    // genuine error on this follow-up read means the cause is unknown,
+    // so it falls back to the same generic, non-accusatory
+    // PERSIST_FAILED the sibling pattern this code cites as its origin
+    // (manage-membership.ts:236-243) deliberately stays with for an
+    // indistinguishable zero-rows cause.
+    const stillPresent =
+      await fetchOwnedEvidenceFile(
+        supabase,
+        orgId,
+        evidenceFileId,
+      );
+
+    if (stillPresent.status === "OK") {
+      return {
+        status: "REJECTED",
+        reason: "EMISSION_DATA_VERIFIED",
+      };
+    }
+
     return {
       status: "REJECTED",
-      reason: "EMISSION_DATA_VERIFIED",
+      reason:
+        stillPresent.reason === "NOT_FOUND"
+          ? "NOT_FOUND"
+          : "PERSIST_FAILED",
     };
   }
 
