@@ -36,6 +36,12 @@ import {
 } from "./evidence-section";
 
 import {
+  DeclarationContextSection,
+  type DeclarationContextListItem,
+  type PrecursorListItem,
+} from "./declaration-context-section";
+
+import {
   StatusBadge,
 } from "../../../components/ui/status-badge";
 
@@ -85,6 +91,8 @@ export interface EmissionDataListItem {
   evidenceComplete: boolean;
   missingEvidenceFields: string[];
   evidenceFiles: EvidenceFileListItem[];
+  declarationContext: DeclarationContextListItem | null;
+  precursors: PrecursorListItem[];
 }
 
 /**
@@ -249,6 +257,20 @@ function EmissionDataRow(
       <EvidenceSection
         emissionDataId={record.id}
         files={record.evidenceFiles}
+      />
+
+      {/*
+        Unlike EvidenceSection (attachable at any lifecycle stage), the
+        edit forms inside this section render only while the record is
+        still DRAFT -- v2.1.1 §11's "pre-publication editability,
+        post-verification locking" -- see declaration-context-section.tsx's
+        own doc comment.
+      */}
+      <DeclarationContextSection
+        emissionDataId={record.id}
+        editable={record.status === "DRAFT"}
+        context={record.declarationContext}
+        precursors={record.precursors}
       />
     </li>
   );

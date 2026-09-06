@@ -43,6 +43,14 @@ import {
 } from "../../../src/domain/emissions/snapshot-completeness";
 
 import {
+  getDeclarationContext,
+} from "../../../src/application/emissions/manage-declaration-context";
+
+import {
+  listPrecursors,
+} from "../../../src/application/emissions/manage-precursors";
+
+import {
   formatReportingPeriod,
 } from "../../../src/domain/shared/reporting-period";
 
@@ -121,6 +129,54 @@ export default async function EmissionDataPage() {
     );
   }
 
+  // S4 (v2.1.1 §9): the dossier context + precursor materials
+  // declared for each record. Fetched per record (not a single batch
+  // query) matching this codebase's own established sequential-queries
+  // convention for a small, per-page-load record count -- see e.g.
+  // page.tsx's own per-line default-reference fetch in the importer's
+  // shipment detail page.
+  const [declarationContexts, precursorLists] =
+    await Promise.all(
+      [
+        Promise.all(
+          records.map(
+            (record) => (
+              getDeclarationContext(
+                supabase,
+                orgSummary.context.org_id,
+                record.id,
+              )
+            ),
+          ),
+        ),
+        Promise.all(
+          records.map(
+            (record) => (
+              listPrecursors(
+                supabase,
+                orgSummary.context.org_id,
+                record.id,
+              )
+            ),
+          ),
+        ),
+      ],
+    );
+
+  const declarationContextByEmissionDataId =
+    new Map(
+      records.map(
+        (record, index) => [record.id, declarationContexts[index]] as const,
+      ),
+    );
+
+  const precursorsByEmissionDataId =
+    new Map(
+      records.map(
+        (record, index) => [record.id, precursorLists[index]] as const,
+      ),
+    );
+
   return (
     <AppShell
       experience="producer"
@@ -179,6 +235,9 @@ export default async function EmissionDataPage() {
                 const installation =
                   installationById.get(record.installation_id);
 
+                const declarationContext =
+                  declarationContextByEmissionDataId.get(record.id) ?? null;
+
                 return {
                   id: record.id,
                   installationName: installation?.name ?? "Unknown installation",
@@ -207,6 +266,29 @@ export default async function EmissionDataPage() {
                         sizeBytes: file.size_bytes,
                         mimeType: file.mime_type,
                         createdAt: file.created_at,
+                      }
+                    ),
+                  ),
+                  declarationContext: declarationContext
+                    ? {
+                        productionProcessDescription: declarationContext.production_process_description,
+                        usesPurchasedPrecursors: declarationContext.uses_purchased_precursors,
+                        verifierReportDeclared: declarationContext.verifier_report_declared,
+                        verifierReportDescription: declarationContext.verifier_report_description,
+                      }
+                    : null,
+                  precursors: (precursorsByEmissionDataId.get(record.id) ?? []).map(
+                    (precursor) => (
+                      {
+                        id: precursor.id,
+                        materialDescription: precursor.material_description,
+                        cnCode: precursor.cn_code,
+                        sourceDescription: precursor.source_description,
+                        directSpecific: precursor.direct_specific,
+                        indirectSpecific: precursor.indirect_specific,
+                        emissionUnit: precursor.emission_unit,
+                        provenance: precursor.provenance,
+                        verifierReportDescription: precursor.verifier_report_description,
                       }
                     ),
                   ),

@@ -32,6 +32,19 @@ import {
 } from "../../../src/application/evidence/upload-evidence";
 
 import {
+  upsertDeclarationContext,
+} from "../../../src/application/emissions/manage-declaration-context";
+
+import {
+  addPrecursor,
+  removePrecursor,
+} from "../../../src/application/emissions/manage-precursors";
+
+import type {
+  PrecursorProvenance,
+} from "../../../src/domain/emissions/declaration-context-types";
+
+import {
   EVIDENCE_INCOMPLETE_NOTICE,
 } from "../../../src/domain/status-vocabulary/owner-sentences";
 
@@ -717,6 +730,377 @@ export async function rejectEmissionDataAction(
     return {
       status: "error",
       message: transitionMessageFor(result.reason),
+    };
+  }
+
+  revalidatePath(
+    "/emission-data",
+  );
+
+  return {
+    status: "idle",
+  };
+}
+
+// ------------------------------------------------------------
+// S4 (producer/trust/sharing), v2.1.1: dossier context + precursors.
+// Same 30/10min ordinary-MEMBER-mutation rate as the transitions/
+// evidence-removal actions above -- editing declared context is the
+// same consequence class, not a compliance decision like verify/
+// reject.
+// ------------------------------------------------------------
+
+const DECLARATION_CONTEXT_RATE_LIMIT: RateLimitConfig =
+  {
+    limit: 30,
+    windowMs: 10 * 60 * 1000,
+  };
+
+const upsertDeclarationContextLimiter =
+  createInMemoryRateLimiter(
+    DECLARATION_CONTEXT_RATE_LIMIT,
+  );
+
+const addPrecursorLimiter =
+  createInMemoryRateLimiter(
+    DECLARATION_CONTEXT_RATE_LIMIT,
+  );
+
+const removePrecursorLimiter =
+  createInMemoryRateLimiter(
+    DECLARATION_CONTEXT_RATE_LIMIT,
+  );
+
+function declarationContextMessageFor(
+  reason: string,
+): string {
+  switch (reason) {
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM producer/operator or importer/declarant.";
+
+    case "RECORD_NOT_FOUND":
+      return "That record could not be found.";
+
+    case "RECORD_NOT_DRAFT":
+      return "This record's context is locked -- it can only be edited while the record is still a draft.";
+
+    case "VERIFIER_REPORT_DESCRIPTION_WITHOUT_DECLARATION":
+      return "Declare that a verifier report exists before describing it.";
+
+    default:
+      return "Something went wrong. Please try again.";
+  }
+}
+
+const upsertDeclarationContextSchema =
+  z.object({
+    emissionDataId:
+      z.string().min(1),
+
+    productionProcessDescription:
+      z.string().optional(),
+
+    usesPurchasedPrecursors:
+      z.string().optional(),
+
+    verifierReportDeclared:
+      z.string().optional(),
+
+    verifierReportDescription:
+      z.string().optional(),
+  });
+
+export async function upsertDeclarationContextAction(
+  _previousState: EmissionDataScreenActionState,
+  formData: FormData,
+): Promise<EmissionDataScreenActionState> {
+  const rateLimitResult =
+    upsertDeclarationContextLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
+  const parsed =
+    upsertDeclarationContextSchema.safeParse(
+      {
+        emissionDataId: formData.get("emissionDataId"),
+        productionProcessDescription: formData.get("productionProcessDescription") ?? undefined,
+        usesPurchasedPrecursors: formData.get("usesPurchasedPrecursors") ?? undefined,
+        verifierReportDeclared: formData.get("verifierReportDeclared") ?? undefined,
+        verifierReportDescription: formData.get("verifierReportDescription") ?? undefined,
+      },
+    );
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Invalid request.",
+    };
+  }
+
+  const setup =
+    await requireOrgAndUser();
+
+  if (setup.status === "error") {
+    return setup;
+  }
+
+  const verifierReportDeclared =
+    parsed.data.verifierReportDeclared === "true";
+
+  const rawDescription =
+    parsed.data.verifierReportDescription?.trim();
+
+  const result =
+    await upsertDeclarationContext(
+      setup.supabase,
+      setup.orgSummary.context,
+      {
+        emissionDataId: parsed.data.emissionDataId as never,
+        productionProcessDescription:
+          parsed.data.productionProcessDescription?.trim() || null,
+        usesPurchasedPrecursors:
+          parsed.data.usesPurchasedPrecursors === "true",
+        verifierReportDeclared,
+        // A description typed and then left after un-checking the
+        // declaration checkbox is dropped, never silently persisted
+        // against a false flag (upsertDeclarationContext would reject
+        // that combination outright, but this avoids relying on the
+        // rejection path for what is really a form UX nicety).
+        verifierReportDescription:
+          verifierReportDeclared && rawDescription ? rawDescription : null,
+      },
+    );
+
+  if (result.status === "REJECTED") {
+    return {
+      status: "error",
+      message: declarationContextMessageFor(result.reason),
+    };
+  }
+
+  revalidatePath(
+    "/emission-data",
+  );
+
+  return {
+    status: "idle",
+  };
+}
+
+function precursorMessageFor(
+  reason: string,
+): string {
+  switch (reason) {
+    case "CAPABILITY_NOT_HELD":
+      return "Your organization is not set up as a CBAM producer/operator or importer/declarant.";
+
+    case "RECORD_NOT_FOUND":
+    case "PRECURSOR_NOT_FOUND":
+      return "That could not be found.";
+
+    case "RECORD_NOT_DRAFT":
+      return "This record's precursors are locked -- they can only be edited while the record is still a draft.";
+
+    case "EMPTY_MATERIAL_DESCRIPTION":
+      return "Describe the precursor material.";
+
+    case "INVALID_DIRECT_SPECIFIC":
+      return "Enter a valid direct specific emissions figure, or leave it blank.";
+
+    case "INVALID_INDIRECT_SPECIFIC":
+      return "Enter a valid indirect specific emissions figure, or leave it blank.";
+
+    case "VERIFIER_REPORT_DESCRIPTION_WITHOUT_DECLARED_REPORT":
+      return "Select \"Actual value, verifier report declared\" before describing the report.";
+
+    default:
+      return "Something went wrong. Please try again.";
+  }
+}
+
+const PRECURSOR_PROVENANCE_VALUES =
+  ["ACTUAL_WITH_DECLARED_REPORT", "ACTUAL_NO_DECLARED_REPORT", "UNKNOWN"] as const;
+
+const addPrecursorSchema =
+  z.object({
+    emissionDataId:
+      z.string().min(1),
+
+    materialDescription:
+      z.string().min(1, "Describe the precursor material."),
+
+    cnCode:
+      z.string().optional(),
+
+    sourceDescription:
+      z.string().optional(),
+
+    directSpecific:
+      z.string().optional(),
+
+    indirectSpecific:
+      z.string().optional(),
+
+    emissionUnit:
+      z.string().optional(),
+
+    provenance:
+      z.enum(PRECURSOR_PROVENANCE_VALUES),
+
+    verifierReportDescription:
+      z.string().optional(),
+  });
+
+export async function addPrecursorAction(
+  _previousState: EmissionDataScreenActionState,
+  formData: FormData,
+): Promise<EmissionDataScreenActionState> {
+  const rateLimitResult =
+    addPrecursorLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
+  const parsed =
+    addPrecursorSchema.safeParse(
+      {
+        emissionDataId: formData.get("emissionDataId"),
+        materialDescription: formData.get("materialDescription"),
+        cnCode: formData.get("cnCode") ?? undefined,
+        sourceDescription: formData.get("sourceDescription") ?? undefined,
+        directSpecific: formData.get("directSpecific") ?? undefined,
+        indirectSpecific: formData.get("indirectSpecific") ?? undefined,
+        emissionUnit: formData.get("emissionUnit") ?? undefined,
+        provenance: formData.get("provenance"),
+        verifierReportDescription: formData.get("verifierReportDescription") ?? undefined,
+      },
+    );
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message:
+        parsed.error.issues[0]?.message ??
+        "Invalid request.",
+    };
+  }
+
+  const setup =
+    await requireOrgAndUser();
+
+  if (setup.status === "error") {
+    return setup;
+  }
+
+  const provenance: PrecursorProvenance =
+    parsed.data.provenance;
+
+  const rawDescription =
+    parsed.data.verifierReportDescription?.trim();
+
+  const result =
+    await addPrecursor(
+      setup.supabase,
+      setup.orgSummary.context,
+      {
+        emissionDataId: parsed.data.emissionDataId as never,
+        materialDescription: parsed.data.materialDescription.trim(),
+        cnCode: parsed.data.cnCode?.trim() || null,
+        sourceDescription: parsed.data.sourceDescription?.trim() || null,
+        directSpecific: parsed.data.directSpecific?.trim() || null,
+        indirectSpecific: parsed.data.indirectSpecific?.trim() || null,
+        emissionUnit: parsed.data.emissionUnit?.trim() || null,
+        provenance,
+        verifierReportDescription:
+          provenance === "ACTUAL_WITH_DECLARED_REPORT" && rawDescription
+            ? rawDescription
+            : null,
+      },
+    );
+
+  if (result.status === "REJECTED") {
+    return {
+      status: "error",
+      message: precursorMessageFor(result.reason),
+    };
+  }
+
+  revalidatePath(
+    "/emission-data",
+  );
+
+  return {
+    status: "idle",
+  };
+}
+
+const removePrecursorSchema =
+  z.object({
+    precursorId:
+      z.string().min(1),
+  });
+
+export async function removePrecursorAction(
+  _previousState: EmissionDataScreenActionState,
+  formData: FormData,
+): Promise<EmissionDataScreenActionState> {
+  const rateLimitResult =
+    removePrecursorLimiter.check(
+      await getClientIp(),
+      Date.now(),
+    );
+
+  if (!rateLimitResult.allowed) {
+    return rateLimitedState(
+      rateLimitResult.retryAfterMs,
+    );
+  }
+
+  const parsed =
+    removePrecursorSchema.safeParse(
+      {
+        precursorId: formData.get("precursorId"),
+      },
+    );
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Invalid request.",
+    };
+  }
+
+  const setup =
+    await requireOrgAndUser();
+
+  if (setup.status === "error") {
+    return setup;
+  }
+
+  const result =
+    await removePrecursor(
+      setup.supabase,
+      setup.orgSummary.context,
+      parsed.data.precursorId as never,
+    );
+
+  if (result.status === "REJECTED") {
+    return {
+      status: "error",
+      message: precursorMessageFor(result.reason),
     };
   }
 

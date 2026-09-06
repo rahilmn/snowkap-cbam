@@ -43,6 +43,14 @@ import {
 } from "../../../src/domain/emissions/snapshot-completeness";
 
 import {
+  getDeclarationContext,
+} from "../../../src/application/emissions/manage-declaration-context";
+
+import {
+  listPrecursors,
+} from "../../../src/application/emissions/manage-precursors";
+
+import {
   formatReportingPeriod,
 } from "../../../src/domain/shared/reporting-period";
 
@@ -148,6 +156,51 @@ export default async function ExternalEmissionsPage() {
     );
   }
 
+  // S4 (v2.1.1 §9): same per-record dossier fetch as the producer's
+  // own emission-data page.tsx -- this route renders the identical
+  // EmissionDataList component, so it needs the identical data shape.
+  const [declarationContexts, precursorLists] =
+    await Promise.all(
+      [
+        Promise.all(
+          records.map(
+            (record) => (
+              getDeclarationContext(
+                supabase,
+                orgSummary.context.org_id,
+                record.id,
+              )
+            ),
+          ),
+        ),
+        Promise.all(
+          records.map(
+            (record) => (
+              listPrecursors(
+                supabase,
+                orgSummary.context.org_id,
+                record.id,
+              )
+            ),
+          ),
+        ),
+      ],
+    );
+
+  const declarationContextByEmissionDataId =
+    new Map(
+      records.map(
+        (record, index) => [record.id, declarationContexts[index]] as const,
+      ),
+    );
+
+  const precursorsByEmissionDataId =
+    new Map(
+      records.map(
+        (record, index) => [record.id, precursorLists[index]] as const,
+      ),
+    );
+
   return (
     <AppShell
       experience="importer"
@@ -223,6 +276,9 @@ export default async function ExternalEmissionsPage() {
                 const installation =
                   installationById.get(record.installation_id);
 
+                const declarationContext =
+                  declarationContextByEmissionDataId.get(record.id) ?? null;
+
                 return {
                   id: record.id,
                   installationName: installation?.name ?? "Unknown installation",
@@ -251,6 +307,29 @@ export default async function ExternalEmissionsPage() {
                         sizeBytes: file.size_bytes,
                         mimeType: file.mime_type,
                         createdAt: file.created_at,
+                      }
+                    ),
+                  ),
+                  declarationContext: declarationContext
+                    ? {
+                        productionProcessDescription: declarationContext.production_process_description,
+                        usesPurchasedPrecursors: declarationContext.uses_purchased_precursors,
+                        verifierReportDeclared: declarationContext.verifier_report_declared,
+                        verifierReportDescription: declarationContext.verifier_report_description,
+                      }
+                    : null,
+                  precursors: (precursorsByEmissionDataId.get(record.id) ?? []).map(
+                    (precursor) => (
+                      {
+                        id: precursor.id,
+                        materialDescription: precursor.material_description,
+                        cnCode: precursor.cn_code,
+                        sourceDescription: precursor.source_description,
+                        directSpecific: precursor.direct_specific,
+                        indirectSpecific: precursor.indirect_specific,
+                        emissionUnit: precursor.emission_unit,
+                        provenance: precursor.provenance,
+                        verifierReportDescription: precursor.verifier_report_description,
                       }
                     ),
                   ),
