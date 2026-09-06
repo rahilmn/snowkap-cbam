@@ -368,6 +368,87 @@ describe(
     );
 
     it(
+      "2026-09-06 (S5 review remediation, findings A3/EF-B3): flags completeness_report_stale when a member shipment stays READY but its line's DEFAULT determination is resolved against a dataset that is no longer ACTIVE",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "READY",
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: { data: [shipmentSummaryRow], error: null },
+                shipment_lines: {
+                  data: [
+                    { emission_determination: { method: "DEFAULT", resolution: { dataset_id: "dataset-superseded-1" } } },
+                  ],
+                  error: null,
+                },
+                // dataset-superseded-1 is deliberately NOT in the ACTIVE
+                // set -- a different, currently-active dataset now
+                // exists for the same dataset_type.
+                regulatory_datasets: { data: [{ id: "dataset-current-1" }], error: null },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          true,
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, findings A3/EF-B3): does NOT flag completeness_report_stale when the member line's dataset is still ACTIVE",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "READY",
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: { data: [shipmentSummaryRow], error: null },
+                shipment_lines: {
+                  data: [
+                    { emission_determination: { method: "DEFAULT", resolution: { dataset_id: "dataset-current-1" } } },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-current-1" }], error: null },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
       "returns null, never a short member list, when a member batch fails (P14)",
       async () => {
         /**

@@ -23,6 +23,14 @@ import {
   type DeclarationRow,
 } from "./declaration-mapper";
 
+import {
+  determinationDatasetIsCurrent,
+} from "../../domain/emissions/determination-dataset-currency";
+
+import type {
+  EmissionDetermination,
+} from "../../domain/emissions/types";
+
 export interface DeclarationMemberShipmentSummary {
   id: ShipmentId;
   reference: string;
@@ -54,25 +62,40 @@ export interface DeclarationDetail {
   // (20260829330000) guarantees at most one, so a single row (not a
   // list) is the correct shape here, not a simplification.
   superseded_by: DeclarationLineageEntry | null;
-  // 2026-09-06 (S5 cross-phase hardening). true when the persisted
-  // completeness_report claims complete:true but at least one CURRENT
-  // member shipment (member_shipments, fetched fresh above, not cached)
-  // is no longer READY/LOCKED -- app.invalidate_declaration_approval_on_
-  // reopen (20260905140000) correctly flips a READY declaration back to
-  // DRAFT the instant a member shipment is reopened, but only touches
-  // `status`; it cannot also clear completeness_report/member_shipment_ids
-  // in the same UPDATE (app.prevent_declaration_fact_change forbids
-  // changing those columns except from DRAFT, and old.status is still
-  // READY at that point). Left unchecked, the UI kept rendering the
-  // pre-revert "Complete -- ready to approve for filing" success badge.
-  // Because shipment_lines is DRAFT-only editable for every role
-  // (20260904090000 -- a READY shipment's lines cannot change without
-  // first reopening it), a READY-population completeness_report can
-  // only ever go stale this ONE way -- a member shipment leaving READY/
-  // LOCKED -- so this check, reusing member_shipments' own live read
-  // rather than a second query, is a complete detector, not a partial
-  // one. Never affects markDeclarationReady's own gate, which always
-  // recomputes fresh and never trusts this cached column either way.
+  // 2026-09-06 (S5 cross-phase hardening; widened same day, S5 review
+  // remediation findings A3/EF-B3). true when the persisted
+  // completeness_report claims complete:true but is no longer trustworthy,
+  // for either of two independent reasons:
+  //
+  // (1) at least one CURRENT member shipment (member_shipments, fetched
+  // fresh above, not cached) is no longer READY/LOCKED --
+  // app.invalidate_declaration_approval_on_reopen (20260905140000)
+  // correctly flips a READY declaration back to DRAFT the instant a
+  // member shipment is reopened, but only touches `status`; it cannot
+  // also clear completeness_report/member_shipment_ids in the same
+  // UPDATE (app.prevent_declaration_fact_change forbids changing those
+  // columns except from DRAFT, and old.status is still READY at that
+  // point).
+  //
+  // (2) at least one member line's DEFAULT determination is resolved
+  // against a regulatory_datasets row that is no longer ACTIVE (finding
+  // A3/EF-B3). This file's own doc comment used to claim reason (1) was
+  // the ONLY way a READY-population report goes stale, reasoning that
+  // shipment_lines is DRAFT-only editable so nothing else could change
+  // under it -- that claim was FALSE: a regulatory correction changes
+  // nothing about the shipment or line at all, only the live
+  // regulatory_datasets state compute-declaration-draft-facts.ts reads
+  // fresh at generation time (LINE_DATASET_SUPERSEDED, added the SAME
+  // S5 phase two commits earlier) -- an independent staleness axis this
+  // detector was never reconciled with. Both checks share the identical
+  // determinationDatasetIsCurrent() comparison
+  // compute-declaration-draft-facts.ts itself uses, so this can never
+  // disagree with what a fresh regeneration would find.
+  //
+  // Left unchecked, the UI kept rendering the pre-revert/pre-correction
+  // "Complete -- ready to approve for filing" success badge. Never
+  // affects markDeclarationReady's own gate, which always recomputes
+  // fresh and never trusts this cached column either way.
   completeness_report_stale: boolean;
 }
 
@@ -170,6 +193,74 @@ async function fetchMemberShipments(
   return rows;
 }
 
+interface LineDeterminationRow {
+  emission_determination: EmissionDetermination | null;
+}
+
+interface ActiveDatasetIdRow {
+  id: string;
+}
+
+/**
+ * 2026-09-06 (S5 review remediation, findings A3/EF-B3). Whether ANY
+ * member shipment's line carries a DEFAULT determination resolved
+ * against a regulatory dataset that is no longer ACTIVE -- the second,
+ * independent half of completeness_report_stale (see that field's own
+ * doc comment). Fails OPEN to "not stale" on a query error rather than
+ * throwing: this is a supplementary staleness SIGNAL on a read-only
+ * detail page whose primary content (the declaration, its member
+ * shipments) already succeeded -- a transient failure here should not
+ * take down the whole page, and markDeclarationReady's own gate (which
+ * DOES throw, per S5's earlier fix) is what actually blocks an
+ * incorrect filing regardless of what this signal shows.
+ */
+async function anyMemberLineDatasetSuperseded(
+  supabase: SupabaseClient,
+  memberIds: readonly string[],
+): Promise<boolean> {
+  if (memberIds.length === 0) {
+    return false;
+  }
+
+  const [
+    { data: lineRows, error: lineError },
+    { data: datasetRows, error: datasetError },
+  ] =
+    await Promise.all(
+      [
+        supabase
+          .from("shipment_lines")
+          .select("emission_determination")
+          .in("shipment_id", memberIds)
+          .eq("determination_method", "DEFAULT"),
+
+        supabase
+          .from("regulatory_datasets")
+          .select("id")
+          .eq("status", "ACTIVE"),
+      ],
+    );
+
+  if (lineError || !lineRows || datasetError || !datasetRows) {
+    return false;
+  }
+
+  const activeDatasetIds =
+    new Set(
+      (datasetRows as ActiveDatasetIdRow[]).map(
+        (row) => row.id,
+      ),
+    );
+
+  return (lineRows as LineDeterminationRow[]).some(
+    (row) =>
+      !determinationDatasetIsCurrent(
+        row.emission_determination,
+        activeDatasetIds,
+      ),
+  );
+}
+
 export async function getDeclarationDetail(
   supabase: SupabaseClient,
   orgId: OrganizationId,
@@ -263,12 +354,31 @@ export async function getDeclarationDetail(
           }
         : null;
 
-  const completenessReportStale =
+  const reportClaimsComplete =
     declaration.completeness_report !== null &&
-    declaration.completeness_report.complete &&
+    declaration.completeness_report.complete;
+
+  // 2026-09-06 (S5 review remediation, findings A3/EF-B3). Only worth
+  // checking dataset currency when the report claims complete AND the
+  // member-shipment-status check above didn't already find it stale --
+  // avoids two extra queries on the common paths (DRAFT declarations,
+  // and declarations already known stale).
+  const memberStatusStale =
+    reportClaimsComplete &&
     memberShipments.some(
       (shipment) => shipment.status !== "READY" && shipment.status !== "LOCKED",
     );
+
+  const datasetStale =
+    reportClaimsComplete &&
+    !memberStatusStale &&
+    (await anyMemberLineDatasetSuperseded(
+      supabase,
+      memberIds,
+    ));
+
+  const completenessReportStale =
+    memberStatusStale || datasetStale;
 
   return {
     declaration,
