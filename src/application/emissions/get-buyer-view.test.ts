@@ -203,26 +203,43 @@ describe(
 
         // Never the file list, only the count -- see get-buyer-view.ts's
         // own BuyerViewData doc comment on why.
-        expect(result?.evidenceFileCount).toBe(
-          2,
+        expect(result?.evidence).toEqual(
+          { status: "OK", count: 2 },
         );
 
-        expect(result?.declarationContext?.production_process_description).toBe(
+        expect(result?.declarationContext.status).toBe(
+          "OK",
+        );
+
+        expect(
+          result?.declarationContext.status === "OK"
+            ? result.declarationContext.context?.production_process_description
+            : undefined,
+        ).toBe(
           "Kiln-fired at 900C",
         );
 
-        expect(result?.precursors).toHaveLength(
+        expect(result?.precursors.status).toBe(
+          "OK",
+        );
+
+        const precursors =
+          result?.precursors.status === "OK"
+            ? result.precursors.precursors
+            : [];
+
+        expect(precursors).toHaveLength(
           1,
         );
 
-        expect(result?.precursors[0]?.material_description).toBe(
+        expect(precursors[0]?.material_description).toBe(
           "Clinker, purchased",
         );
       },
     );
 
     it(
-      "returns evidenceFileCount 0, declarationContext null, and an empty precursor list when none of that has been captured -- never an error",
+      "returns evidence count 0, declaration context null, and an empty precursor list when none of that has been captured -- never an error",
       async () => {
         const result =
           await getBuyerView(
@@ -245,13 +262,61 @@ describe(
             emissionDataId,
           );
 
-        expect(result?.evidenceFileCount).toBe(
-          0,
+        expect(result?.evidence).toEqual(
+          { status: "OK", count: 0 },
         );
 
-        expect(result?.declarationContext).toBeNull();
+        expect(result?.declarationContext).toEqual(
+          { status: "OK", context: null },
+        );
+
         expect(result?.precursors).toEqual(
-          [],
+          { status: "OK", precursors: [] },
+        );
+      },
+    );
+
+    it(
+      "S5 cross-phase hardening: reports UNAVAILABLE for evidence count, declaration context, and precursors on a genuine fetch error on each -- never a false 'No'/absent claim about a different organization's record",
+      async () => {
+        const result =
+          await getBuyerView(
+            makeMockSupabase(
+              {
+                emission_data: [
+                  { data: [sharedRow], error: null },
+                  // countEvidenceFiles' own single-row query errors.
+                  { data: null, error: { message: "connection reset" } },
+                ],
+                installations: [
+                  { data: [{ id: "installation-2", name: "Steel Works B", country: "IN" }], error: null },
+                ],
+                sharing_grants: [
+                  { data: [{ id: "grant-1", installation_id: "installation-2", expires_at: null }], error: null },
+                ],
+                emission_data_declaration_context: [
+                  { data: null, error: { message: "connection reset" } },
+                ],
+                emission_data_precursors: [
+                  { data: null, error: { message: "connection reset" } },
+                ],
+              },
+              { data: [{ id: "org-2", name: "Acme Steel Producer" }], error: null },
+            ),
+            orgId,
+            emissionDataId,
+          );
+
+        expect(result?.evidence).toEqual(
+          { status: "UNAVAILABLE" },
+        );
+
+        expect(result?.declarationContext).toEqual(
+          { status: "UNAVAILABLE" },
+        );
+
+        expect(result?.precursors).toEqual(
+          { status: "UNAVAILABLE" },
         );
       },
     );

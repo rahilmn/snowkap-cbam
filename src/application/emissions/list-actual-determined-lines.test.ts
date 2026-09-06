@@ -403,29 +403,28 @@ describe(
     );
 
     it(
-      "returns an empty array on a shipment_lines fetch error",
+      "throws on a shipment_lines fetch error -- never silently returns [] the same way a genuinely empty org does (S5 cross-phase hardening)",
       async () => {
-        const result =
-          await listActualDeterminedLines(
+        await expect(
+          listActualDeterminedLines(
             makeMockSupabase(
               {
                 shipment_lines: { data: null, error: { message: "denied" } },
               },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
 
     it(
-      "returns an empty array on a shipments fetch error",
+      "throws on a shipments fetch error",
       async () => {
-        const result =
-          await listActualDeterminedLines(
+        await expect(
+          listActualDeterminedLines(
             makeMockSupabase(
               {
                 shipment_lines: { data: [actualLineRow()], error: null },
@@ -433,19 +432,18 @@ describe(
               },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
 
     it(
-      "returns an empty array -- rather than a false 'Unknown organization' placeholder for every SHARED row -- when the sharing_grants follow-up lookup itself errors",
+      "throws -- rather than a false 'Unknown organization' placeholder for every SHARED row, or blanking unrelated OWN rows -- when the sharing_grants follow-up lookup itself errors",
       async () => {
-        const result =
-          await listActualDeterminedLines(
+        await expect(
+          listActualDeterminedLines(
             makeMockSupabase(
               {
                 shipment_lines: {
@@ -463,19 +461,18 @@ describe(
               },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
 
     it(
-      "returns an empty array when the organizations follow-up lookup itself errors",
+      "throws when the organizations follow-up lookup itself errors",
       async () => {
-        const result =
-          await listActualDeterminedLines(
+        await expect(
+          listActualDeterminedLines(
             makeMockSupabase(
               {
                 shipment_lines: {
@@ -494,10 +491,9 @@ describe(
               },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );

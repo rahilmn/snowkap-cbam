@@ -208,11 +208,29 @@ export async function getDeclarationContext(
  * a materially worse outcome for a merely-decorative field than
  * freezing null/[] and letting the core (regulatory-relevant)
  * determination succeed.
+ *
+ * 2026-09-06 (S5 cross-phase hardening). "Doesn't throw" USED to also
+ * mean "collapses a genuine fetch error and a genuinely absent context
+ * to the identical `null`" -- fine for determine-from-actual-data.ts's
+ * own best-effort freeze (null either way), but get-buyer-view.ts's own
+ * SECOND use of this same null feeds an explicit cross-org "Supporting
+ * evidence attached: No" / "Production process described: No"
+ * readiness claim, where the two cases are not remotely equivalent: one
+ * is a true fact about the record, the other is Snowkap's own read
+ * failing. Returns a discriminated result instead so each caller can
+ * keep its own correct behavior for the case it actually cares about --
+ * determine-from-actual-data.ts still freezes null on UNAVAILABLE
+ * (unchanged), get-buyer-view.ts now propagates UNAVAILABLE instead of
+ * asserting a false "No".
  */
+export type DeclarationContextByIdResult =
+  | { status: "OK"; context: EmissionDataDeclarationContext | null }
+  | { status: "UNAVAILABLE" };
+
 export async function getDeclarationContextById(
   supabase: SupabaseClient,
   emissionDataId: EmissionDataId,
-): Promise<EmissionDataDeclarationContext | null> {
+): Promise<DeclarationContextByIdResult> {
   const { data, error } =
     await supabase
       .from("emission_data_declaration_context")
@@ -222,13 +240,21 @@ export async function getDeclarationContextById(
       .eq("emission_data_id", emissionDataId)
       .maybeSingle();
 
-  if (error || !data) {
-    return null;
+  if (error) {
+    return {
+      status: "UNAVAILABLE",
+    };
   }
 
-  return toDeclarationContext(
-    data as DeclarationContextRow,
-  );
+  return {
+    status: "OK",
+    context:
+      data
+        ? toDeclarationContext(
+            data as DeclarationContextRow,
+          )
+        : null,
+  };
 }
 
 export interface UpsertDeclarationContextInput {

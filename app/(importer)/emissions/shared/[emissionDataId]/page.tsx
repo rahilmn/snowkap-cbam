@@ -287,17 +287,37 @@ function ProvenanceCard(
             Verifier report
           </dt>
 
-          <dd>
-            <StatusBadge
-              statusKey={verifierReportBadgeFor(buyerView.declarationContext?.verifier_report_declared ?? false)}
-            />
+          {/*
+            2026-09-06 (S5 cross-phase hardening). A fetch failure on
+            declarationContext USED to render identically to "not
+            declared" -- a false claim that no verifier report exists,
+            shown to a different organization, indistinguishable from
+            the operator's own genuine answer. Rendered as its own
+            explicit "Unavailable" state instead.
+          */}
+          {buyerView.declarationContext.status === "UNAVAILABLE" ? (
+            <dd>
+              <Badge tone="danger">
+                Unavailable
+              </Badge>
 
-            {buyerView.declarationContext?.verifier_report_description ? (
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                {buyerView.declarationContext.verifier_report_description}
+                Couldn&apos;t load this right now. Try refreshing the page.
               </p>
-            ) : null}
-          </dd>
+            </dd>
+          ) : (
+            <dd>
+              <StatusBadge
+                statusKey={verifierReportBadgeFor(buyerView.declarationContext.context?.verifier_report_declared ?? false)}
+              />
+
+              {buyerView.declarationContext.context?.verifier_report_description ? (
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                  {buyerView.declarationContext.context.verifier_report_description}
+                </p>
+              ) : null}
+            </dd>
+          )}
         </div>
       </dl>
     </Card>
@@ -314,6 +334,11 @@ function DossierCard(
   const { declarationContext, precursors } =
     buyerView;
 
+  const context =
+    declarationContext.status === "OK"
+      ? declarationContext.context
+      : null;
+
   return (
     <Card>
       <CardHeader>
@@ -323,14 +348,28 @@ function DossierCard(
       </CardHeader>
 
       <div className="flex flex-col gap-3 p-4 text-sm">
-        {declarationContext?.production_process_description ? (
+        {/*
+          2026-09-06 (S5 cross-phase hardening). A fetch failure USED to
+          render identically to "no production process description was
+          provided" / "no precursor materials were declared" -- a false
+          claim about what the operator did or didn't declare. Both
+          blocks below now render their own explicit "Couldn't load"
+          state instead of silently reading as a genuine, complete
+          absence.
+        */}
+        {declarationContext.status === "UNAVAILABLE" ? (
+          <p className="text-[var(--color-danger-700)]">
+            Couldn&apos;t load the production process description right
+            now. Try refreshing the page.
+          </p>
+        ) : context?.production_process_description ? (
           <div>
             <p className="text-[var(--text-tertiary)]">
               Production process
             </p>
 
             <p className="text-[var(--text-primary)]">
-              {declarationContext.production_process_description}
+              {context.production_process_description}
             </p>
           </div>
         ) : (
@@ -344,15 +383,20 @@ function DossierCard(
             Precursor materials
           </p>
 
-          {precursors.length === 0 ? (
+          {precursors.status === "UNAVAILABLE" ? (
+            <p className="text-[var(--color-danger-700)]">
+              Couldn&apos;t load precursor materials right now. Try
+              refreshing the page.
+            </p>
+          ) : precursors.precursors.length === 0 ? (
             <p className="text-[var(--text-secondary)]">
-              {declarationContext?.uses_purchased_precursors
+              {context?.uses_purchased_precursors
                 ? "The operator indicated purchased precursors are used, but did not list any."
                 : "No CBAM-covered precursor materials were declared."}
             </p>
           ) : (
             <ul className="flex flex-col gap-1.5">
-              {precursors.map(
+              {precursors.precursors.map(
                 (precursor) => (
                   <li
                     key={precursor.id}
@@ -385,39 +429,78 @@ function DossierCard(
   );
 }
 
+// 2026-09-06 (S5 cross-phase hardening). A plain boolean `met` could
+// only ever say Yes or No -- a fetch failure on any one of the three
+// underlying legs (evidence count, declaration context, precursors)
+// used to be forced into whichever of those two a caller's `?? false`/
+// `.length` happened to produce, indistinguishable from the operator's
+// own real answer. "unavailable" is a genuine third state this
+// checklist must be able to say, on a screen whose entire purpose is
+// giving a cross-org viewer an honest completeness signal.
+type ReadinessCheckState =
+  | "met"
+  | "not_met"
+  | "unavailable";
+
 interface ReadinessCheck {
   label: string;
-  met: boolean;
-  notApplicable?: boolean;
+  state: ReadinessCheckState;
 }
 
 function readinessChecks(
   buyerView: BuyerViewData,
 ): ReadinessCheck[] {
-  const { option, declarationContext, precursors, evidenceFileCount } =
+  const { option, declarationContext, precursors, evidence } =
     buyerView;
+
+  const context =
+    declarationContext.status === "OK"
+      ? declarationContext.context
+      : null;
 
   const checks: ReadinessCheck[] =
     [
       {
         label: "Reviewed internally by the recording organization",
-        met: true,
+        state: "met",
       },
       {
         label: "Supporting evidence attached",
-        met: evidenceFileCount > 0,
+        state:
+          evidence.status === "UNAVAILABLE"
+            ? "unavailable"
+            : evidence.count > 0
+              ? "met"
+              : "not_met",
       },
       {
         label: "Production process described",
-        met: Boolean(declarationContext?.production_process_description),
+        state:
+          declarationContext.status === "UNAVAILABLE"
+            ? "unavailable"
+            : Boolean(context?.production_process_description)
+              ? "met"
+              : "not_met",
       },
     ];
 
-  if (declarationContext?.uses_purchased_precursors) {
+  // Whether this check applies at all depends on
+  // declarationContext.uses_purchased_precursors -- when
+  // declarationContext itself is UNAVAILABLE, that answer is unknown
+  // too, so the row is shown anyway (as "unavailable") rather than
+  // silently dropped, exactly the failure this whole checklist was
+  // hardened against: a shorter-looking, more-complete-looking list is
+  // not a safe way to represent "we couldn't check."
+  if (declarationContext.status === "UNAVAILABLE" || context?.uses_purchased_precursors) {
     checks.push(
       {
         label: "Precursor materials listed",
-        met: precursors.length > 0,
+        state:
+          declarationContext.status === "UNAVAILABLE" || precursors.status === "UNAVAILABLE"
+            ? "unavailable"
+            : precursors.precursors.length > 0
+              ? "met"
+              : "not_met",
       },
     );
   }
@@ -426,7 +509,7 @@ function readinessChecks(
     checks.push(
       {
         label: "Operator-provided source (recorded by the operator itself, not transcribed)",
-        met: false,
+        state: "not_met",
       },
     );
   }
@@ -461,8 +544,20 @@ function ReadinessCard(
               key={check.label}
               className="flex items-center gap-2"
             >
-              <Badge tone={check.met ? "success" : "warning"}>
-                {check.met ? "Yes" : "No"}
+              <Badge
+                tone={
+                  check.state === "met"
+                    ? "success"
+                    : check.state === "unavailable"
+                      ? "danger"
+                      : "warning"
+                }
+              >
+                {check.state === "met"
+                  ? "Yes"
+                  : check.state === "unavailable"
+                    ? "Couldn't check"
+                    : "No"}
               </Badge>
 
               <span className="text-[var(--text-primary)]">

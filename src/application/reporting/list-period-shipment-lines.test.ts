@@ -258,10 +258,10 @@ describe(
     );
 
     it(
-      "fails the whole result closed (not a partial result) on a shipments fetch error",
+      "throws on a shipments fetch error -- never silently returns the empty sentinel a genuinely empty period also produces (S5 cross-phase hardening)",
       async () => {
-        const result =
-          await listPeriodShipmentLines(
+        await expect(
+          listPeriodShipmentLines(
             makeMockSupabase(
               {
                 shipments: { data: null, error: { message: "denied" } },
@@ -269,19 +269,18 @@ describe(
             ),
             orgId,
             annualPeriod,
-          );
-
-        expect(result).toEqual(
-          { shipment_count: 0, lines: [] },
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
 
     it(
-      "fails the whole result closed on a shipment_lines fetch error, rather than returning shipment_count with an empty lines array indistinguishable from a real zero-lines state",
+      "throws on a shipment_lines fetch error, rather than returning shipment_count with an empty lines array indistinguishable from a real zero-lines state",
       async () => {
-        const result =
-          await listPeriodShipmentLines(
+        await expect(
+          listPeriodShipmentLines(
             makeMockSupabase(
               {
                 shipments: { data: [shipmentRow()], error: null },
@@ -290,19 +289,18 @@ describe(
             ),
             orgId,
             annualPeriod,
-          );
-
-        expect(result).toEqual(
-          { shipment_count: 0, lines: [] },
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
 
     it(
-      "fails the whole result closed on a latest_calculation_results fetch error",
+      "throws on a latest_calculation_results fetch error",
       async () => {
-        const result =
-          await listPeriodShipmentLines(
+        await expect(
+          listPeriodShipmentLines(
             makeMockSupabase(
               {
                 shipments: { data: [shipmentRow()], error: null },
@@ -312,10 +310,9 @@ describe(
             ),
             orgId,
             annualPeriod,
-          );
-
-        expect(result).toEqual(
-          { shipment_count: 0, lines: [] },
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );

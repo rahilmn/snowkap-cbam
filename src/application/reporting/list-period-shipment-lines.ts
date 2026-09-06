@@ -178,14 +178,37 @@ function periodFilterColumns(
  *      reducing client-side previously truncated silently past
  *      PostgREST's row cap), filtered to the same distinct shipment ids.
  *
- * Fails the WHOLE result to `{ shipment_count: 0, lines: [] }` on ANY of
- * the three query errors -- matching listActualDeterminedLines' and
- * listAvailableActualEmissionData's own established posture of never
- * returning a partial result a caller could mistake for "shipments
- * exist, but nothing has lines/calculations yet" (a real, distinct
- * state this function's own callers must be able to tell apart from a
- * transport failure -- see build-period-summary.ts's empty-state
- * handling).
+ * THROWS on any of the three query legs' own errors, rather than
+ * returning a partial or empty-looking result -- a real, distinct state
+ * this function's own callers must be able to tell apart from a
+ * transport failure.
+ *
+ * 2026-09-06 (S5 cross-phase hardening). This USED to fail the WHOLE
+ * result closed to the literal sentinel `{ shipment_count: 0, lines: [] }`
+ * on any of the three query legs' own errors -- including a failure on
+ * a single page deep inside the shipment_lines/latest_calculation_results
+ * batch loops, discarding every row already fetched from earlier
+ * batches/pages. That sentinel is byte-identical to a genuinely empty
+ * period, and both of this function's own callers (build-period-
+ * summary.ts, build-period-export-rows.ts) destructure it with no error
+ * signal of their own -- so a transient DB blip produced a page reading
+ * "No shipments in {period} yet." and a standalone XLSX/CSV export
+ * (app/api/reports/export/route.ts, not gated by the page's own
+ * exportRows.length>0 check) that returned HTTP 200 with a syntactically
+ * complete, empty-but-legitimate-looking workbook. Live-reproduced: real
+ * seeded data (6 shipments, a real calculated 139 tCO2e line) rendered
+ * byte-identical to a genuine empty period the moment any one query leg
+ * was made to fail. This exact "fail closed to the empty sentinel"
+ * design already caused one real silent-wrong-total incident in this
+ * codebase's own history (P13, commit 7b03cd3, unbounded pagination
+ * rather than a query error, but the identical resulting failure shape)
+ * -- matches this codebase's own "throw is for infrastructure failures"
+ * convention (CLAUDE.md). Neither caller needs its own try/catch: both
+ * are read by plain server-component pages / the export route with no
+ * wrapper, so a throw here reaches app/error.tsx (P13's own established
+ * page-level failure boundary) or, for the API route, Next's own
+ * uncaught-exception 500 response -- either way, no longer
+ * indistinguishable from a genuinely complete, empty result.
  */
 // PostgREST's own configured page cap (supabase/config.toml's
 // `max_rows`) -- a query with no `.range()` silently truncates to this
@@ -289,15 +312,20 @@ export async function listPeriodShipmentLines(
     const { data: pageRows, error: pageError } =
       await pageQuery;
 
-    if (pageError || !pageRows) {
-      return empty;
+    if (pageError) {
+      throw new Error(
+        `list-period-shipment-lines: shipments fetch failed (${pageError.message}).`,
+      );
     }
 
+    const page =
+      (pageRows ?? []) as ShipmentRow[];
+
     shipmentRows.push(
-      ...(pageRows as ShipmentRow[]),
+      ...page,
     );
 
-    if (pageRows.length < SHIPMENTS_PAGE_SIZE) {
+    if (page.length < SHIPMENTS_PAGE_SIZE) {
       break;
     }
   }
@@ -358,15 +386,20 @@ export async function listPeriodShipmentLines(
             offset + SHIPMENTS_PAGE_SIZE - 1,
           );
 
-      if (lineError || !batchRows) {
-        return empty;
+      if (lineError) {
+        throw new Error(
+          `list-period-shipment-lines: shipment_lines fetch failed (${lineError.message}).`,
+        );
       }
 
+      const page =
+        (batchRows ?? []) as ShipmentLineRow[];
+
       lineRows.push(
-        ...(batchRows as ShipmentLineRow[]),
+        ...page,
       );
 
-      if (batchRows.length < SHIPMENTS_PAGE_SIZE) {
+      if (page.length < SHIPMENTS_PAGE_SIZE) {
         break;
       }
     }
@@ -397,7 +430,9 @@ export async function listPeriodShipmentLines(
           );
 
       if (calculationError) {
-        return empty;
+        throw new Error(
+          `list-period-shipment-lines: latest_calculation_results fetch failed (${calculationError.message}).`,
+        );
       }
 
       const pageRows =

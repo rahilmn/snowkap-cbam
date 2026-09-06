@@ -82,12 +82,28 @@ describe(
     );
 
     it(
-      "returns an empty array on error",
+      "throws on a genuine query error -- never silently returns [] the same way a real empty org does (S5 cross-phase hardening)",
+      async () => {
+        await expect(
+          listShipments(
+            mockSupabase(
+              { data: null, error: { message: "boom" } },
+            ),
+            "org-1" as never,
+          ),
+        ).rejects.toThrow(
+          "boom",
+        );
+      },
+    );
+
+    it(
+      "returns an empty array for a genuinely empty org (no error, no rows)",
       async () => {
         const result =
           await listShipments(
             mockSupabase(
-              { data: null, error: { message: "boom" } },
+              { data: [], error: null },
             ),
             "org-1" as never,
           );

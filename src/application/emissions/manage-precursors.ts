@@ -191,11 +191,26 @@ export async function listPrecursors(
  * this function's two callers treat the result as a best-effort
  * enrichment, not something that should fail a determination or crash
  * a read-only buyer view over a transient fetch error.
+ *
+ * 2026-09-06 (S5 cross-phase hardening). Returns a discriminated result
+ * rather than collapsing a genuine fetch error into the same `[]` a
+ * record with no precursors also produces -- see
+ * getDeclarationContextById's own identical fix (manage-declaration-
+ * context.ts) for the full reasoning: determine-from-actual-data.ts
+ * still freezes `[]` on UNAVAILABLE (unchanged), but get-buyer-view.ts's
+ * own second use of this function feeds an explicit cross-org
+ * "Precursor materials listed" readiness row that must not silently
+ * drop out of the checklist -- indistinguishable from "the record
+ * genuinely has none" -- on a transient error.
  */
+export type PrecursorsByIdResult =
+  | { status: "OK"; precursors: EmissionDataPrecursor[] }
+  | { status: "UNAVAILABLE" };
+
 export async function listPrecursorsById(
   supabase: SupabaseClient,
   emissionDataId: EmissionDataId,
-): Promise<EmissionDataPrecursor[]> {
+): Promise<PrecursorsByIdResult> {
   const { data, error } =
     await supabase
       .from("emission_data_precursors")
@@ -205,13 +220,18 @@ export async function listPrecursorsById(
       .eq("emission_data_id", emissionDataId)
       .order("created_at", { ascending: true });
 
-  if (error || !data) {
-    return [];
+  if (error) {
+    return {
+      status: "UNAVAILABLE",
+    };
   }
 
-  return (data as PrecursorRow[]).map(
-    toPrecursor,
-  );
+  return {
+    status: "OK",
+    precursors: ((data ?? []) as PrecursorRow[]).map(
+      toPrecursor,
+    ),
+  };
 }
 
 export interface AddPrecursorInput {

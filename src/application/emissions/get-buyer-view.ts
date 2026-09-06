@@ -9,24 +9,28 @@ import {
 
 import {
   getDeclarationContextById,
+  type DeclarationContextByIdResult,
 } from "./manage-declaration-context";
 
 import {
   listPrecursorsById,
+  type PrecursorsByIdResult,
 } from "./manage-precursors";
-
-import type {
-  EmissionDataDeclarationContext,
-  EmissionDataPrecursor,
-} from "../../domain/emissions/declaration-context-types";
 
 import type {
   EmissionDataId,
   OrganizationId,
 } from "../../domain/shared/ids";
 
-export interface BuyerViewData {
-  option: AvailableActualEmissionDataOption;
+// 2026-09-06 (S5 cross-phase hardening). Each of the three legs below
+// now carries its own {status} rather than a bare value -- this
+// screen's whole point is showing a cross-org viewer explicit Yes/No
+// readiness claims about a DIFFERENT organization's data, and a
+// transient fetch error on any one leg used to collapse to the exact
+// same value ("No"/null/[]) a genuine absence produces. See
+// getDeclarationContextById's own doc comment (manage-declaration-
+// context.ts) for the full reasoning.
+export type BuyerViewEvidence =
   // A count only -- never the file list or download links. This
   // codebase never widened evidence_files' own RLS for a sharing-grant
   // grantee (checked: none of the 11 migrations that widen a table for
@@ -34,9 +38,14 @@ export interface BuyerViewData {
   // feature does not start now -- "evidence... state" (v2.1.1 §19)
   // means completeness, not file access. See v2.1.1 §18's own
   // "do not expand sharing permissions merely to simplify the SME UI".
-  evidenceFileCount: number;
-  declarationContext: EmissionDataDeclarationContext | null;
-  precursors: EmissionDataPrecursor[];
+  | { status: "OK"; count: number }
+  | { status: "UNAVAILABLE" };
+
+export interface BuyerViewData {
+  option: AvailableActualEmissionDataOption;
+  evidence: BuyerViewEvidence;
+  declarationContext: DeclarationContextByIdResult;
+  precursors: PrecursorsByIdResult;
 }
 
 /**
@@ -79,7 +88,7 @@ export async function getBuyerView(
     return null;
   }
 
-  const [declarationContext, precursors, evidenceFileCount] =
+  const [declarationContext, precursors, evidence] =
     await Promise.all(
       [
         getDeclarationContextById(
@@ -99,7 +108,7 @@ export async function getBuyerView(
 
   return {
     option,
-    evidenceFileCount,
+    evidence,
     declarationContext,
     precursors,
   };
@@ -112,13 +121,18 @@ interface EvidenceCountRow {
 /**
  * RLS-trusted, by id alone -- same posture as
  * getDeclarationContextById/listPrecursorsById. Only the COUNT is ever
- * read out of the row; see this file's BuyerViewData doc comment on
+ * read out of the row; see this file's BuyerViewEvidence doc comment on
  * why the file list itself is never exposed to a grantee.
+ *
+ * 2026-09-06 (S5 cross-phase hardening): returns a discriminated result
+ * rather than collapsing a genuine fetch error into the same `0` a
+ * record with no evidence also produces -- see BuyerViewEvidence's own
+ * doc comment above.
  */
 async function countEvidenceFiles(
   supabase: SupabaseClient,
   emissionDataId: EmissionDataId,
-): Promise<number> {
+): Promise<BuyerViewEvidence> {
   const { data, error } =
     await supabase
       .from("emission_data")
@@ -128,9 +142,14 @@ async function countEvidenceFiles(
       .eq("id", emissionDataId)
       .maybeSingle();
 
-  if (error || !data) {
-    return 0;
+  if (error) {
+    return {
+      status: "UNAVAILABLE",
+    };
   }
 
-  return (data as EvidenceCountRow).evidence_file_ids.length;
+  return {
+    status: "OK",
+    count: data ? (data as EvidenceCountRow).evidence_file_ids.length : 0,
+  };
 }

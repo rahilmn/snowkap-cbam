@@ -628,19 +628,36 @@ async function performDetermination(
   // the PRODUCER's org, not necessarily the caller's, so this read
   // must work identically whether the caller owns the record or holds
   // a sharing grant for it. `null`/`[]` are real, meaningful answers
-  // ("no context/no precursors were declared"), not fetch failures --
-  // both functions already return that shape on a genuine absence.
-  const declarationContext =
+  // ("no context/no precursors were declared"), not fetch failures.
+  //
+  // 2026-09-06 (S5 cross-phase hardening): both functions now return a
+  // discriminated {status} result so THIS caller and get-buyer-view.ts
+  // can each keep their own correct behavior for a genuine fetch
+  // failure -- this function's own posture is unchanged: UNAVAILABLE
+  // is treated exactly like a genuine absence (freeze null/[]) rather
+  // than failing the core, regulatory-relevant determination over a
+  // merely-decorative field.
+  const declarationContextResult =
     await getDeclarationContextById(
       supabase,
       record.id,
     );
 
-  const precursors =
+  const declarationContext =
+    declarationContextResult.status === "OK"
+      ? declarationContextResult.context
+      : null;
+
+  const precursorsResult =
     await listPrecursorsById(
       supabase,
       record.id,
     );
+
+  const precursors =
+    precursorsResult.status === "OK"
+      ? precursorsResult.precursors
+      : [];
 
   const snapshot: ActualEmissionSnapshot =
     {

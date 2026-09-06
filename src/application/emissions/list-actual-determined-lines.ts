@@ -188,14 +188,30 @@ function isActualDeterminedLine(
  *   3. `organizations`, batched by every distinct grantor_org_id the
  *      sharing_grants lookup resolved -- the grantor org's display name.
  *
- * Follows list-available-actual-data.ts's own established two-follow-up-
- * queries discipline for both of the lookups above: a transport/PostgREST
- * ERROR on either fails the WHOLE result to [] (never indistinguishable
- * from a fabricated placeholder shown for every row); a query that
- * SUCCEEDS but simply doesn't return a specific id degrades only that
- * one row to UNKNOWN_GRANTOR_ORGANIZATION_NAME (imported from that same
- * module, not redefined here, so the two "shared-in data" surfaces this
- * screen and the per-line picker never visibly disagree on wording).
+ * A query that SUCCEEDS but simply doesn't return a specific id degrades
+ * only that one row to UNKNOWN_GRANTOR_ORGANIZATION_NAME (imported from
+ * list-available-actual-data.ts, not redefined here, so the two
+ * "shared-in data" surfaces this screen and the per-line picker never
+ * visibly disagree on wording).
+ *
+ * 2026-09-06 (S5 cross-phase hardening). All four of this function's own
+ * query legs (shipment_lines, shipments, sharing_grants, the org-name
+ * RPC) USED to fail the whole result to [] on a genuine transport/
+ * PostgREST error -- silently indistinguishable from "no lines are
+ * determined from actual data," on the one screen (master plan §27
+ * screen 15) whose entire purpose is surfacing STALE determinations an
+ * importer needs to re-check. The two legs that only run when a SHARED
+ * row exists (sharing_grants, the org-name RPC) could blank the ENTIRE
+ * table on a failure affecting only shared rows, not just degrade them.
+ * Matches this codebase's own "throw is for infrastructure failures"
+ * convention (CLAUDE.md) and the identical remediation already applied
+ * to listDraftShipmentsWithLines/listDeclarations for the guidance
+ * dashboard's own sibling gap (S2 B3) -- this function has no bespoke
+ * caller-side UNAVAILABLE wrapper of its own; its one caller
+ * (app/(importer)/emissions/page.tsx) is a plain server component with
+ * no try/catch, so a throw here reaches app/error.tsx (P13's own
+ * established page-level failure boundary) exactly the way
+ * listShipments/listDeclarations already do for their own pages.
  *
  * Sorted STALE-first (then by shipment reference, then line number) --
  * this is a read-only overview whose whole purpose is surfacing what an
@@ -219,12 +235,14 @@ export async function listActualDeterminedLines(
       .order("shipment_id", { ascending: true })
       .order("line_number", { ascending: true });
 
-  if (lineError || !lineRows) {
-    return [];
+  if (lineError) {
+    throw new Error(
+      `list-actual-determined-lines: shipment_lines fetch failed (${lineError.message}).`,
+    );
   }
 
   const actualLines =
-    (lineRows as ShipmentLineRow[])
+    ((lineRows ?? []) as ShipmentLineRow[])
       .map(
         toShipmentLine,
       )
@@ -252,13 +270,15 @@ export async function listActualDeterminedLines(
       .eq("org_id", orgId)
       .in("id", shipmentIds);
 
-  if (shipmentError || !shipmentRows) {
-    return [];
+  if (shipmentError) {
+    throw new Error(
+      `list-actual-determined-lines: shipments fetch failed (${shipmentError.message}).`,
+    );
   }
 
   const shipmentById =
     new Map<string, Shipment>(
-      (shipmentRows as ShipmentRow[]).map(
+      ((shipmentRows ?? []) as ShipmentRow[]).map(
         (row) => [row.id, toShipment(row)],
       ),
     );
@@ -340,12 +360,16 @@ export async function listActualDeterminedLines(
         )
         .in("id", sharingGrantIds);
 
-    // Fails the whole result closed -- see this function's own doc
+    // Throws rather than degrading -- see this function's own doc
     // comment for why a transport failure here must never be
-    // indistinguishable from a fabricated placeholder shown for every
-    // SHARED row.
+    // indistinguishable from "no lines are determined from actual
+    // data," and must not blank the ENTIRE result (including unrelated
+    // OWN-provenance rows) just because a failure touched only the
+    // SHARED-row lookup.
     if (grantError) {
-      return [];
+      throw new Error(
+        `list-actual-determined-lines: sharing_grants fetch failed (${grantError.message}).`,
+      );
     }
 
     for (const row of (grantRows ?? []) as SharingGrantGrantorLookupRow[]) {
@@ -397,7 +421,9 @@ export async function listActualDeterminedLines(
         );
 
     if (organizationError) {
-      return [];
+      throw new Error(
+        `list-actual-determined-lines: grantor org-name lookup failed (${organizationError.message}).`,
+      );
     }
 
     for (const row of (organizationRows ?? []) as OrganizationNameLookupRow[]) {

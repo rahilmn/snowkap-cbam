@@ -372,12 +372,30 @@ export async function startDeclarationAction(
     };
   }
 
-  const result =
-    await generateOrRefreshDeclarationDraft(
-      supabase,
-      orgSummary.context,
-      period,
-    );
+  // 2026-09-06 (S5 cross-phase hardening). computeDeclarationDraftFacts
+  // (called by generateOrRefreshDeclarationDraft) now THROWS on a
+  // genuine infrastructure failure reading the period's shipments/lines
+  // -- it used to fail closed to an empty, fabricated "no shipments"
+  // fact set instead. Caught here and turned into the same expected
+  // {status:"error"} shape this action already returns for a REJECTED
+  // outcome, rather than letting an unhandled throw reach the client as
+  // an unstyled error from inside a Server Action.
+  let result:
+    Awaited<ReturnType<typeof generateOrRefreshDeclarationDraft>>;
+
+  try {
+    result =
+      await generateOrRefreshDeclarationDraft(
+        supabase,
+        orgSummary.context,
+        period,
+      );
+  } catch {
+    return {
+      status: "error",
+      message: "Couldn't load this period's shipments right now. Try again.",
+    };
+  }
 
   if (result.status === "REJECTED") {
     return {
@@ -485,12 +503,24 @@ export async function refreshDeclarationDraftAction(
     };
   }
 
-  const result =
-    await generateOrRefreshDeclarationDraft(
-      supabase,
-      orgSummary.context,
-      period,
-    );
+  // See the identical S5 hardening note on generateDeclarationDraftAction
+  // above.
+  let result:
+    Awaited<ReturnType<typeof generateOrRefreshDeclarationDraft>>;
+
+  try {
+    result =
+      await generateOrRefreshDeclarationDraft(
+        supabase,
+        orgSummary.context,
+        period,
+      );
+  } catch {
+    return {
+      status: "error",
+      message: "Couldn't load this period's shipments right now. Try again.",
+    };
+  }
 
   if (result.status === "REJECTED") {
     return {
@@ -554,12 +584,24 @@ export async function markDeclarationReadyAction(
     };
   }
 
-  const result =
-    await markDeclarationReady(
-      supabase,
-      orgSummary.context,
-      parsed.data.declarationId as never,
-    );
+  // See the identical S5 hardening note on generateDeclarationDraftAction
+  // above -- markDeclarationReady also calls computeDeclarationDraftFacts.
+  let result:
+    Awaited<ReturnType<typeof markDeclarationReady>>;
+
+  try {
+    result =
+      await markDeclarationReady(
+        supabase,
+        orgSummary.context,
+        parsed.data.declarationId as never,
+      );
+  } catch {
+    return {
+      status: "error",
+      message: "Couldn't check this declaration's completeness right now. Try again.",
+    };
+  }
 
   if (result.status === "REJECTED") {
     return {
