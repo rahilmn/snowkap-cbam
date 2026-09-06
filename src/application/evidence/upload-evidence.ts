@@ -22,10 +22,13 @@ import type {
   OrganizationId,
 } from "../../domain/shared/ids";
 
-import {
-  hasCapability,
-  type OrgContext,
+import type {
+  OrgContext,
 } from "../organizations/org-context";
+
+import {
+  mayManageOwnInstallationRecords,
+} from "../installations/provenance-capability";
 
 import {
   recordAuditEvent,
@@ -252,7 +255,23 @@ export async function uploadEvidenceFile(
   context: OrgContext,
   input: UploadEvidenceInput,
 ): Promise<UploadEvidenceResult> {
-  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+  // 2026-09-06 (S5 review remediation round 2, finding S5R2-COMPOSE-B1).
+  // Was PRODUCER_OPERATOR-only, but owner decision D2 gives an
+  // IMPORTER_DECLARANT-only org a first-class emissions-capture path
+  // too (/external-emissions, IMPORTER_ENTERED provenance) -- every
+  // OTHER emission_data operation (record/submit/verify/reject/discard/
+  // activate, manage-emission-data.ts) already gates on
+  // mayManageOwnInstallationRecords (PRODUCER_OPERATOR OR
+  // IMPORTER_DECLARANT). Evidence was the one operation still gated on
+  // PRODUCER_OPERATOR alone, so an importer-only org could create a
+  // record but never attach evidence to it -- and since
+  // checkEmissionDataEvidenceCompleteness requires evidence_file_ids
+  // non-empty with no provenance waiver, that record could never be
+  // verified or activated at all. This round's own guidance fix
+  // (020c2b3) now actively routes importer-only orgs to /external-
+  // emissions to fix a REJECTED record, which makes this dead end
+  // routinely reachable.
+  if (!mayManageOwnInstallationRecords(context)) {
     return {
       status: "REJECTED",
       reason: "CAPABILITY_NOT_HELD",
@@ -499,7 +518,10 @@ export async function removeEvidenceFile(
   context: OrgContext,
   evidenceFileId: EvidenceFileId,
 ): Promise<RemoveEvidenceFileResult> {
-  if (!hasCapability(context, "PRODUCER_OPERATOR")) {
+  // 2026-09-06 (S5 review remediation round 2, finding S5R2-COMPOSE-B1).
+  // Same widening as uploadEvidenceFile above, for the identical reason
+  // -- see that function's own doc comment.
+  if (!mayManageOwnInstallationRecords(context)) {
     return {
       status: "REJECTED",
       reason: "CAPABILITY_NOT_HELD",

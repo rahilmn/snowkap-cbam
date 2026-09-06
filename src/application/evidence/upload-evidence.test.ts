@@ -625,7 +625,7 @@ describe(
       "capability gate",
       () => {
         it(
-          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          "rejects an org with NEITHER PRODUCER_OPERATOR nor IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
           async () => {
             const recorder =
               makeRecorder();
@@ -637,7 +637,7 @@ describe(
                   {},
                   recorder,
                 ),
-                memberContext(["IMPORTER_DECLARANT"]),
+                memberContext([]),
                 validInput,
               );
 
@@ -664,6 +664,28 @@ describe(
                   },
                 ),
                 memberContext(["PRODUCER_OPERATOR"]),
+                validInput,
+              );
+
+            expect(result.status).toBe(
+              "OK",
+            );
+          },
+        );
+
+        it(
+          "2026-09-06 (S5 review remediation round 2, finding S5R2-COMPOSE-B1): allows an org holding IMPORTER_DECLARANT only -- owner decision D2's importer-entered path can now attach evidence, not just create the record",
+          async () => {
+            const result =
+              await uploadEvidenceFile(
+                makeMockSupabase(
+                  {
+                    emission_data: { data: { entered_by_org_id: "org-1", evidence_file_ids: [] }, error: null },
+                    evidence_files: { data: evidenceFileRow, error: null },
+                    audit_events: { data: null, error: null },
+                  },
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
                 validInput,
               );
 
@@ -1030,7 +1052,7 @@ describe(
       "capability gate",
       () => {
         it(
-          "rejects an org without PRODUCER_OPERATOR with CAPABILITY_NOT_HELD, before touching the database",
+          "rejects an org with NEITHER PRODUCER_OPERATOR nor IMPORTER_DECLARANT with CAPABILITY_NOT_HELD, before touching the database",
           async () => {
             const recorder =
               makeRecorder();
@@ -1042,7 +1064,7 @@ describe(
                   {},
                   recorder,
                 ),
-                memberContext(["IMPORTER_DECLARANT"]),
+                memberContext([]),
                 "evidence-file-1" as never,
               );
 
@@ -1068,6 +1090,27 @@ describe(
                   },
                 ),
                 memberContext(["PRODUCER_OPERATOR"]),
+                "evidence-file-1" as never,
+              );
+
+            expect(result).toEqual(
+              { status: "OK" },
+            );
+          },
+        );
+
+        it(
+          "2026-09-06 (S5 review remediation round 2, finding S5R2-COMPOSE-B1): allows an org holding IMPORTER_DECLARANT only",
+          async () => {
+            const result =
+              await removeEvidenceFile(
+                makeMockSupabase(
+                  {
+                    evidence_files: { data: evidenceFileRow, error: null },
+                    emission_data: { data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1"] }, error: null },
+                  },
+                ),
+                memberContext(["IMPORTER_DECLARANT"]),
                 "evidence-file-1" as never,
               );
 
