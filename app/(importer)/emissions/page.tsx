@@ -302,11 +302,11 @@ function DeterminedLinesTable(
                     </Badge>
                   ) : line.sharing_grant_status === "REVOKED" ? (
                     <Badge tone="neutral">
-                      Can't verify — access revoked
+                      Can't confirm — access revoked
                     </Badge>
                   ) : line.sharing_grant_status === "EXPIRED" ? (
                     <Badge tone="neutral">
-                      Can't verify — access expired
+                      Can't confirm — access expired
                     </Badge>
                   ) : (
                     <Badge tone="success">
