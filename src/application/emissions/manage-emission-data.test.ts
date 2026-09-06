@@ -177,6 +177,12 @@ function makeMockSupabase(
       },
       order: () => chain,
       limit: () => chain,
+      // 2026-09-07 (S5 review round 6, findings S5R6-A-2/S5R6-SHARE-B2):
+      // listEmissionData now pages with .range(). Every fixture here
+      // returns well under EMISSION_DATA_PAGE_SIZE rows, so the paging
+      // loop always terminates after its first page -- this mock stays
+      // a one-shot resolver, .range() is a pure pass-through.
+      range: () => chain,
       insert: (payload: unknown) => {
         recorder.ops.push({ table, op: "insert", payload, filters });
         return chain;

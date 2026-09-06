@@ -52,36 +52,79 @@ import {
   type EmissionDataRow,
 } from "./emission-data-mapper";
 
+// 2026-09-07 (supabase/config.toml `max_rows = 1000`; S5 review round
+// 6, findings S5R6-A-2/S5R6-SHARE-B2). Paged with .range() -- an org's
+// emission_data only grows over time (entered records accumulate
+// across installations, reporting periods, and DRAFT/amendment
+// versions, and are never bulk-purged), so a long-lived producer or
+// importer-entered-data org eventually crosses PostgREST's row cap.
+// Both callers (app/(producer)/emission-data/page.tsx, app/(importer)/
+// external-emissions/page.tsx) are the org's own primary emissions
+// register -- a silently truncated result would hide real records with
+// no signal anything was dropped, the same defect class already fixed
+// across listShipments, listAvailableActualEmissionData,
+// listEvidenceFiles, and the sharing_grants list queries earlier this
+// same S5 phase.
+const EMISSION_DATA_PAGE_SIZE =
+  1000;
+
 export async function listEmissionData(
   supabase: SupabaseClient,
   orgId: OrganizationId,
 ): Promise<EmissionData[]> {
-  const { data, error } =
-    await supabase
-      .from("emission_data")
-      .select(
-        EMISSION_DATA_COLUMNS,
-      )
-      .eq("entered_by_org_id", orgId)
-      .order("created_at", { ascending: false });
+  const rows: EmissionDataRow[] =
+    [];
 
-  // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2). THROWS on a
-  // genuine query error rather than degrading to [] -- matching the
-  // throw-is-for-infrastructure-failures fix already applied to the
-  // sibling read services this same S5 phase. Both callers
-  // (app/(producer)/emission-data/page.tsx, app/(importer)/external-
-  // emissions/page.tsx) are plain server components with no try/catch
-  // of their own, so this reaches app/error.tsx the same way
-  // listShipments/listDeclarations already do. A transport failure here
-  // previously rendered as "no emission data recorded yet" -- a false
-  // all-clear on the producer's own emissions register.
-  if (error) {
-    throw new Error(
-      `manage-emission-data: emission_data fetch failed (${error.message}).`,
+  let offset =
+    0;
+
+  for (;;) {
+    const { data, error } =
+      await supabase
+        .from("emission_data")
+        .select(
+          EMISSION_DATA_COLUMNS,
+        )
+        .eq("entered_by_org_id", orgId)
+        .order("created_at", { ascending: false })
+        // `id` as a deterministic tie-breaker so .range() pagination
+        // stays stable across pages sharing a created_at value.
+        .order("id", { ascending: false })
+        .range(offset, offset + EMISSION_DATA_PAGE_SIZE - 1);
+
+    // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2). THROWS on
+    // a genuine query error rather than degrading to [] -- matching
+    // the throw-is-for-infrastructure-failures fix already applied to
+    // the sibling read services this same S5 phase. Both callers
+    // (app/(producer)/emission-data/page.tsx, app/(importer)/external-
+    // emissions/page.tsx) are plain server components with no
+    // try/catch of their own, so this reaches app/error.tsx the same
+    // way listShipments/listDeclarations already do. A transport
+    // failure here previously rendered as "no emission data recorded
+    // yet" -- a false all-clear on the producer's own emissions
+    // register.
+    if (error) {
+      throw new Error(
+        `manage-emission-data: emission_data fetch failed (${error.message}).`,
+      );
+    }
+
+    const page =
+      (data ?? []) as EmissionDataRow[];
+
+    rows.push(
+      ...page,
     );
+
+    if (page.length < EMISSION_DATA_PAGE_SIZE) {
+      break;
+    }
+
+    offset +=
+      EMISSION_DATA_PAGE_SIZE;
   }
 
-  return ((data ?? []) as EmissionDataRow[]).map(
+  return rows.map(
     toEmissionData,
   );
 }
