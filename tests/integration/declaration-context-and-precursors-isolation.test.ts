@@ -76,6 +76,8 @@ describe.skipIf(!localSupabaseReachable)(
     let secondEmissionDataId: string | undefined;
     let lockedEmissionDataId: string;
     let lockedContextId: string;
+    let draftVerifiedEmissionDataId: string;
+    let draftVerifiedContextId: string;
 
     let clientA: SupabaseClient;
     let clientB: SupabaseClient;
@@ -303,6 +305,8 @@ describe.skipIf(!localSupabaseReachable)(
       // lockedEmissionDataId is the separate ACTIVE+VERIFIED fixture the
       // lock tests create -- its own context/precursor rows are locked
       // the same way, so it needs the same parent-first deletion order.
+      // draftVerifiedEmissionDataId (S5) is likewise locked once
+      // verification_status='VERIFIED', even while status stays DRAFT.
       await serviceClient
         .from("emission_data")
         .delete()
@@ -312,6 +316,7 @@ describe.skipIf(!localSupabaseReachable)(
             emissionDataId,
             ...(secondEmissionDataId ? [secondEmissionDataId] : []),
             ...(lockedEmissionDataId ? [lockedEmissionDataId] : []),
+            ...(draftVerifiedEmissionDataId ? [draftVerifiedEmissionDataId] : []),
           ],
         );
 
@@ -1016,6 +1021,178 @@ describe.skipIf(!localSupabaseReachable)(
             .eq(
               "id",
               newPrecursor.id,
+            )
+            .maybeSingle();
+
+        expect(stillThere).not.toBeNull();
+      },
+    );
+
+    // S5 cross-phase hardening (20260906230000). app.enforce_dossier_lock
+    // used to fire only once verified_active_at was set, which happens
+    // only once a record is ACTIVE+VERIFIED together -- leaving the
+    // whole DRAFT+VERIFIED window (verifyEmissionData and
+    // activateEmissionData are separate, non-atomic actions) completely
+    // unprotected at the database layer. Widened to lock the moment the
+    // parent leaves DRAFT OR is VERIFIED, matching verifyEmissionData
+    // Editable's own app-layer condition.
+    it(
+      "once a record is VERIFIED -- even while it is still DRAFT, not yet ACTIVE -- its declaration context can no longer be edited by anyone in the owning org",
+      async () => {
+        const { data: draftVerifiedRow, error: draftVerifiedRowError } =
+          await serviceClient
+            .from("emission_data")
+            .insert(
+              {
+                installation_id: installationId,
+                entered_by_org_id: orgAId,
+                cn_scope: ["25231000"],
+                reporting_period_kind: "ANNUAL",
+                reporting_period_year: 2029,
+                direct_specific: "1.0",
+                indirect_specific: "0.5",
+                emission_unit: "tCO2e/t",
+                methodology: "EU_METHOD",
+                status: "DRAFT",
+                verification_status: "VERIFIED",
+                verifier_user_id: memberAId,
+                version: 1,
+              },
+            )
+            .select("id")
+            .single();
+
+        if (draftVerifiedRowError || !draftVerifiedRow) {
+          throw new Error(
+            `Failed to create a DRAFT+VERIFIED emission_data row: ${draftVerifiedRowError?.message}`,
+          );
+        }
+
+        draftVerifiedEmissionDataId = draftVerifiedRow.id;
+
+        const { data: draftVerifiedRowCheck } =
+          await serviceClient
+            .from("emission_data")
+            .select("status, verification_status, verified_active_at")
+            .eq("id", draftVerifiedEmissionDataId)
+            .single();
+
+        // Confirms the fixture actually reached the state under test --
+        // status stays DRAFT and verified_active_at stays null, unlike
+        // the ACTIVE+VERIFIED fixture above.
+        expect(draftVerifiedRowCheck?.status).toBe(
+          "DRAFT",
+        );
+
+        expect(draftVerifiedRowCheck?.verification_status).toBe(
+          "VERIFIED",
+        );
+
+        expect(draftVerifiedRowCheck?.verified_active_at).toBeNull();
+
+        const { data: draftVerifiedContext, error: draftVerifiedContextError } =
+          await serviceClient
+            .from("emission_data_declaration_context")
+            .insert(
+              {
+                org_id: orgAId,
+                emission_data_id: draftVerifiedEmissionDataId,
+                production_process_description: "Kiln-fired, verified but not yet activated",
+              },
+            )
+            .select("id")
+            .single();
+
+        if (draftVerifiedContextError || !draftVerifiedContext) {
+          throw new Error(
+            `Failed to create the DRAFT+VERIFIED row's declaration context: ${draftVerifiedContextError?.message}`,
+          );
+        }
+
+        draftVerifiedContextId = draftVerifiedContext.id;
+
+        const { data, error } =
+          await clientA
+            .from("emission_data_declaration_context")
+            .update(
+              { production_process_description: "Tampered while DRAFT+VERIFIED" },
+            )
+            .eq(
+              "id",
+              draftVerifiedContextId,
+            )
+            .select(
+              "id",
+            );
+
+        expect(error).not.toBeNull();
+        expect(data).toBeNull();
+
+        const { data: unchanged } =
+          await serviceClient
+            .from("emission_data_declaration_context")
+            .select(
+              "production_process_description",
+            )
+            .eq(
+              "id",
+              draftVerifiedContextId,
+            )
+            .single();
+
+        expect(unchanged?.production_process_description).toBe(
+          "Kiln-fired, verified but not yet activated",
+        );
+      },
+    );
+
+    it(
+      "...and a precursor declared against the same DRAFT+VERIFIED record can no longer be deleted",
+      async () => {
+        const { data: draftVerifiedPrecursor, error: draftVerifiedPrecursorError } =
+          await serviceClient
+            .from("emission_data_precursors")
+            .insert(
+              {
+                org_id: orgAId,
+                emission_data_id: draftVerifiedEmissionDataId,
+                material_description: "Precursor on a DRAFT+VERIFIED record, for the S5 lock regression test",
+                provenance: "UNKNOWN",
+              },
+            )
+            .select("id")
+            .single();
+
+        if (draftVerifiedPrecursorError || !draftVerifiedPrecursor) {
+          throw new Error(
+            `Failed to create precursor for the DRAFT+VERIFIED lock test: ${draftVerifiedPrecursorError?.message}`,
+          );
+        }
+
+        const { data, error } =
+          await clientA
+            .from("emission_data_precursors")
+            .delete()
+            .eq(
+              "id",
+              draftVerifiedPrecursor.id,
+            )
+            .select(
+              "id",
+            );
+
+        expect(error).not.toBeNull();
+        expect(data).toBeNull();
+
+        const { data: stillThere } =
+          await serviceClient
+            .from("emission_data_precursors")
+            .select(
+              "id",
+            )
+            .eq(
+              "id",
+              draftVerifiedPrecursor.id,
             )
             .maybeSingle();
 
