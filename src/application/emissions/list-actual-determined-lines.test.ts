@@ -163,6 +163,12 @@ function makeMockSupabase(
         return chain;
       },
       order: () => chain,
+      // 2026-09-07 (S5 review round 3, finding S5R3-STALE-B3): the
+      // cross-org shipment_lines query now pages with .range(). Every
+      // fixture here returns well under LINE_PAGE_SIZE rows, so the
+      // paging loop always terminates after its first page -- this mock
+      // stays a one-shot resolver, .range() is a pure pass-through.
+      range: () => chain,
       then: (
         resolve: (value: { data: unknown; error: unknown }) => unknown,
         reject: (reason: unknown) => unknown,

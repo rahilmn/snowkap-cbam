@@ -224,25 +224,64 @@ export async function listActualDeterminedLines(
   supabase: SupabaseClient,
   orgId: OrganizationId,
 ): Promise<ActualDeterminedLineOverviewRow[]> {
-  const { data: lineRows, error: lineError } =
-    await supabase
-      .from("shipment_lines")
-      .select(
-        SHIPMENT_LINE_COLUMNS,
-      )
-      .eq("org_id", orgId)
-      .eq("determination_method", "ACTUAL")
-      .order("shipment_id", { ascending: true })
-      .order("line_number", { ascending: true });
+  // 2026-09-07 (supabase/config.toml `max_rows = 1000`; S5 review round
+  // 3, finding S5R3-STALE-B3). This is the one query in this file with
+  // no per-shipment scope at all -- every ACTUAL-determined line across
+  // the ENTIRE org, which is exactly the shape most likely to exceed
+  // PostgREST's row cap for an org with many shipments. Un-paged, it
+  // previously returned HTTP 200 with `error: null` and silently kept
+  // only the first 1000 rows (shipment_id, then line_number order) --
+  // indistinguishable from "this org has no more than 1000 ACTUAL
+  // lines," on the one screen whose entire purpose (master plan §27
+  // screen 15) is surfacing which lines need re-determination. Paged
+  // with .range(), matching the established convention for this defect
+  // class elsewhere in this file's own siblings (list-shared-data-
+  // status.ts, get-declaration-detail.ts).
+  const LINE_PAGE_SIZE =
+    1000;
 
-  if (lineError) {
-    throw new Error(
-      `list-actual-determined-lines: shipment_lines fetch failed (${lineError.message}).`,
+  const lineRows: ShipmentLineRow[] =
+    [];
+
+  let lineOffset =
+    0;
+
+  for (;;) {
+    const { data, error: lineError } =
+      await supabase
+        .from("shipment_lines")
+        .select(
+          SHIPMENT_LINE_COLUMNS,
+        )
+        .eq("org_id", orgId)
+        .eq("determination_method", "ACTUAL")
+        .order("shipment_id", { ascending: true })
+        .order("line_number", { ascending: true })
+        .range(lineOffset, lineOffset + LINE_PAGE_SIZE - 1);
+
+    if (lineError) {
+      throw new Error(
+        `list-actual-determined-lines: shipment_lines fetch failed (${lineError.message}).`,
+      );
+    }
+
+    const page =
+      (data ?? []) as ShipmentLineRow[];
+
+    lineRows.push(
+      ...page,
     );
+
+    if (page.length < LINE_PAGE_SIZE) {
+      break;
+    }
+
+    lineOffset +=
+      LINE_PAGE_SIZE;
   }
 
   const actualLines =
-    ((lineRows ?? []) as ShipmentLineRow[])
+    lineRows
       .map(
         toShipmentLine,
       )
