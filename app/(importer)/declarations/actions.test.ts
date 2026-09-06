@@ -398,7 +398,7 @@ describe(
           {
             status: "error",
             message:
-              "A declaration for this period is already marked READY. Reopen it, or wait for it to be filed, before starting a new one.",
+              "A declaration for this period is already approved for filing. Reopen it, or wait for it to be filed, before starting a new one.",
           },
         );
       },

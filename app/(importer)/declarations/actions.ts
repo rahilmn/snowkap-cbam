@@ -162,7 +162,7 @@ function draftMessageFor(
       return "Your organization is not set up as a CBAM importer/declarant.";
 
     case "PERIOD_HAS_READY_DECLARATION":
-      return "A declaration for this period is already marked READY. Reopen it, or wait for it to be filed, before starting a new one.";
+      return "A declaration for this period is already approved for filing. Reopen it, or wait for it to be filed, before starting a new one.";
 
     case "PERIOD_ALREADY_FILED":
       return "This period already has a filed declaration. Create an amendment from that declaration instead of starting a new one.";
@@ -226,7 +226,7 @@ function filedMessageFor(
       return "This declaration has already been recorded as filed.";
 
     case "NOT_READY":
-      return "Mark this declaration READY before recording it as filed.";
+      return "Approve this declaration for filing before recording it as filed.";
 
     case "NO_MEMBER_SHIPMENTS":
       return "This declaration has no member shipments to lock.";
@@ -256,10 +256,10 @@ function filedMessageFor(
     // approved over. Recoverable, and the message says how: re-approving
     // the declaration is what records the new population as approved.
     case "POPULATION_CHANGED_SINCE_READY":
-      return "The lines in this declaration's shipments have changed since it was marked ready, so filing it now would record a different population than the one approved. Reopen the declaration, check the lines, and mark it ready again.";
+      return "The lines in this declaration's shipments have changed since it was approved for filing, so filing it now would record a different population than the one approved. Reopen the declaration, check the lines, and approve it for filing again.";
 
     case "APPROVED_POPULATION_UNKNOWN":
-      return "This declaration has no record of the line population it was approved over, so filing cannot confirm the two match. Reopen it and mark it ready again.";
+      return "This declaration has no record of the line population it was approved over, so filing cannot confirm the two match. Reopen it and approve it for filing again.";
 
     default:
       return "Something went wrong recording this filing. Please try again.";
