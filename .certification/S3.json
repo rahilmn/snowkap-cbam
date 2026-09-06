@@ -1,0 +1,92 @@
+{
+  "phase": "S3-importer-experience",
+  "base_commit": "7185576079415b79691d5606e52b25a613c5f749",
+  "commit": "25c778f9090051b268b7d1cf63d7690107e725d4",
+  "branch": "feature/sme-experience",
+  "verdict": "PASS_WITH_NOTES",
+  "certifiable": true,
+  "certified_at": "2026-09-06T05:52:00Z",
+  "commits_in_phase": [
+    "eb8a93b feat(sme-s3): DataTable foundation with mobile card fallback",
+    "7e264e0 feat(sme-s3): guided line wizard, replacing the flat 6-field add-line form",
+    "b920be3 feat(sme-s3): trust panel -- render the review-status badge in \"Why this number?\"",
+    "116b7c8 feat(sme-s3): distinguish \"Ready for declaration\" from \"Approved for filing\"",
+    "fb71643 feat(sme-s3): default reference display on ACTUAL-determined lines",
+    "8e22823 fix(sme-s3): resolveGoodSectorForActualLine had no org_id defense of its own",
+    "83c54a9 fix(sme-s3): add-line wizard's step buttons were under the 44x44 touch target",
+    "d912e06 feat(sme-s3): prominent per-shipment total embedded emissions",
+    "fbe2d29 fix(sme-s3): fresh review remediation -- stale calculations, org check, tap target",
+    "25c778f polish(sme-s3): swap wizard's hand-rolled select, scope N4's fix to mobile only"
+  ],
+  "review_rounds": [
+    {
+      "round": 1,
+      "reviewer": "independent adversarial review (Opus 5), fresh -- isolated worktree, no prior session context",
+      "reviewed_head": "d912e0695e9424f3181b0c8d8396abefb69cb41e",
+      "verdict": "FAIL",
+      "blocking_findings": 1,
+      "non_blocking_findings": 9,
+      "p14_protected_zone": "CLEAN",
+      "summary": "B1 (CRITICAL): the new per-shipment 'Total embedded emissions' headline (sum-shipment-emissions.ts, wired from page.tsx) summed every line's latest calculation unfiltered, including STALE ones -- a line re-determined after being calculated (calculation_results is append-only) kept contributing its superseded figure to the headline while the per-line badge, the period report, and the declaration completeness check all correctly treated it as not-current. Reintroduced, one layer up, a defect build-period-summary.ts's calculationIsCurrent already found and fixed at the period level (2026-09-03, P14). 9 non-blocking findings also reported (N1-N9): missing unit/dataset_version on default-reference display, an org-check gap in reproduce-calculation-result.ts's resolveCnCodeForLine mirroring the same class as an already-fixed gap, unbounded per-line regulatory resolver fan-out with no dedup, a sub-44px mobile card tap target, deliberate E2E force-click trade-offs, a declaration-approval button reading as a status claim, wizard error placement, cn-code-picker keyboard-reopen friction, and default-reference collapsing distinct regulatory reasons into one UNAVAILABLE label."
+    },
+    {
+      "round": 2,
+      "reviewer": "independent adversarial re-review (Opus 5), fresh -- separate isolated worktree, no context from round 1's own agent",
+      "reviewed_head": "fbe2d299b6bf986dfa750ecca52d99abdb96102b",
+      "verdict": "PASS_WITH_NOTES",
+      "b1_resolved": "YES, independently verified -- reproduced the pre-fix bug itself (the old call shape published 1000011.5 where 12.5 is correct) and confirmed the fix's own test suite exercises real values, not just shapes",
+      "new_blocking_findings": 0,
+      "new_non_blocking_findings": 4,
+      "p14_protected_zone": "CLEAN",
+      "certifiable": "YES",
+      "summary": "Verified get-shipment-emissions-total.ts calls checkCalculationCurrency with the correct (calculatedAgainst, currentDetermination) argument order, that page.tsx feeds it the same two objects LinesTable already renders (so the headline and the per-line staleness badge cannot disagree), and wrote an independent scratch test suite covering COMPLETE/PARTIAL/NONE/mixed-staleness/jsonb-key-order cases before deleting it. Grepped every embedded_emissions_tco2e consumer in the codebase and found no second copy of the bug. Confirmed the N2 (org check) and N4 (tap target) fixes from the remediation commit are complete and correct. Found 4 new non-blocking issues: N10 (wizard's hand-rolled <select> under the design system's own Select component, itself 44px below md), N11 (the N4 fix applied its 44px min-height unconditionally, growing desktop rows unnecessarily), N12 (the 'Not yet calculated' headline wording is imprecise for a line that WAS calculated but is now stale -- no distinct reason code exists), N13 (a trivial doc-comment formatting nit)."
+    }
+  ],
+  "post_review_polish": {
+    "commit": "25c778f9090051b268b7d1cf63d7690107e725d4",
+    "addressed": ["N10", "N11", "N13"],
+    "not_addressed": ["N1", "N3", "N5", "N6", "N7", "N8", "N9", "N12"],
+    "third_review_performed": false,
+    "rationale": "The phase was already CERTIFIABLE: YES after round 2. N10/N11/N13 are mechanical, low-risk changes (a component swap to an existing, already-used design-system primitive; a Tailwind breakpoint prefix; a comment-formatting fix) verified directly via typecheck, the full unit/integration suite, the full E2E suite, a production build, and a live DOM measurement (375px viewport: 44px; desktop: 20px) rather than via a third adversarial round. None of N1/N3/N5-N9/N12 puts a wrong number in front of a user or crosses a tenant boundary -- the two classes of finding this codebase treats as blocking -- so none were treated as gating certification."
+  },
+  "known_open_gaps": [
+    "N1 -- default-reference display (why-this-number-panel.tsx) omits emission_unit and dataset_version, unlike the actual-snapshot figures rendered above it in the same panel.",
+    "N3 -- getDefaultReferenceForLine is called once per ACTUAL-determined line with no dedup by (cnCode, originCountry, route), unlike the file's own distinct-cn_code dedup 80 lines earlier for the same reason. Unbounded fan-out on a large shipment.",
+    "N5 -- 6 E2E specs use .click({force: true}) on the 'Add line' submit button to work around a Playwright double-dispatch artifact (root-caused this session via trace.zip network-log extraction, not a real user risk since Button self-disables on click), trading away actionability-check coverage for that click. A disclosed, considered trade-off.",
+    "N6 -- the declaration-approval button on a DRAFT declaration reads 'Approved for filing' (past-tense, reads as a status claim) while its own confirm dialog correctly reads 'Approve for filing' (imperative). Pre-existing pattern, not introduced by S3, but S3's own terminology-clarity slice (116b7c8) did not catch it.",
+    "N7 -- a wizard submission error surfaces on the Review step even when the invalid field lives on an earlier, now-hidden step.",
+    "N8 -- after selecting a CN code, the results dropdown cannot be reopened by refocusing the field with the keyboard; only typing reopens it (the justSelectedRef guard is broader than the reopen bug it was built to fix).",
+    "N9 -- describeDefaultReference collapses REFERENCE_REQUIRED / NOT_APPLICABLE / SOURCE_TEXT into one UNAVAILABLE outcome, rendered as a single generic 'Reference unavailable.' string -- fail-closed (correct direction) but less specific than the rest of this codebase's regulatory-reason vocabulary.",
+    "N12 -- ShipmentEmissionsTotal has no distinct status/reason for 'was calculated, is now stale' vs 'never calculated' -- both currently render as 'Not yet calculated', which is imprecise for the former.",
+    "readiness surfacing at the shipment-detail level stayed at the pre-existing static banner ('Ready requires every line to have a resolved emission determination...') plus the existing S2 dashboard guidance queue -- no new shipment-page widget was built, since nothing new was added that could duplicate the guidance engine's own logic.",
+    "app/(importer)/shipments/[id]/lines-table.tsx has no mobile card fallback the way the newer DataTable component does -- it predates DataTable, has per-row expansion and multiple in-cell forms DataTable's model doesn't support, and a full rebuild was judged out of scope for this phase. Columns remain reachable via horizontal scroll, not hidden.",
+    "listCbamGoodsBySector, a capability the S3 spec authorized (not required), was never built -- the guided line wizard's CN-code search reuses the pre-existing searchCbamGoodsByPrefix/searchCbamGoodsByText, so the capability was never needed.",
+    "export columns (src/application/reporting/build-period-export-rows.ts) are unchanged -- the S3 spec required exports to stay additive/non-breaking but never specified new columns to add."
+  ],
+  "constraints_verified": {
+    "p14_protected_surfaces_untouched": true,
+    "protected_paths_checked": [
+      "src/domain/regulatory/",
+      "src/infrastructure/regulatory/",
+      "src/infrastructure/supabase/client.ts",
+      "supabase/migrations/20260826133116_create_regulatory_foundation.sql",
+      "supabase/migrations/20260827093000_support_regulatory_geography.sql",
+      "supabase/migrations/20260827110000_activate_definitive_regulatory_dataset.sql",
+      "supabase/migrations/20260827130000_harden_regulatory_emission_uniqueness.sql",
+      "supabase/migrations/20260828100000_authenticated_read_regulatory_data.sql",
+      "scripts/regulatory/"
+    ],
+    "new_migrations_added_by_this_phase": 0,
+    "duplicate_calculation_or_classification_logic": "none found -- decimal.js confirmed imported nowhere outside src/domain/shared/decimal.ts; ANNEX_II_SECTORS, resolveDefaultValue, resolveGoodSectorForActualLine, resolutionCountryName all exported and reused, never re-implemented; sum-shipment-emissions.ts and get-shipment-emissions-total.ts are aggregation only (decimal addition of already-computed figures, plus a staleness filter reusing an existing domain function), never an independent calculation",
+    "scope_creep": "none observed -- zero occurrences anywhere in the full phase diff of: carbon-price, certificate, benchmark, scenario, renewable, supplier-score, euro-exposure, buyer, dossier, verifier-report, savings. No S4 functionality (producer dossier, verifier report declaration, buyer view) or deferred-feature language present.",
+    "typecheck": "pass (exit 0)",
+    "production_build": "pass (next build + copy-standalone-assets + assert-clean-production-artifact, all exit 0)",
+    "full_unit_integration_suite": "1980 passed, 14 skipped, 2 failed -- both failures in tests/integration/password-change-current-password-proof.test.ts (otherSessionsSignedOut assertion), confirmed pre-existing and unrelated to this phase's diff via two independent methods: (1) its full transitive import closure touches no file in this phase's diff, (2) reproduces identically when run against the pre-phase base commit 7185576",
+    "full_e2e_suite": "73 passed, 15 skipped (all pre-existing documented skips -- the Storage-disabled live probe in actual-data-determination.spec.ts, and mobile-chromium project duplicates of desktop-only specs), 0 hard failures. One flaky result observed in an earlier run (change-password.spec.ts, same pre-existing password/session area, passed on retry) -- not reproduced in the final run on this exact HEAD.",
+    "regulatory_verify": "NOT RUN -- no file under the protected regulatory zone is touched anywhere in this phase (verified by diff across the full base..HEAD range), and pnpm regulatory:verify requires SUPABASE_DB_PASSWORD plus a configured Python environment, neither present in this environment. Stated explicitly per CLAUDE.md rather than skipped silently."
+  },
+  "environment_blocked": [
+    "tests/e2e/actual-data-determination.spec.ts self-skips on this host because Supabase Storage is disabled locally (supabase_storage_snowkap-cbam container continuously restart-looping) -- a genuine, pre-existing, standing environment limitation predating this phase, not a weakened test. This is the one E2E path that would exercise the ACTUAL-determination flow the trust-panel and default-reference-display features target most directly."
+  ],
+  "summary": "PASS_WITH_NOTES. Two independent, fresh Opus reviews were run against this phase, in isolated worktrees with no shared context between them or with the implementing session. The first (round 1, against d912e06) found one CRITICAL blocking defect -- a newly-added shipment-level emissions total that silently summed stale calculations, capable of showing a wrong regulatory figure in the largest text on the screen, in direct disagreement with the same page's own per-line staleness badge -- plus 9 non-blocking findings. The blocker was fixed in fbe2d29 by extracting the aggregation into a new, independently-tested application function (get-shipment-emissions-total.ts) that filters every line through the same checkCalculationCurrency domain function the per-line staleness badge already uses, so the two can no longer disagree; two of the nine non-blocking findings (an org-check gap mirroring an already-fixed one, and a mobile tap-target size issue) were fixed in the same commit. The second review (round 2, against fbe2d29, run by a different agent instance with no knowledge of the first review's own agent) independently reproduced the original bug to confirm the fix was real (the pre-fix code path would have published 1000011.5 where 12.5 is correct), verified no second copy of the defect exists anywhere in the codebase, confirmed both bundled non-blocking fixes are correct and complete, and returned PASS_WITH_NOTES / CERTIFIABLE: YES with zero new blocking findings and four new non-blocking ones. Two of those four (a wizard field that should have used an existing 44px-capable design-system component, and an over-broad application of a tap-target fix that grew desktop rows unnecessarily) were corrected in a final polish commit (25c778f), verified directly via typecheck, the full 1996-test suite, the full 88-spec E2E suite, a production build, and a live DOM measurement, without a third adversarial round -- the phase was already certifiable before that commit, and the remaining changes were mechanical and low-risk. P14's protected regulatory zone was confirmed untouched across the entire phase, in every commit, by direct diff inspection. No duplicate calculation or classification logic was introduced anywhere. No S4 functionality or deferred-feature scope leaked in. A complete, honest list of known, disclosed, non-blocking gaps is recorded above rather than left implicit. This certification authorizes nothing beyond the review itself: no push, no merge, no deploy, and S4 does not begin automatically."
+}
