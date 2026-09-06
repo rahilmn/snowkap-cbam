@@ -31,6 +31,20 @@ import {
 } from "../../../src/application/declarations/list-declarations";
 
 import {
+  computeCompletenessReportStaleness,
+  fetchMemberShipments,
+  type DeclarationMemberShipmentSummary,
+} from "../../../src/application/declarations/get-declaration-detail";
+
+import type {
+  ShipmentId,
+} from "../../../src/domain/shared/ids";
+
+import {
+  Badge,
+} from "../../../components/ui/badge";
+
+import {
   formatReportingPeriod,
 } from "../../../src/domain/shared/reporting-period";
 
@@ -106,6 +120,53 @@ export default async function DeclarationsPage() {
       orgSummary.context.org_id,
     );
 
+  // 2026-09-07 (S5 review round 6, finding S5R6-A-B1). Declarations are
+  // one-per-period by construction
+  // (declarations_period_in_preparation_uq/
+  // declarations_period_original_uq), so a real org has at most a
+  // handful of rows in this list ever -- computing the identical
+  // staleness signal the detail page already computes (S5R5-VOCAB-1),
+  // once per row here, is not the "meaningfully larger batched-query
+  // feature" this page's own prior comment assumed it would be.
+  // Reuses computeCompletenessReportStaleness/fetchMemberShipments
+  // verbatim (get-declaration-detail.ts) rather than re-deriving the
+  // logic a second time, so the two screens can never disagree.
+  const staleByDeclarationId =
+    new Map(
+      await Promise.all(
+        declarations.map(
+          async (declaration) => {
+            const memberShipmentRows =
+              await fetchMemberShipments(
+                supabase,
+                declaration.member_shipment_ids,
+              );
+
+            const memberShipments: DeclarationMemberShipmentSummary[] =
+              memberShipmentRows.map(
+                (row) => (
+                  {
+                    id: row.id as ShipmentId,
+                    reference: row.reference,
+                    status: row.status,
+                  }
+                ),
+              );
+
+            const { stale } =
+              await computeCompletenessReportStaleness(
+                supabase,
+                declaration,
+                memberShipments,
+                declaration.member_shipment_ids,
+              );
+
+            return [declaration.id, stale] as const;
+          },
+        ),
+      ),
+    );
+
   return (
     <AppShell
       breadcrumbs={[
@@ -177,33 +238,30 @@ export default async function DeclarationsPage() {
                       </td>
 
                       <td className="px-4 py-2.5">
-                        {
-                          // 2026-09-07 (S5 review round 5, finding
-                          // S5R5-VOCAB-1). This list renders the raw
-                          // declaration.status alone, the same gap the
-                          // detail page's own header badge had -- fixed
-                          // there (app/(importer)/declarations/[id]/
-                          // page.tsx) by adding a "Needs refresh" badge
-                          // driven by completenessReportStale.
-                          // listDeclarations (this page's own data
-                          // source) does not compute that signal, and
-                          // this list is deliberately scoped to a
-                          // lightweight, single-query overview (also
-                          // shared by deriveGuidanceItems) -- adding it
-                          // here would mean re-deriving per-declaration
-                          // member-shipment-status and dataset-currency
-                          // checks for every row in the list, a
-                          // meaningfully larger batched-query feature,
-                          // not a hardening fix. Disclosed rather than
-                          // silently left: a reader who needs to know
-                          // whether a specific READY declaration is
-                          // still genuinely ready to file should open
-                          // its detail page, which now states this
-                          // correctly.
-                        }
-                        <StatusBadge
-                          statusKey={declarationStatusKey(declaration.status)}
-                        />
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <StatusBadge
+                            statusKey={declarationStatusKey(declaration.status)}
+                          />
+
+                          {
+                            // 2026-09-07 (S5 review round 6, finding
+                            // S5R6-A-B1). Mirrors the detail page's own
+                            // "Needs refresh" badge (S5R5-VOCAB-1) --
+                            // this list previously rendered the raw
+                            // status alone, so a READY declaration whose
+                            // completeness report had gone stale (a
+                            // reopened member shipment, or a regulatory
+                            // correction) still read as an unqualified
+                            // green "Approved for filing" on the one
+                            // overview screen a compliance officer would
+                            // scan to decide what still needs filing.
+                            staleByDeclarationId.get(declaration.id) ? (
+                              <Badge tone="warning">
+                                Needs refresh
+                              </Badge>
+                            ) : null
+                          }
+                        </div>
                       </td>
 
                       <td className="px-4 py-2.5 text-[var(--text-secondary)]">

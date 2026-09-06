@@ -165,7 +165,7 @@ const MEMBER_ID_BATCH_SIZE =
  * Silence about a fetch failure on a compliance record is the defect;
  * the length limit was only what made it visible.
  */
-async function fetchMemberShipments(
+export async function fetchMemberShipments(
   supabase: SupabaseClient,
   memberIds: readonly string[],
 ): Promise<ShipmentSummaryRow[]> {
@@ -440,6 +440,54 @@ export async function getDeclarationDetail(
           }
         : null;
 
+  const { stale: completenessReportStale, reason: completenessReportStaleReason } =
+    await computeCompletenessReportStaleness(
+      supabase,
+      declaration,
+      memberShipments,
+      memberIds,
+    );
+
+  return {
+    declaration,
+    member_shipments: memberShipments,
+    supersedes: toLineageEntry(
+      predecessorRow as LineageRow | null,
+    ),
+    superseded_by: toLineageEntry(
+      successorRow as LineageRow | null,
+    ),
+    completeness_report_stale: completenessReportStale,
+    completeness_report_stale_reason: completenessReportStaleReason,
+  };
+}
+
+export interface CompletenessReportStaleness {
+  stale: boolean;
+  reason: "MEMBER_REOPENED" | "DATASET_SUPERSEDED" | null;
+}
+
+/**
+ * 2026-09-07 (S5 review round 6, finding S5R6-A-B1). Extracted from
+ * this function's own body so the declarations LIST page
+ * (app/(importer)/declarations/page.tsx) can compute the identical
+ * signal per row, rather than the two screens risking disagreement
+ * through two independently-maintained copies of the same logic. The
+ * list page previously rendered a raw, unqualified status badge with
+ * no staleness computation at all -- the byte-identical gap round 5
+ * (S5R5-VOCAB-1) fixed on this detail page, deliberately deferred there
+ * on the (incorrect) assumption that per-row staleness would require a
+ * "meaningfully larger batched-query feature": declarations are
+ * one-per-period by construction (declarations_period_in_preparation_uq/
+ * declarations_period_original_uq), so a real org has at most a
+ * handful of rows ever, not a scale problem.
+ */
+export async function computeCompletenessReportStaleness(
+  supabase: SupabaseClient,
+  declaration: Pick<Declaration, "status" | "completeness_report">,
+  memberShipments: readonly DeclarationMemberShipmentSummary[],
+  memberIds: readonly string[],
+): Promise<CompletenessReportStaleness> {
   const reportClaimsComplete =
     declaration.completeness_report !== null &&
     declaration.completeness_report.complete;
@@ -493,32 +541,19 @@ export async function getDeclarationDetail(
       memberIds,
     ));
 
-  const completenessReportStale =
-    memberStatusStale || datasetStale;
-
   // 2026-09-06 (S5 review remediation round 2, finding EF2-B3). Lets
   // the UI explain the ACTUAL reason rather than always printing the
   // "a member shipment was reopened" copy -- memberStatusStale and
   // datasetStale are mutually exclusive by construction (datasetStale
   // is gated on `!memberStatusStale`), so this is a true discriminant,
-  // never both/neither when completenessReportStale is true.
-  const completenessReportStaleReason: DeclarationDetail["completeness_report_stale_reason"] =
-    memberStatusStale
-      ? "MEMBER_REOPENED"
-      : datasetStale
-      ? "DATASET_SUPERSEDED"
-      : null;
-
+  // never both/neither when the combined result is stale.
   return {
-    declaration,
-    member_shipments: memberShipments,
-    supersedes: toLineageEntry(
-      predecessorRow as LineageRow | null,
-    ),
-    superseded_by: toLineageEntry(
-      successorRow as LineageRow | null,
-    ),
-    completeness_report_stale: completenessReportStale,
-    completeness_report_stale_reason: completenessReportStaleReason,
+    stale: memberStatusStale || datasetStale,
+    reason:
+      memberStatusStale
+        ? "MEMBER_REOPENED"
+        : datasetStale
+        ? "DATASET_SUPERSEDED"
+        : null,
   };
 }
