@@ -83,7 +83,7 @@ export async function getCurrentOrgSummary(
     return null;
   }
 
-  const { data: memberships } =
+  const { data: memberships, error } =
     await supabase
       .from("memberships")
       .select(
@@ -104,6 +104,28 @@ export async function getCurrentOrgSummary(
         "created_at",
         { ascending: true },
       );
+
+  // 2026-09-07 (S5 review round 6, finding S5R6-A-1). This is the
+  // single most load-bearing read in the whole application -- every
+  // page.tsx under app/** and nearly every Server Action calls it, and
+  // both app/(importer)/layout.tsx and app/(producer)/layout.tsx
+  // redirect("/onboarding") on a null result, exactly as if the caller
+  // had never joined an organization. A genuine Postgres/transport
+  // error on this one query was previously indistinguishable from that
+  // case (the destructure above never named `error`), so a transient
+  // failure bounced every authenticated, actually-org-member user in
+  // the entire product to onboarding, or silently denied whatever
+  // action they were taking -- the same defect class round 5 already
+  // fixed in three siblings (organization-profile.ts's
+  // getOrganizationProfile, get-shipment-detail.ts,
+  // get-declaration-detail.ts's fetchMemberShipments) but never applied
+  // here, despite this function having by far the largest blast radius
+  // of any of them.
+  if (error) {
+    throw new Error(
+      `get-current-org-context: memberships fetch failed (${error.message}).`,
+    );
+  }
 
   if (!memberships || memberships.length === 0) {
     return null;

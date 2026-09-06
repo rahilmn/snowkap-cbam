@@ -53,7 +53,9 @@ const membershipRows =
     },
   ];
 
-function mockSupabase() {
+function mockSupabase(
+  membershipsError: { message: string } | null = null,
+) {
   return {
     auth: {
       getUser: () =>
@@ -73,13 +75,15 @@ function mockSupabase() {
               {
                 order: () =>
                   Promise.resolve(
-                    {
-                      data: membershipRows.filter(
-                        (row) =>
-                          (row as never)[field] === value,
-                      ),
-                      error: null,
-                    },
+                    membershipsError
+                      ? { data: null, error: membershipsError }
+                      : {
+                          data: membershipRows.filter(
+                            (row) =>
+                              (row as never)[field] === value,
+                          ),
+                          error: null,
+                        },
                   ),
               }
             ),
@@ -168,6 +172,19 @@ describe(
 
         expect(summary?.context.org_id).toBe(
           orgAId,
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 6, finding S5R6-A-1): throws on a genuine memberships-query error instead of returning null -- a null result here is indistinguishable from 'never joined an org' to every one of this function's ~68 callers, most of which redirect to onboarding or deny the action outright",
+      async () => {
+        await expect(
+          getCurrentOrgSummary(
+            mockSupabase({ message: "connection reset by peer" }),
+          ),
+        ).rejects.toThrow(
+          /memberships fetch failed/,
         );
       },
     );
