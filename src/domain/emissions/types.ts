@@ -11,6 +11,11 @@ import type {
 } from "../installations/types";
 
 import type {
+  FrozenDeclarationContext,
+  FrozenPrecursor,
+} from "./declaration-context-types";
+
+import type {
   IsoTimestamp,
 } from "../shared/reporting-period";
 
@@ -188,6 +193,42 @@ export interface ActualEmissionSnapshot {
    * "unknown period": every write since sets it.
    */
   dataset_reporting_period?: ReportingPeriod;
+
+  /**
+   * S4 (producer/trust/sharing), v2.1.1 §11: the declared context that
+   * existed on the source emission_data record at the moment this
+   * determination was made, frozen alongside it -- exactly the same
+   * "sharing needs no new grant semantics" resolution the S4 INSPECT
+   * pass reached: a sharing grant is (and stays) installation-scoped,
+   * and the importer already reads through this SAME snapshot to see
+   * everything about the shared data, so freezing dossier context here
+   * is a strict extension of an existing mechanism, not a second one.
+   *
+   * `null` (not absent) means the source record genuinely had no
+   * declaration context captured at determination time -- a real,
+   * meaningful fact about that record, never confused with "frozen
+   * before this field existed" (see this field's own optionality note
+   * below).
+   *
+   * OPTIONAL because determinations frozen before this existed carry no
+   * such key. Absent means "frozen before this field existed", never
+   * "no context" -- every write since sets it (to a real object or to
+   * `null`), matching record_provenance's/dataset_reporting_period's
+   * own optionality convention above.
+   */
+  declaration_context?: FrozenDeclarationContext | null;
+
+  /**
+   * S4 (producer/trust/sharing), v2.1.1 §12: the precursor materials
+   * declared on the source emission_data record at the moment this
+   * determination was made, frozen alongside it -- same reasoning as
+   * declaration_context above. An empty array is a real, meaningful
+   * fact ("no precursors were declared"), distinct from this field
+   * being entirely absent (frozen before it existed).
+   *
+   * OPTIONAL for the identical reason declaration_context is.
+   */
+  precursors?: FrozenPrecursor[];
 }
 
 export type EmissionDetermination =

@@ -286,7 +286,93 @@ describe(
             // 2026-09-04 (owner decision 7): the period the emissions
             // data covers, frozen with the numbers.
             dataset_reporting_period: { kind: "ANNUAL", year: 2026 },
+            // S4 (v2.1.1 §§11-12): no declaration_context/precursors
+            // rows exist for this fixture's emission_data_id in the
+            // mock (the generic per-table default), so both freeze to
+            // their own "nothing was declared" shape -- null and [],
+            // never omitted -- proving every determination sets these
+            // keys going forward, not just ones where a dossier
+            // happens to exist.
+            declaration_context: null,
+            precursors: [],
           },
+        );
+      },
+    );
+
+    it(
+      "freezes the source record's own declared context and precursors into the snapshot (S4, v2.1.1 §§11-12)",
+      async () => {
+        const result =
+          await determineLineFromActualData(
+            makeMockSupabase(
+              {
+                shipment_lines: [
+                  { data: lineRow, error: null },
+                  { data: updatedLineRow, error: null },
+                ],
+                emission_data: { data: verifiedActiveRow, error: null },
+                emission_data_declaration_context: {
+                  data: {
+                    production_process_description: "Kiln-fired at 900C",
+                    uses_purchased_precursors: true,
+                    verifier_report_declared: true,
+                    verifier_report_description: "TUV Rheinland, 2026-02",
+                  },
+                  error: null,
+                },
+                emission_data_precursors: {
+                  data: [
+                    {
+                      material_description: "Clinker, purchased",
+                      cn_code: "25231000",
+                      source_description: "Acme Cement, DE",
+                      direct_specific: "0.850",
+                      indirect_specific: "0.120",
+                      emission_unit: "tCO2e/t",
+                      provenance: "ACTUAL_WITH_DECLARED_REPORT",
+                      verifier_report_description: "TUV Rheinland, 2026-02",
+                    },
+                  ],
+                  error: null,
+                },
+              },
+            ),
+            memberContext(),
+            lineId,
+            emissionDataId,
+          );
+
+        expect(result.status).toBe(
+          "DETERMINED",
+        );
+
+        if (result.status !== "DETERMINED") {
+          throw new Error("expected DETERMINED");
+        }
+
+        expect(result.snapshot.declaration_context).toEqual(
+          {
+            production_process_description: "Kiln-fired at 900C",
+            uses_purchased_precursors: true,
+            verifier_report_declared: true,
+            verifier_report_description: "TUV Rheinland, 2026-02",
+          },
+        );
+
+        expect(result.snapshot.precursors).toEqual(
+          [
+            {
+              material_description: "Clinker, purchased",
+              cn_code: "25231000",
+              source_description: "Acme Cement, DE",
+              direct_specific: "0.850",
+              indirect_specific: "0.120",
+              emission_unit: "tCO2e/t",
+              provenance: "ACTUAL_WITH_DECLARED_REPORT",
+              verifier_report_description: "TUV Rheinland, 2026-02",
+            },
+          ],
         );
       },
     );

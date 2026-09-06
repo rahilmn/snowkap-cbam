@@ -28,6 +28,14 @@ import {
   cnScopeCoversCnCode,
 } from "../../domain/emissions/cn-scope-covers-code";
 
+import {
+  getDeclarationContextById,
+} from "./manage-declaration-context";
+
+import {
+  listPrecursorsById,
+} from "./manage-precursors";
+
 import type {
   IsoTimestamp,
 } from "../../domain/shared/reporting-period";
@@ -609,6 +617,31 @@ async function performDetermination(
     };
   }
 
+  // S4 (v2.1.1 §§11-12). The dossier context/precursors that existed
+  // on the source record at THIS exact moment, frozen alongside the
+  // rest of the snapshot -- never a live reference (the same reasoning
+  // ActualEmissionSnapshot's own doc comment gives for every other
+  // field: a later edit, supersession, or grant revocation must never
+  // change a historical result). Fetched via the *ById variants
+  // (manage-declaration-context.ts/manage-precursors.ts), which take
+  // no orgId and rely entirely on RLS -- record.entered_by_org_id is
+  // the PRODUCER's org, not necessarily the caller's, so this read
+  // must work identically whether the caller owns the record or holds
+  // a sharing grant for it. `null`/`[]` are real, meaningful answers
+  // ("no context/no precursors were declared"), not fetch failures --
+  // both functions already return that shape on a genuine absence.
+  const declarationContext =
+    await getDeclarationContextById(
+      supabase,
+      record.id,
+    );
+
+  const precursors =
+    await listPrecursorsById(
+      supabase,
+      record.id,
+    );
+
   const snapshot: ActualEmissionSnapshot =
     {
       emission_data_id: record.id,
@@ -638,6 +671,30 @@ async function performDetermination(
       // it was computed from after the record is superseded, discarded,
       // or read through a grant that is later revoked.
       dataset_reporting_period: record.period,
+
+      declaration_context: declarationContext
+        ? {
+            production_process_description: declarationContext.production_process_description,
+            uses_purchased_precursors: declarationContext.uses_purchased_precursors,
+            verifier_report_declared: declarationContext.verifier_report_declared,
+            verifier_report_description: declarationContext.verifier_report_description,
+          }
+        : null,
+
+      precursors: precursors.map(
+        (precursor) => (
+          {
+            material_description: precursor.material_description,
+            cn_code: precursor.cn_code,
+            source_description: precursor.source_description,
+            direct_specific: precursor.direct_specific,
+            indirect_specific: precursor.indirect_specific,
+            emission_unit: precursor.emission_unit,
+            provenance: precursor.provenance,
+            verifier_report_description: precursor.verifier_report_description,
+          }
+        ),
+      ),
     };
 
   const determination: EmissionDetermination =

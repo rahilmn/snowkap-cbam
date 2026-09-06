@@ -68,6 +68,37 @@ export interface EmissionDataPrecursor {
 }
 
 /**
+ * A frozen copy of one precursor row, for embedding inside
+ * ActualEmissionSnapshot -- deliberately without `id`/`emission_data_id`/
+ * timestamps (those identify the LIVE row this was copied from, which
+ * the snapshot already identifies via its own emission_data_id/
+ * emission_data_version) or `created_at`/`updated_at` (the snapshot has
+ * its own `resolved_at`). Same shape as EmissionDataPrecursor minus
+ * those four fields.
+ */
+export interface FrozenPrecursor {
+  material_description: string;
+  cn_code: string | null;
+  source_description: string | null;
+  direct_specific: DecimalString | null;
+  indirect_specific: DecimalString | null;
+  emission_unit: string | null;
+  provenance: PrecursorProvenance;
+  verifier_report_description: string | null;
+}
+
+/**
+ * A frozen copy of a declaration context, for embedding inside
+ * ActualEmissionSnapshot -- same reasoning as FrozenPrecursor above.
+ */
+export interface FrozenDeclarationContext {
+  production_process_description: string | null;
+  uses_purchased_precursors: boolean;
+  verifier_report_declared: boolean;
+  verifier_report_description: string | null;
+}
+
+/**
  * The producer's declared context for one emission_data record --
  * v2.1.1 §9's "dossier" experience. 1:1 with emission_data (a unique
  * constraint on emission_data_id enforces this at the database layer).

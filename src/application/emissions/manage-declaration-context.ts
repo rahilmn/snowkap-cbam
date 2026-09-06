@@ -152,6 +152,47 @@ export async function getDeclarationContext(
   );
 }
 
+/**
+ * RLS-trusted variant of getDeclarationContext, for a caller that does
+ * NOT own the record -- e.g. an importer freezing a shared record's
+ * context into an ActualEmissionSnapshot at determination time
+ * (determine-from-actual-data.ts). Deliberately takes no `orgId` and
+ * filters by `emission_data_id` alone: the row's own `org_id` is the
+ * PRODUCER's, never the caller's, so an explicit `.eq("org_id", ...)`
+ * filter here would always return nothing for a legitimate cross-org
+ * grantee even after RLS correctly admits the row. Mirrors
+ * fetchAuthorizedEmissionData's own posture (determine-from-actual-data.ts)
+ * -- the security boundary is entirely
+ * emission_data_declaration_context_select_shared
+ * (20260906190000_s4_widen_dossier_select_for_grantee.sql), which only
+ * admits a shared installation's ACTIVE+VERIFIED emission_data row's
+ * context, the same boundary emission_data_select_own_org itself
+ * enforces on the parent row. Never use this for an "own org" listing
+ * UI -- use getDeclarationContext there, so a bug in this function
+ * can't silently leak into a screen that owns the record.
+ */
+export async function getDeclarationContextById(
+  supabase: SupabaseClient,
+  emissionDataId: EmissionDataId,
+): Promise<EmissionDataDeclarationContext | null> {
+  const { data, error } =
+    await supabase
+      .from("emission_data_declaration_context")
+      .select(
+        DECLARATION_CONTEXT_COLUMNS,
+      )
+      .eq("emission_data_id", emissionDataId)
+      .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return toDeclarationContext(
+    data as DeclarationContextRow,
+  );
+}
+
 export interface UpsertDeclarationContextInput {
   emissionDataId: EmissionDataId;
   productionProcessDescription: string | null;

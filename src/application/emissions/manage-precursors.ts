@@ -165,6 +165,37 @@ export async function listPrecursors(
   );
 }
 
+/**
+ * RLS-trusted variant of listPrecursors, for a caller that does NOT
+ * own the record -- same reasoning as manage-declaration-context.ts's
+ * own getDeclarationContextById, which see. Deliberately takes no
+ * `orgId`; the security boundary is
+ * emission_data_precursors_select_shared
+ * (20260906190000_s4_widen_dossier_select_for_grantee.sql). Never use
+ * this for an "own org" listing UI -- use listPrecursors there.
+ */
+export async function listPrecursorsById(
+  supabase: SupabaseClient,
+  emissionDataId: EmissionDataId,
+): Promise<EmissionDataPrecursor[]> {
+  const { data, error } =
+    await supabase
+      .from("emission_data_precursors")
+      .select(
+        PRECURSOR_COLUMNS,
+      )
+      .eq("emission_data_id", emissionDataId)
+      .order("created_at", { ascending: true });
+
+  if (error || !data) {
+    return [];
+  }
+
+  return (data as PrecursorRow[]).map(
+    toPrecursor,
+  );
+}
+
 export interface AddPrecursorInput {
   emissionDataId: EmissionDataId;
   materialDescription: string;
