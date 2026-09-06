@@ -535,7 +535,7 @@ function removeEvidenceFileMessageFor(
     // appeared in this file's history before this fix, even though the
     // reason itself was introduced by a P13 finding well before S5.
     case "EMISSION_DATA_VERIFIED":
-      return "This record has already been verified, so its evidence can no longer be removed. Discard the record and start a new one if it needs to change.";
+      return "This record has already completed internal review, so its evidence can no longer be removed. Discard the record and start a new one if it needs to change.";
 
     default:
       return "Something went wrong. Please try again.";

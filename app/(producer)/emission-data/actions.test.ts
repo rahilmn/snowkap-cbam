@@ -883,7 +883,7 @@ describe(
         expect(result).toEqual(
           {
             status: "error",
-            message: "This record has already been verified, so its evidence can no longer be removed. Discard the record and start a new one if it needs to change.",
+            message: "This record has already completed internal review, so its evidence can no longer be removed. Discard the record and start a new one if it needs to change.",
           },
         );
       },
