@@ -126,7 +126,25 @@ async function verifyEmissionDataEditable(
  * Read-only. No capability check (matches listEmissionData's own
  * posture, manage-emission-data.ts) -- anyone who can see the parent
  * emission_data row may see its declared context. `null` means no
- * context has been captured yet, not an error.
+ * context has been captured yet -- a real, distinct outcome from a
+ * genuine fetch error, which THROWS rather than also returning null.
+ *
+ * This function backs a producer's own EDIT form
+ * (declaration-context-section.tsx): `context?.field ?? ""` fills the
+ * form from whatever this returns, and the form's Save button is a
+ * full upsert (replace, not a patch). A masked fetch error here would
+ * render the form as if nothing had ever been captured, and pressing
+ * Save on it would genuinely overwrite real, previously-saved context
+ * with empty values -- exactly the failure-handling anti-pattern
+ * v2.1.1 section 25 names ("never turn infrastructure/data-access
+ * failure into successful empty state"), and the identical class of
+ * bug S2's B3 blocker fixed in list-declarations.ts (return [] -> throw).
+ * Throwing surfaces a real error.tsx boundary instead of a silently
+ * wrong "nothing here yet" form.
+ *
+ * getDeclarationContextById (below) deliberately does NOT throw --
+ * see its own doc comment for why that function's risk profile is
+ * different.
  */
 export async function getDeclarationContext(
   supabase: SupabaseClient,
@@ -143,7 +161,13 @@ export async function getDeclarationContext(
       .eq("emission_data_id", emissionDataId)
       .maybeSingle();
 
-  if (error || !data) {
+  if (error) {
+    throw new Error(
+      `getDeclarationContext: failed to fetch declaration context for ${emissionDataId}: ${error.message}`,
+    );
+  }
+
+  if (!data) {
     return null;
   }
 
@@ -170,6 +194,20 @@ export async function getDeclarationContext(
  * enforces on the parent row. Never use this for an "own org" listing
  * UI -- use getDeclarationContext there, so a bug in this function
  * can't silently leak into a screen that owns the record.
+ *
+ * Deliberately does NOT throw on a fetch error, unlike
+ * getDeclarationContext above -- this function's two callers
+ * (determine-from-actual-data.ts's performDetermination, and
+ * get-buyer-view.ts) both treat the frozen/displayed context as a
+ * best-effort ENRICHMENT of a determination that must not itself fail
+ * because of it, the same posture record_provenance/
+ * dataset_reporting_period already have on ActualEmissionSnapshot. The
+ * Server Action wrapping determineLineFromActualData has no top-level
+ * try/catch, so a thrown error here would surface as an unstructured
+ * crash instead of the caller's own {status, reason} result shape --
+ * a materially worse outcome for a merely-decorative field than
+ * freezing null/[] and letting the core (regulatory-relevant)
+ * determination succeed.
  */
 export async function getDeclarationContextById(
   supabase: SupabaseClient,

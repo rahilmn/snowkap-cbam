@@ -140,6 +140,15 @@ async function verifyEmissionDataEditable(
  * Read-only, no capability check -- matches getDeclarationContext's own
  * posture. Ordered by created_at so the list order a producer entered
  * precursors in is preserved.
+ *
+ * Throws on a genuine fetch error rather than also returning [] --
+ * same reasoning as getDeclarationContext (this file's sibling): this
+ * function backs a producer's own EDIT screen (the precursor list +
+ * add/remove forms in declaration-context-section.tsx), where a masked
+ * fetch error would render as "no precursors yet," inviting the
+ * producer to re-add materials that already exist rather than
+ * revealing that the read itself failed. listPrecursorsById (below)
+ * deliberately does NOT throw -- see its own doc comment for why.
  */
 export async function listPrecursors(
   supabase: SupabaseClient,
@@ -156,11 +165,13 @@ export async function listPrecursors(
       .eq("emission_data_id", emissionDataId)
       .order("created_at", { ascending: true });
 
-  if (error || !data) {
-    return [];
+  if (error) {
+    throw new Error(
+      `listPrecursors: failed to fetch precursors for ${emissionDataId}: ${error.message}`,
+    );
   }
 
-  return (data as PrecursorRow[]).map(
+  return ((data ?? []) as PrecursorRow[]).map(
     toPrecursor,
   );
 }
@@ -173,6 +184,13 @@ export async function listPrecursors(
  * emission_data_precursors_select_shared
  * (20260906190000_s4_widen_dossier_select_for_grantee.sql). Never use
  * this for an "own org" listing UI -- use listPrecursors there.
+ *
+ * Also deliberately does NOT throw on a fetch error, unlike
+ * listPrecursors above -- see getDeclarationContextById's own doc
+ * comment (manage-declaration-context.ts) for the identical reasoning:
+ * this function's two callers treat the result as a best-effort
+ * enrichment, not something that should fail a determination or crash
+ * a read-only buyer view over a transient fetch error.
  */
 export async function listPrecursorsById(
   supabase: SupabaseClient,

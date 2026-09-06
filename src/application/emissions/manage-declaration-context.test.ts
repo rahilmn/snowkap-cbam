@@ -372,6 +372,26 @@ describe(
     );
 
     it(
+      "throws on a genuine fetch error -- never silently returns null the same way a real absence does (v2.1.1 section 25)",
+      async () => {
+        await expect(
+          getDeclarationContext(
+            mockSupabase(
+              {
+                selectResult: {
+                  data: null,
+                  error: { message: "connection reset" },
+                },
+              },
+            ),
+            orgId,
+            emissionDataId,
+          ),
+        ).rejects.toThrow();
+      },
+    );
+
+    it(
       "returns the context when one exists",
       async () => {
         const result =

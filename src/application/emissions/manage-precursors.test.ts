@@ -474,6 +474,26 @@ describe(
         );
       },
     );
+
+    it(
+      "throws on a genuine fetch error -- never silently returns [] the same way a real absence does (v2.1.1 section 25)",
+      async () => {
+        await expect(
+          listPrecursors(
+            mockSupabase(
+              {
+                listResult: {
+                  data: null,
+                  error: { message: "connection reset" },
+                },
+              },
+            ),
+            orgId,
+            emissionDataId,
+          ),
+        ).rejects.toThrow();
+      },
+    );
   },
 );
 
