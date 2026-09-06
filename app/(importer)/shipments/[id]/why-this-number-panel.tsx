@@ -550,7 +550,24 @@ export function WhyThisNumberPanel(
               </div>
             ) : null}
           </div>
-        ) : actualSnapshot ? (
+        ) : /*
+              * 2026-09-07 (S5 review round 6, finding S5R6-NUM-B). A
+              * plain `actualSnapshot ?` truthy check only ruled out
+              * `snapshot` being absent entirely -- `values` and
+              * `verification` are dereferenced (`.values.direct_specific`
+              * / `.indirect_specific` below, `.verification.status`
+              * further down) with no guard on either, both compile-time-
+              * required but not runtime-guaranteed for a row frozen
+              * before the field existed (the same unchecked-jsonb-cast
+              * gap already closed this same S5 phase in
+              * calculate-line-emissions.ts and
+              * actual-determination-is-unchanged.ts). A snapshot missing
+              * either now falls through to the "Not yet determined."
+              * branch below -- the same graceful-degradation treatment
+              * this panel already gives a line with no determination at
+              * all, rather than crashing the whole page.
+              */
+        actualSnapshot && actualSnapshot.values && actualSnapshot.verification ? (
           <div className="flex flex-col gap-1.5">
             <div className="grid grid-cols-2 gap-1.5">
               <DecimalPill

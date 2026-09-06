@@ -139,6 +139,80 @@ describe(
     );
 
     it(
+      "2026-09-07 (S5 review round 6, finding S5R6-NUM-B): returns false (never throws) for an ACTUAL snapshot present but missing `values` -- round 4's own S5R4-A-B1 fix only guarded 'snapshot absent entirely'",
+      () => {
+        const incompleteSnapshotDetermination =
+          {
+            method: "ACTUAL",
+            snapshot: {
+              emission_data_id: CANDIDATE.emission_data_id,
+              emission_data_version: CANDIDATE.emission_data_version,
+              installation_id: CANDIDATE.installation_id,
+              resolved_at: "2026-09-01T10:00:00.000Z" as never,
+              emission_unit: CANDIDATE.emission_unit,
+              methodology: CANDIDATE.methodology,
+              verification: { status: "VERIFIED", verifier_user_id: CANDIDATE.verifier_user_id },
+              evidence_file_ids: [...CANDIDATE.evidence_file_ids],
+              sharing_grant_id: CANDIDATE.sharing_grant_id,
+              // No `values` key at all.
+            },
+          } as unknown as EmissionDetermination;
+
+        expect(
+          () =>
+            actualDeterminationIsUnchanged(
+              incompleteSnapshotDetermination,
+              CANDIDATE,
+            ),
+        ).not.toThrow();
+
+        expect(
+          actualDeterminationIsUnchanged(
+            incompleteSnapshotDetermination,
+            CANDIDATE,
+          ),
+        ).toBe(false);
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 6, finding S5R6-NUM-B): returns false (never throws) for an ACTUAL snapshot present but missing `evidence_file_ids` -- would otherwise crash spreading undefined inside evidenceSetsMatch",
+      () => {
+        const incompleteSnapshotDetermination =
+          {
+            method: "ACTUAL",
+            snapshot: {
+              emission_data_id: CANDIDATE.emission_data_id,
+              emission_data_version: CANDIDATE.emission_data_version,
+              installation_id: CANDIDATE.installation_id,
+              resolved_at: "2026-09-01T10:00:00.000Z" as never,
+              values: { direct_specific: CANDIDATE.direct_specific, indirect_specific: CANDIDATE.indirect_specific },
+              emission_unit: CANDIDATE.emission_unit,
+              methodology: CANDIDATE.methodology,
+              verification: { status: "VERIFIED", verifier_user_id: CANDIDATE.verifier_user_id },
+              sharing_grant_id: CANDIDATE.sharing_grant_id,
+              // No `evidence_file_ids` key at all.
+            },
+          } as unknown as EmissionDetermination;
+
+        expect(
+          () =>
+            actualDeterminationIsUnchanged(
+              incompleteSnapshotDetermination,
+              CANDIDATE,
+            ),
+        ).not.toThrow();
+
+        expect(
+          actualDeterminationIsUnchanged(
+            incompleteSnapshotDetermination,
+            CANDIDATE,
+          ),
+        ).toBe(false);
+      },
+    );
+
+    it(
       "is false when the line currently carries a DEFAULT determination",
       () => {
         expect(

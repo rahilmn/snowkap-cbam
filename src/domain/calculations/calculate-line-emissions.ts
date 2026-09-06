@@ -363,6 +363,29 @@ function calculateFromActualDetermination(
     );
   }
 
+  // 2026-09-07 (S5 review round 6, finding S5R6-NUM-B). The guard just
+  // above (and round 3's own S5R3-A-B1 fix it belongs to) only checked
+  // that `snapshot` itself exists, not that its own required sub-fields
+  // do -- the exact depth the DEFAULT branch's sibling guard above
+  // (`!resolution?.values?.total`) already gets right. `values` and
+  // `emission_unit` are, like `verification`, compile-time-required but
+  // not runtime-guaranteed for a row frozen before either field
+  // existed. Live-reproduced: a hand-built snapshot with `verification`
+  // present and VERIFIED but no `values` key threw `TypeError: Cannot
+  // read properties of undefined (reading 'direct_specific')` at the
+  // `snapshot.values.direct_specific` dereference below; one with
+  // `values` present but no `emission_unit` threw inside
+  // unitMatchesQuantityBasis on the very next line.
+  if (
+    !snapshot.values?.direct_specific ||
+    !snapshot.values?.indirect_specific ||
+    !snapshot.emission_unit
+  ) {
+    return noValueResult(
+      "VALUE_UNAVAILABLE",
+    );
+  }
+
   if (!unitMatchesQuantityBasis(snapshot.emission_unit, netMassTonnes)) {
     return noValueResult(
       "UNIT_UNSUPPORTED",

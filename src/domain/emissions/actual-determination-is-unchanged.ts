@@ -106,7 +106,31 @@ export function actualDeterminationIsUnchanged(
   // to compare against": false, never a crash -- a malformed frozen
   // snapshot is exactly a case where a fresh determination changes the
   // line (there is nothing valid to be unchanged from).
-  if (!current.snapshot) {
+  // 2026-09-07 (S5 review round 6, finding S5R6-NUM-B). The guard above
+  // (round 4's own S5R4-A-B1 fix) only checked that `snapshot` itself
+  // exists, not that its own required sub-fields do -- `values`,
+  // `verification`, and `evidence_file_ids` are each dereferenced
+  // unconditionally below (the last one spread into `[...frozen]`
+  // inside evidenceSetsMatch), so a `snapshot` present but missing any
+  // one of them still crashed this predicate, which is called from
+  // mark-actual-options-for-line.ts on EVERY line of EVERY shipment-
+  // detail page render (a pure read path, not gated behind any user
+  // action) -- so a single line anywhere with an incomplete ACTUAL
+  // snapshot would 500 that page on every future visit. Live-
+  // reproduced: a snapshot with `verification` present but no `values`
+  // key threw `TypeError: Cannot read properties of undefined (reading
+  // 'direct_specific')` at the comparison below. Treated the same way
+  // the function's own doc comment already treats "no ACTUAL
+  // determination to compare against" and "no snapshot at all": false,
+  // never a crash -- an incomplete frozen snapshot is exactly a case
+  // where a fresh determination changes the line (there is nothing
+  // valid, complete, and comparable to be unchanged from).
+  if (
+    !current.snapshot ||
+    !current.snapshot.values ||
+    !current.snapshot.verification ||
+    !current.snapshot.evidence_file_ids
+  ) {
     return false;
   }
 

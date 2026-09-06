@@ -331,6 +331,82 @@ describe(
     );
 
     it(
+      "returns VALUE_UNAVAILABLE (never throws) for an ACTUAL snapshot that carries `verification` but no `values` key -- S5 review round 6, finding S5R6-NUM-B: round 3's own S5R3-A-B1 fix only guarded 'snapshot absent entirely,' not 'snapshot present but missing the fields actually dereferenced'",
+      () => {
+        const legacyShapeDetermination =
+          {
+            method: "ACTUAL",
+            snapshot: {
+              emission_data_id: "ed-1" as never,
+              emission_data_version: 1,
+              installation_id: "inst-1" as never,
+              resolved_at: "2026-08-28T00:00:00.000Z" as never,
+              emission_unit: "TCO2E_PER_TONNE",
+              methodology: "EU_METHOD",
+              verification: { status: "VERIFIED", verifier_user_id: "user-1" as never },
+              evidence_file_ids: ["evidence-1"],
+              sharing_grant_id: null,
+              // No `values` key at all.
+            },
+          } as unknown as EmissionDetermination;
+
+        const result =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10.5" as never,
+              quantity_mwh: null,
+              emission_determination: legacyShapeDetermination,
+            },
+          );
+
+        expect(result).toEqual(
+          {
+            status: "VALUE_UNAVAILABLE",
+            engine_version: ENGINE_VERSION,
+          },
+        );
+      },
+    );
+
+    it(
+      "returns VALUE_UNAVAILABLE (never throws) for an ACTUAL snapshot with `values` present but no `emission_unit` key -- S5R6-NUM-B",
+      () => {
+        const legacyShapeDetermination =
+          {
+            method: "ACTUAL",
+            snapshot: {
+              emission_data_id: "ed-1" as never,
+              emission_data_version: 1,
+              installation_id: "inst-1" as never,
+              resolved_at: "2026-08-28T00:00:00.000Z" as never,
+              values: { direct_specific: "1.0" as never, indirect_specific: "0.1" as never },
+              methodology: "EU_METHOD",
+              verification: { status: "VERIFIED", verifier_user_id: "user-1" as never },
+              evidence_file_ids: ["evidence-1"],
+              sharing_grant_id: null,
+              // No `emission_unit` key at all.
+            },
+          } as unknown as EmissionDetermination;
+
+        const result =
+          calculateLineEmissions(
+            {
+              net_mass_tonnes: "10.5" as never,
+              quantity_mwh: null,
+              emission_determination: legacyShapeDetermination,
+            },
+          );
+
+        expect(result).toEqual(
+          {
+            status: "VALUE_UNAVAILABLE",
+            engine_version: ENGINE_VERSION,
+          },
+        );
+      },
+    );
+
+    it(
       "computes embedded emissions for a mass good from an ACTUAL determination (RULE-EE-009: quantity x (direct_specific + indirect_specific))",
       () => {
         const result =
