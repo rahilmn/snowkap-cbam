@@ -114,6 +114,31 @@ describe(
     );
 
     it(
+      "2026-09-07 (S5 review round 4, finding S5R4-A-B1): returns false (never throws) for a legacy-shape ACTUAL determination with no snapshot object at all",
+      () => {
+        const legacyShapeDetermination =
+          {
+            method: "ACTUAL",
+          } as unknown as EmissionDetermination;
+
+        expect(
+          () =>
+            actualDeterminationIsUnchanged(
+              legacyShapeDetermination,
+              CANDIDATE,
+            ),
+        ).not.toThrow();
+
+        expect(
+          actualDeterminationIsUnchanged(
+            legacyShapeDetermination,
+            CANDIDATE,
+          ),
+        ).toBe(false);
+      },
+    );
+
+    it(
       "is false when the line currently carries a DEFAULT determination",
       () => {
         expect(

@@ -89,6 +89,27 @@ export function actualDeterminationIsUnchanged(
     return false;
   }
 
+  // 2026-09-07 (S5 review round 4, finding S5R4-A-B1). `snapshot` is
+  // typed as required on the ACTUAL branch of EmissionDetermination,
+  // but that promise is a compile-time fiction for a row frozen before
+  // this field existed or otherwise malformed -- EmissionDetermination
+  // round-trips through shipment_lines.emission_determination jsonb (no
+  // CHECK constraint) and back through an unchecked cast
+  // (shipment-mapper.ts). This is the same unguarded-jsonb-cast gap
+  // already closed at five other call sites this same S5 phase
+  // (calculate-line-emissions.ts, summarize-determination-for-audit.ts,
+  // build-period-export-rows.ts, check-actual-determination-staleness.ts,
+  // list-actual-determined-lines.ts) -- missed here because this
+  // function sits in the redetermination-no-op path, not the
+  // calculation path those fixes swept. Treated the same way the
+  // function's own doc comment already treats "no ACTUAL determination
+  // to compare against": false, never a crash -- a malformed frozen
+  // snapshot is exactly a case where a fresh determination changes the
+  // line (there is nothing valid to be unchanged from).
+  if (!current.snapshot) {
+    return false;
+  }
+
   const snapshot =
     current.snapshot;
 
