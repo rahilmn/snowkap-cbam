@@ -249,17 +249,26 @@ function filedMessageFor(
     // 2026-09-04 (P14 owner decision 2). Names the action, because this
     // is a state ordinary work reaches -- a line calculated before an
     // engine release and filed after it -- not an error.
+    //
+    // 2026-09-06 (S5 review remediation, finding A2). The recalculate
+    // instruction is only actually possible while the member shipment
+    // is still editable (DRAFT) -- shipment_lines stays writable only
+    // then (20260904090000), and a LOCKED shipment (this exact
+    // declaration's own member, once it or an earlier version of it was
+    // filed) has no reopen path back out of LOCKED either
+    // (shipments_update_own_org_not_terminal excludes LOCKED). The old
+    // wording asserted the fix would work unconditionally; it does not
+    // say so when it cannot, per the same finding's own core complaint.
     case "CALCULATION_ENGINE_OUTDATED":
-      return "One or more lines were calculated by an earlier version of the calculation engine. Recalculate those lines, then record the filing -- the earlier results are kept for provenance.";
+      return "One or more lines were calculated by an earlier version of the calculation engine. If the member shipment is still editable, recalculate those lines, then record the filing -- the earlier results are kept for provenance. If the shipment has already been LOCKED (for example by an earlier filing), this cannot be corrected through the normal declaration flow -- contact support.";
 
-    // 2026-09-06 (S5 finding #12, 20260906250000). A default-value line
-    // was determined against a regulatory dataset that has since been
-    // corrected/superseded. Names the action, same as
-    // CALCULATION_ENGINE_OUTDATED above -- redetermining the line picks
-    // up the corrected dataset; the earlier determination is kept for
-    // provenance.
+    // 2026-09-06 (S5 finding #12, 20260906250000; messaging widened same
+    // day, S5 review remediation finding A2). A default-value line was
+    // determined against a regulatory dataset that has since been
+    // corrected/superseded. Same LOCKED-shipment caveat as
+    // CALCULATION_ENGINE_OUTDATED above, for the identical reason.
     case "DATASET_SUPERSEDED":
-      return "One or more lines were determined against a regulatory dataset that has since been corrected. Redetermine those lines against the current dataset, then record the filing -- the earlier determination is kept for provenance.";
+      return "One or more lines were determined against a regulatory dataset that has since been corrected. If the member shipment is still editable, redetermine those lines against the current dataset, then record the filing -- the earlier determination is kept for provenance. If the shipment has already been LOCKED (for example by an earlier filing), this cannot be corrected through the normal declaration flow -- contact support.";
 
     // 2026-09-04 (P14). The lines are not the ones this declaration was
     // approved over. Recoverable, and the message says how: re-approving

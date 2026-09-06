@@ -788,7 +788,7 @@ describe(
           {
             status: "error",
             message:
-              "One or more lines were determined against a regulatory dataset that has since been corrected. Redetermine those lines against the current dataset, then record the filing -- the earlier determination is kept for provenance.",
+              "One or more lines were determined against a regulatory dataset that has since been corrected. If the member shipment is still editable, redetermine those lines against the current dataset, then record the filing -- the earlier determination is kept for provenance. If the shipment has already been LOCKED (for example by an earlier filing), this cannot be corrected through the normal declaration flow -- contact support.",
           },
         );
       },
