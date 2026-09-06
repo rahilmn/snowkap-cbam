@@ -27,6 +27,20 @@ const shipmentRow =
 function mockSupabase(
   result: { data: unknown; error: unknown },
 ) {
+  // 2026-09-07 (S5 review round 4, finding S5R4-TRUNC-A1): the query
+  // now pages with .range() (ordered by created_at/id for a stable
+  // tie-break). Every fixture here returns well under
+  // SHIPMENT_PAGE_SIZE rows, so the paging loop always terminates
+  // after its first page -- this mock stays a one-shot resolver,
+  // .order()/.range() are pure pass-throughs.
+  const rangeChain =
+    {
+      range: () =>
+        Promise.resolve(
+          result,
+        ),
+    };
+
   return {
     from: () => (
       {
@@ -34,10 +48,12 @@ function mockSupabase(
           {
             eq: () => (
               {
-                order: () =>
-                  Promise.resolve(
-                    result,
-                  ),
+                order: () => (
+                  {
+                    order: () =>
+                      rangeChain,
+                  }
+                ),
               }
             ),
           }

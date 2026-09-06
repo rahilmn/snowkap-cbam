@@ -262,40 +262,82 @@ interface OrganizationNameLookupRow {
  * app's own root error boundary (app/error.tsx) -- an honest failure
  * state, not a silent "nothing here".
  */
+// 2026-09-07 (supabase/config.toml `max_rows = 1000`; S5 review round
+// 4, finding S5R4-SHARE-01). An un-paged PostgREST query returns HTTP
+// 200 with `error: null` and silently caps at 1000 rows -- and this
+// query has NO org filter of its own (it relies on RLS's own
+// membership-based visibility, then narrows in application code), so
+// its row count grows with every ACTIVE+VERIFIED record across every
+// org this codebase's RLS ever admits, own-org and shared-in alike.
+// Since PostgREST orders by created_at DESC, a truncation would
+// silently drop the OLDEST such records first -- with no signal
+// anywhere that anything was dropped. Paged with .range(), matching
+// the established convention for this defect class elsewhere in this
+// application layer.
+const AVAILABLE_ACTUAL_DATA_PAGE_SIZE =
+  1000;
+
 export async function listAvailableActualEmissionData(
   supabase: SupabaseClient,
   orgId: OrganizationId,
   cnCode: string | null,
 ): Promise<AvailableActualEmissionDataListing> {
-  const { data, error } =
-    await supabase
-      .from("emission_data")
-      .select(
-        EMISSION_DATA_COLUMNS,
-      )
-      .eq("status", "ACTIVE")
-      .eq("verification_status", "VERIFIED")
-      .order("created_at", { ascending: false });
+  const rows: EmissionDataRow[] =
+    [];
 
-  // 2026-09-06 (S5 review remediation, finding S5B-2). All four of this
-  // function's query legs used to fail closed to emptyListing() --
-  // indistinguishable here from "there is genuinely nothing available".
-  // Three real consumers (the shared-in-data picker on
-  // app/(importer)/emissions/page.tsx, the per-line determination picker
-  // on app/(importer)/shipments/[id]/page.tsx, and getBuyerView) call
-  // this with no try/catch of their own -- a throw here reaches Next's
-  // app/error.tsx boundary, an honest "something went wrong", instead of
-  // silently rendering as though nothing were shared, bouncing the S5
-  // Buyer view off to /emissions as NOT_FOUND, or dropping the actual-
-  // data <select> with no message at all.
-  if (error || !data) {
-    throw new Error(
-      `emissions: available actual-data fetch failed (${error?.message ?? "no rows"}).`,
+  let offset =
+    0;
+
+  for (;;) {
+    const { data, error } =
+      await supabase
+        .from("emission_data")
+        .select(
+          EMISSION_DATA_COLUMNS,
+        )
+        .eq("status", "ACTIVE")
+        .eq("verification_status", "VERIFIED")
+        .order("created_at", { ascending: false })
+        // `id` as a deterministic tie-breaker so .range() pagination
+        // stays stable across pages sharing a created_at value.
+        .order("id", { ascending: false })
+        .range(offset, offset + AVAILABLE_ACTUAL_DATA_PAGE_SIZE - 1);
+
+    // 2026-09-06 (S5 review remediation, finding S5B-2). All four of
+    // this function's query legs used to fail closed to emptyListing()
+    // -- indistinguishable here from "there is genuinely nothing
+    // available". Three real consumers (the shared-in-data picker on
+    // app/(importer)/emissions/page.tsx, the per-line determination
+    // picker on app/(importer)/shipments/[id]/page.tsx, and
+    // getBuyerView) call this with no try/catch of their own -- a
+    // throw here reaches Next's app/error.tsx boundary, an honest
+    // "something went wrong", instead of silently rendering as though
+    // nothing were shared, bouncing the S5 Buyer view off to
+    // /emissions as NOT_FOUND, or dropping the actual-data <select>
+    // with no message at all.
+    if (error || !data) {
+      throw new Error(
+        `emissions: available actual-data fetch failed (${error?.message ?? "no rows"}).`,
+      );
+    }
+
+    const page =
+      data as EmissionDataRow[];
+
+    rows.push(
+      ...page,
     );
+
+    if (page.length < AVAILABLE_ACTUAL_DATA_PAGE_SIZE) {
+      break;
+    }
+
+    offset +=
+      AVAILABLE_ACTUAL_DATA_PAGE_SIZE;
   }
 
   const records =
-    (data as EmissionDataRow[]).map(
+    rows.map(
       toEmissionData,
     );
 
