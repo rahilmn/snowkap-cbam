@@ -36,7 +36,7 @@ function memberContext(
 function mockSupabase(
   {
     emissionDataFetchResult = {
-      data: { org_id: "org-1", status: "DRAFT" },
+      data: { org_id: "org-1", status: "DRAFT", verification_status: "UNVERIFIED" },
       error: null,
     },
     upsertResult = {
@@ -217,7 +217,7 @@ describe(
             mockSupabase(
               {
                 emissionDataFetchResult: {
-                  data: { org_id: "org-1", status: "ACTIVE" },
+                  data: { org_id: "org-1", status: "ACTIVE", verification_status: "VERIFIED" },
                   error: null,
                 },
               },
@@ -233,7 +233,65 @@ describe(
           );
 
         expect(result).toEqual(
-          { status: "REJECTED", reason: "RECORD_NOT_DRAFT" },
+          { status: "REJECTED", reason: "RECORD_LOCKED" },
+        );
+      },
+    );
+
+    it(
+      "rejects a DRAFT + VERIFIED record too -- a producer can leave a record DRAFT indefinitely after verification succeeds before choosing to ACTIVATE it, and v2.1.1 says 'post-VERIFICATION locking', not 'post-activation locking'",
+      async () => {
+        const result =
+          await upsertDeclarationContext(
+            mockSupabase(
+              {
+                emissionDataFetchResult: {
+                  data: { org_id: "org-1", status: "DRAFT", verification_status: "VERIFIED" },
+                  error: null,
+                },
+              },
+            ),
+            memberContext(),
+            {
+              emissionDataId,
+              productionProcessDescription: "Updated after verification succeeded",
+              usesPurchasedPrecursors: false,
+              verifierReportDeclared: false,
+              verifierReportDescription: null,
+            },
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "RECORD_LOCKED" },
+        );
+      },
+    );
+
+    it(
+      "still allows editing a DRAFT record whose verification is only PENDING (not yet VERIFIED)",
+      async () => {
+        const result =
+          await upsertDeclarationContext(
+            mockSupabase(
+              {
+                emissionDataFetchResult: {
+                  data: { org_id: "org-1", status: "DRAFT", verification_status: "VERIFICATION_PENDING" },
+                  error: null,
+                },
+              },
+            ),
+            memberContext(),
+            {
+              emissionDataId,
+              productionProcessDescription: "Still editable while pending",
+              usesPurchasedPrecursors: false,
+              verifierReportDeclared: false,
+              verifierReportDescription: null,
+            },
+          );
+
+        expect(result.status).toBe(
+          "OK",
         );
       },
     );

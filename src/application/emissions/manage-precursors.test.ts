@@ -56,7 +56,7 @@ const DEFAULT_PRECURSOR_ROW =
 function mockSupabase(
   {
     emissionDataFetchResult = {
-      data: { org_id: "org-1", status: "DRAFT" },
+      data: { org_id: "org-1", status: "DRAFT", verification_status: "UNVERIFIED" },
       error: null,
     },
     insertResult = {
@@ -354,7 +354,7 @@ describe(
             mockSupabase(
               {
                 emissionDataFetchResult: {
-                  data: { org_id: "org-1", status: "ACTIVE" },
+                  data: { org_id: "org-1", status: "ACTIVE", verification_status: "VERIFIED" },
                   error: null,
                 },
               },
@@ -374,7 +374,40 @@ describe(
           );
 
         expect(result).toEqual(
-          { status: "REJECTED", reason: "RECORD_NOT_DRAFT" },
+          { status: "REJECTED", reason: "RECORD_LOCKED" },
+        );
+      },
+    );
+
+    it(
+      "rejects a DRAFT + VERIFIED record too -- post-VERIFICATION locking, not merely post-activation",
+      async () => {
+        const result =
+          await addPrecursor(
+            mockSupabase(
+              {
+                emissionDataFetchResult: {
+                  data: { org_id: "org-1", status: "DRAFT", verification_status: "VERIFIED" },
+                  error: null,
+                },
+              },
+            ),
+            memberContext(),
+            {
+              emissionDataId,
+              materialDescription: "Clinker",
+              cnCode: null,
+              sourceDescription: null,
+              directSpecific: null,
+              indirectSpecific: null,
+              emissionUnit: null,
+              provenance: "UNKNOWN",
+              verifierReportDescription: null,
+            },
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "RECORD_LOCKED" },
         );
       },
     );
@@ -512,7 +545,7 @@ describe(
             mockSupabase(
               {
                 emissionDataFetchResult: {
-                  data: { org_id: "org-1", status: "ACTIVE" },
+                  data: { org_id: "org-1", status: "ACTIVE", verification_status: "VERIFIED" },
                   error: null,
                 },
               },
@@ -522,7 +555,7 @@ describe(
           );
 
         expect(result).toEqual(
-          { status: "REJECTED", reason: "RECORD_NOT_DRAFT" },
+          { status: "REJECTED", reason: "RECORD_LOCKED" },
         );
       },
     );

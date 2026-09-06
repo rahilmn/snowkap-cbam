@@ -262,13 +262,17 @@ function EmissionDataRow(
       {/*
         Unlike EvidenceSection (attachable at any lifecycle stage), the
         edit forms inside this section render only while the record is
-        still DRAFT -- v2.1.1 §11's "pre-publication editability,
-        post-verification locking" -- see declaration-context-section.tsx's
-        own doc comment.
+        still DRAFT AND not yet VERIFIED -- v2.1.1 §11's "pre-publication
+        editability, post-VERIFICATION locking" means locked once
+        VERIFIED, not merely once activated (a record can sit DRAFT +
+        VERIFIED indefinitely before ACTIVATE -- emission-data-lifecycle.ts's
+        own doc comment), matching the exact same two-part gate
+        manage-declaration-context.ts's/manage-precursors.ts's own
+        verifyEmissionDataEditable enforces server-side.
       */}
       <DeclarationContextSection
         emissionDataId={record.id}
-        editable={record.status === "DRAFT"}
+        editable={record.status === "DRAFT" && record.verificationStatus !== "VERIFIED"}
         context={record.declarationContext}
         precursors={record.precursors}
       />

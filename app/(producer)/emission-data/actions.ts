@@ -781,8 +781,8 @@ function declarationContextMessageFor(
     case "RECORD_NOT_FOUND":
       return "That record could not be found.";
 
-    case "RECORD_NOT_DRAFT":
-      return "This record's context is locked -- it can only be edited while the record is still a draft.";
+    case "RECORD_LOCKED":
+      return "This record's context is locked -- it can only be edited before the record is approved in internal review.";
 
     case "VERIFIER_REPORT_DESCRIPTION_WITHOUT_DECLARATION":
       return "Declare that a verifier report exists before describing it.";
@@ -905,8 +905,8 @@ function precursorMessageFor(
     case "PRECURSOR_NOT_FOUND":
       return "That could not be found.";
 
-    case "RECORD_NOT_DRAFT":
-      return "This record's precursors are locked -- they can only be edited while the record is still a draft.";
+    case "RECORD_LOCKED":
+      return "This record's precursors are locked -- they can only be edited before the record is approved in internal review.";
 
     case "EMPTY_MATERIAL_DESCRIPTION":
       return "Describe the precursor material.";

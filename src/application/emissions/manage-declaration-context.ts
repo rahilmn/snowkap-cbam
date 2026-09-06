@@ -56,31 +56,39 @@ function toDeclarationContext(
 interface EmissionDataOwnershipRow {
   org_id: string;
   status: string;
+  verification_status: string;
 }
 
 /**
  * Mirrors verifyInstallationOwnership's shape (manage-emission-data.ts)
  * one layer up: `orgId` is the caller's active org, not yet proven to
- * be the org that owns this specific emission_data row. Also returns
- * the row's own `status` -- v2.1.1's "pre-publication editability,
- * post-verification locking" requirement (§11) is enforced here, at
- * the application layer, matching emission_data_update_own_org's own
- * stated reasoning for why lifecycle-stage editability is not an RLS
- * concern (20260829230000).
+ * be the org that owns this specific emission_data row. Also checks
+ * the row's own `status` AND `verification_status` -- v2.1.1's
+ * "pre-publication editability, post-VERIFICATION locking" requirement
+ * (§11) needs both of emission_data's two coupled state axes
+ * (emission-data-lifecycle.ts's own doc comment), not just one: a
+ * record can sit DRAFT + VERIFIED for as long as the producer wants
+ * before choosing to ACTIVATE it, so `status === 'DRAFT'` alone is
+ * NOT "not yet verified" -- checking only that would leave context
+ * editable for the entire DRAFT+VERIFIED window, directly contradicting
+ * "post-verification locking". Enforced here, at the application
+ * layer, matching emission_data_update_own_org's own stated reasoning
+ * for why lifecycle-stage editability is not an RLS concern
+ * (20260829230000).
  */
-async function verifyEmissionDataDraft(
+async function verifyEmissionDataEditable(
   supabase: SupabaseClient,
   orgId: OrganizationId,
   emissionDataId: EmissionDataId,
 ): Promise<
   | { status: "OK" }
-  | { status: "REJECTED"; reason: "RECORD_NOT_FOUND" | "RECORD_NOT_DRAFT" | "PERSIST_FAILED" }
+  | { status: "REJECTED"; reason: "RECORD_NOT_FOUND" | "RECORD_LOCKED" | "PERSIST_FAILED" }
 > {
   const { data, error } =
     await supabase
       .from("emission_data")
       .select(
-        "org_id:entered_by_org_id, status",
+        "org_id:entered_by_org_id, status, verification_status",
       )
       .eq("id", emissionDataId)
       .maybeSingle();
@@ -102,10 +110,10 @@ async function verifyEmissionDataDraft(
     };
   }
 
-  if (row.status !== "DRAFT") {
+  if (row.status !== "DRAFT" || row.verification_status === "VERIFIED") {
     return {
       status: "REJECTED",
-      reason: "RECORD_NOT_DRAFT",
+      reason: "RECORD_LOCKED",
     };
   }
 
@@ -159,7 +167,7 @@ export type UpsertDeclarationContextResult =
       reason:
         | "CAPABILITY_NOT_HELD"
         | "RECORD_NOT_FOUND"
-        | "RECORD_NOT_DRAFT"
+        | "RECORD_LOCKED"
         // v2.1.1 §13: a verifier report description only means
         // anything alongside a declaration that one exists -- the same
         // invariant emission_data_declaration_context_check enforces
@@ -173,14 +181,15 @@ export type UpsertDeclarationContextResult =
  * Create-or-update -- one emission_data row has exactly one
  * declaration context (unique constraint on emission_data_id), so this
  * is always an upsert, never a separate create/update pair. Only legal
- * while the parent emission_data row is still DRAFT: v2.1.1 §11's
- * "authoritative context for a published dossier version is the
- * context captured by its last successful verification transition" --
- * once the record leaves DRAFT, its context is locked, the same way
- * emission_data's own fact columns freeze (though by a different
- * mechanism: a DB trigger for emission_data's facts, an application-
- * layer check here, matching this table's own RLS not encoding
- * lifecycle stage -- see this file's verifyEmissionDataDraft).
+ * while the parent emission_data row is still DRAFT and not yet
+ * VERIFIED: v2.1.1 §11's "authoritative context for a published
+ * dossier version is the context captured by its last successful
+ * verification transition" -- once the record is verified, its context
+ * is locked, the same way emission_data's own fact columns freeze
+ * (though by a different mechanism: a DB trigger for emission_data's
+ * facts, an application-layer check here, matching this table's own
+ * RLS not encoding lifecycle stage -- see this file's
+ * verifyEmissionDataEditable).
  */
 export async function upsertDeclarationContext(
   supabase: SupabaseClient,
@@ -208,7 +217,7 @@ export async function upsertDeclarationContext(
     context.org_id;
 
   const ownership =
-    await verifyEmissionDataDraft(
+    await verifyEmissionDataEditable(
       supabase,
       orgId,
       input.emissionDataId,

@@ -70,31 +70,39 @@ function toPrecursor(
 interface EmissionDataOwnershipRow {
   org_id: string;
   status: string;
+  verification_status: string;
 }
 
 /**
  * Same shape as manage-declaration-context.ts's own
- * verifyEmissionDataDraft -- deliberately duplicated rather than
+ * verifyEmissionDataEditable -- deliberately duplicated rather than
  * shared, matching this codebase's own established convention for a
  * small helper used by more than one sibling file in the same
  * directory when sharing it would mean a new file for a five-line
  * function (see e.g. reproduce-calculation-result.ts's own file-local
  * deepEqual next to check-calculation-currency.ts's determinationsEqual,
  * both doing the identical jsonb-key-order-safe comparison).
+ *
+ * Checks both of emission_data's coupled state axes -- v2.1.1's
+ * "post-VERIFICATION locking" (§11) means locked once VERIFIED, not
+ * merely once activated: a record can sit DRAFT + VERIFIED indefinitely
+ * before the producer chooses to ACTIVATE it
+ * (emission-data-lifecycle.ts's own doc comment), so status === 'DRAFT'
+ * alone is not "not yet verified".
  */
-async function verifyEmissionDataDraft(
+async function verifyEmissionDataEditable(
   supabase: SupabaseClient,
   orgId: OrganizationId,
   emissionDataId: EmissionDataId,
 ): Promise<
   | { status: "OK" }
-  | { status: "REJECTED"; reason: "RECORD_NOT_FOUND" | "RECORD_NOT_DRAFT" | "PERSIST_FAILED" }
+  | { status: "REJECTED"; reason: "RECORD_NOT_FOUND" | "RECORD_LOCKED" | "PERSIST_FAILED" }
 > {
   const { data, error } =
     await supabase
       .from("emission_data")
       .select(
-        "org_id:entered_by_org_id, status",
+        "org_id:entered_by_org_id, status, verification_status",
       )
       .eq("id", emissionDataId)
       .maybeSingle();
@@ -116,10 +124,10 @@ async function verifyEmissionDataDraft(
     };
   }
 
-  if (row.status !== "DRAFT") {
+  if (row.status !== "DRAFT" || row.verification_status === "VERIFIED") {
     return {
       status: "REJECTED",
-      reason: "RECORD_NOT_DRAFT",
+      reason: "RECORD_LOCKED",
     };
   }
 
@@ -176,7 +184,7 @@ export type AddPrecursorResult =
       reason:
         | "CAPABILITY_NOT_HELD"
         | "RECORD_NOT_FOUND"
-        | "RECORD_NOT_DRAFT"
+        | "RECORD_LOCKED"
         | "EMPTY_MATERIAL_DESCRIPTION"
         | "INVALID_DIRECT_SPECIFIC"
         | "INVALID_INDIRECT_SPECIFIC"
@@ -261,7 +269,7 @@ export async function addPrecursor(
     context.org_id;
 
   const ownership =
-    await verifyEmissionDataDraft(
+    await verifyEmissionDataEditable(
       supabase,
       orgId,
       input.emissionDataId,
@@ -333,7 +341,7 @@ export type RemovePrecursorResult =
       reason:
         | "CAPABILITY_NOT_HELD"
         | "PRECURSOR_NOT_FOUND"
-        | "RECORD_NOT_DRAFT"
+        | "RECORD_LOCKED"
         | "PERSIST_FAILED";
     };
 
@@ -386,7 +394,7 @@ export async function removePrecursor(
   }
 
   const ownership =
-    await verifyEmissionDataDraft(
+    await verifyEmissionDataEditable(
       supabase,
       orgId,
       precursorRow.emission_data_id as EmissionDataId,
@@ -400,10 +408,10 @@ export async function removePrecursor(
       };
     }
 
-    if (ownership.reason === "RECORD_NOT_DRAFT") {
+    if (ownership.reason === "RECORD_LOCKED") {
       return {
         status: "REJECTED",
-        reason: "RECORD_NOT_DRAFT",
+        reason: "RECORD_LOCKED",
       };
     }
 
