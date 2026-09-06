@@ -862,6 +862,32 @@ describe(
         );
       },
     );
+
+    it(
+      "2026-09-07 (S5 review round 4, findings S5R4-GUID-B2/S5R4-EVID-01): maps EMISSION_DATA_VERIFIED to a message naming the actual, permanent reason -- not the generic 'try again'",
+      async () => {
+        primeAllowedOrgContext();
+
+        removeEvidenceFileMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "EMISSION_DATA_VERIFIED" },
+        );
+
+        const result =
+          await removeEvidenceFileAction(
+            { status: "idle" },
+            formData(
+              { evidenceFileId: "evidence-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message: "This record has already been verified, so its evidence can no longer be removed. Discard the record and start a new one if it needs to change.",
+          },
+        );
+      },
+    );
   },
 );
 

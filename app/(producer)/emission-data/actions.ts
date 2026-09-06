@@ -526,6 +526,17 @@ function removeEvidenceFileMessageFor(
     case "CAPABILITY_NOT_HELD":
       return "Your organization is not set up as a CBAM producer/operator.";
 
+    // 2026-09-07 (S5 review round 4, findings S5R4-GUID-B2/S5R4-EVID-01
+    // -- the same bug found independently by two reviewers). This
+    // reason is a permanent, by-design refusal (removeEvidenceFile's
+    // own doc comment, upload-evidence.ts) -- retrying will never
+    // succeed, so the generic "Please try again" actively misled the
+    // user about why the removal failed. This string has never
+    // appeared in this file's history before this fix, even though the
+    // reason itself was introduced by a P13 finding well before S5.
+    case "EMISSION_DATA_VERIFIED":
+      return "This record has already been verified, so its evidence can no longer be removed. Discard the record and start a new one if it needs to change.";
+
     default:
       return "Something went wrong. Please try again.";
   }

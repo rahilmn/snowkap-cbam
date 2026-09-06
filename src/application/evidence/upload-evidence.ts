@@ -468,9 +468,9 @@ export type RemoveEvidenceFileResult =
     };
 
 /**
- * Removes one evidence file the caller's active org owns: the storage
- * object, the evidence_files metadata row, and this file's id out of
- * its emission_data record's evidence_file_ids array -- audited as
+ * Removes one evidence file the caller's active org owns: this file's
+ * id out of its emission_data record's evidence_file_ids array, the
+ * storage object, then the evidence_files metadata row -- audited as
  * evidence.removed.
  *
  * Rejects EMISSION_DATA_VERIFIED before touching anything if the owning
@@ -492,26 +492,51 @@ export type RemoveEvidenceFileResult =
  * could otherwise strip evidence the verifier already signed off on
  * and then ACTIVATE anyway.
  *
- * Storage delete runs BEFORE the metadata delete, and a storage-delete
- * failure stops here (nothing else is touched): the safer failure mode
- * is "both still exist, retryable" rather than "metadata gone but a
- * storage object now orphaned with no owning row." The
- * evidence_file_ids array update runs after the metadata row is
- * already gone (same non-atomicity posture documented on
- * uploadEvidenceFile above, between the metadata delete and this
- * array update specifically) -- best-effort in the sense that its own
- * failure is not itself surfaced to the caller (the file is already
- * genuinely removed by that point), but the array mutation ITSELF is
- * no longer racy: remove_evidence_file_id (20260906240000) performs it
- * as a single atomic `array_remove` UPDATE, so a concurrent removal or
- * upload against the same row serializes at the row level instead of
- * silently overwriting this call's own result (or vice versa) -- the
- * class of bug a P13 audit round partially closed with a single retry
- * for the narrower two-concurrent-removals case, and an S5 audit round
- * found the retry never covered a concurrent upload racing a removal
- * (live-reproduced end to end: an uploaded file's own citation silently
- * dropped, with no error anywhere). The atomic RPC closes both, by
- * construction, with no retry logic needed at all.
+ * 2026-09-07 (S5 review round 4, finding S5R4-AUTHZ-B1). The
+ * evidence_file_ids array update (remove_evidence_file_id,
+ * 20260906240000) now runs FIRST, before either delete, rather than
+ * best-effort after the metadata delete. Each individual RLS/trigger
+ * check that guards this record (the in-memory verificationStatus
+ * check above, evidence_storage_delete_own_org, evidence_files_
+ * delete_own_org) was already independently correct in isolation --
+ * this was a gap BETWEEN them: a concurrent, fully legitimate ADMIN
+ * VERIFY landing between the OLD ordering's storage delete and
+ * metadata delete left the storage bytes permanently deleted (a
+ * genuinely authorized delete at the instant it ran, while the record
+ * was still not-VERIFIED) while the metadata delete then correctly
+ * refused (the record had since become VERIFIED) -- an
+ * "evidence can never shrink" VERIFIED record whose evidence_files row
+ * and citation stayed intact, but whose actual object no longer
+ * existed in storage. Live-reproduced end to end (real psql BEGIN...
+ * ROLLBACK, impersonating a real MEMBER and a real ADMIN of the same
+ * org): the ordering race reproduced exactly as described.
+ *
+ * remove_evidence_file_id's own UPDATE is the one write in this whole
+ * function already hardened to be un-race-able against a concurrent
+ * VERIFY (S5R3-AUTHZ-B1, this same phase): app.enforce_emission_data_
+ * verification_gate's "evidence cannot shrink from a VERIFIED record,
+ * in any status" rule fires live, inside that single UPDATE statement,
+ * against whatever the row's verification_status genuinely is at that
+ * instant -- so running it FIRST, and treating any error it returns as
+ * EMISSION_DATA_VERIFIED, makes it the authoritative gate the storage
+ * and metadata deletes that follow can safely rely on having already
+ * passed. If it fails, nothing else is touched. If it succeeds, the
+ * array has already, atomically, and permanently recorded that this id
+ * no longer counts as backing evidence -- a VERIFY that commits any
+ * time after this point changes nothing about that fact, so the
+ * storage/metadata cleanup that follows is just carrying out an
+ * already-safely-decided removal, never racing to decide one.
+ *
+ * Storage delete still runs BEFORE the metadata delete, and a
+ * storage-delete failure still stops here (nothing else is touched):
+ * the safer failure mode remains "both still exist, retryable" rather
+ * than "metadata gone but a storage object now orphaned with no owning
+ * row." Concurrent removal/upload races against the array update
+ * itself remain closed by construction (a single atomic `array_remove`
+ * UPDATE, so two concurrent writers serialize at the row level instead
+ * of overwriting each other -- the class of bug a P13 audit round
+ * partially closed with a retry, and an S5 audit round closed fully
+ * with this same RPC).
  */
 export async function removeEvidenceFile(
   supabase: SupabaseClient,
@@ -588,6 +613,32 @@ export async function removeEvidenceFile(
     };
   }
 
+  // 2026-09-07 (S5 review round 4, finding S5R4-AUTHZ-B1). Moved to run
+  // FIRST, before either delete -- see this function's own doc comment
+  // for why. Any error here is treated as EMISSION_DATA_VERIFIED: the
+  // only realistic failure mode for a single-row array_remove UPDATE
+  // against a row `fetched`/`ownership` just confirmed this org owns is
+  // app.enforce_emission_data_verification_gate's live "evidence cannot
+  // shrink from a VERIFIED record" rule firing because a concurrent
+  // VERIFY committed between the in-memory check above and this
+  // statement -- exactly the race this reordering exists to close.
+  const { error: arrayUpdateError } =
+    await supabase
+      .rpc(
+        "remove_evidence_file_id",
+        {
+          p_emission_data_id: fetched.file.emission_data_id,
+          p_evidence_file_id: evidenceFileId,
+        },
+      );
+
+  if (arrayUpdateError) {
+    return {
+      status: "REJECTED",
+      reason: "EMISSION_DATA_VERIFIED",
+    };
+  }
+
   const { error: storageError } =
     await supabase.storage
       .from(EVIDENCE_STORAGE_BUCKET)
@@ -607,12 +658,10 @@ export async function removeEvidenceFile(
   // PostgREST reports NO error for a DELETE that RLS filters to zero
   // rows, so `deleteError` alone cannot distinguish "deleted" from
   // "silently refused." evidence_files_delete_own_org (20260829560000)
-  // filters exactly that way when the parent is VERIFIED.
-  //
-  // Without this the function returned OK for a row it never deleted --
-  // and because the storage delete above has no verification clause in
-  // its own policy, the object was already gone by then. (P13 final
-  // round, 2026-08-31.)
+  // filters exactly that way when the parent is VERIFIED -- though by
+  // this point the array update above has already succeeded, so this
+  // specific refusal reason should not recur; PERSIST_FAILED remains
+  // the honest label for whatever it is if it somehow does.
   const { data: deleted, error: deleteError } =
     await supabase
       .from("evidence_files")
@@ -625,30 +674,6 @@ export async function removeEvidenceFile(
       status: "REJECTED",
       reason: "PERSIST_FAILED",
     };
-  }
-
-  if (ownership.status === "OK") {
-    // 2026-09-06 (S5 cross-phase hardening). Was a client-side read
-    // (the `ownership` fetch above) + filter + write of a whole new
-    // array, with a single retry-on-error added by the P13 adversarial
-    // audit for the narrower case of two concurrent REMOVALS racing
-    // each other. remove_evidence_file_id (20260906240000) performs
-    // this as a single atomic `array_remove` UPDATE instead -- two
-    // concurrent writers (including the broader case the P13 retry
-    // never covered: this removal racing a concurrent uploadEvidence
-    // File, live-reproduced end to end) now serialize at the row level
-    // rather than racing, so no retry is needed at all. SECURITY
-    // INVOKER, so RLS (including the evidence_file_ids anti-join)
-    // still governs this write exactly as it did the bare UPDATE it
-    // replaces.
-    await supabase
-      .rpc(
-        "remove_evidence_file_id",
-        {
-          p_emission_data_id: fetched.file.emission_data_id,
-          p_evidence_file_id: evidenceFileId,
-        },
-      );
   }
 
   await recordAuditEvent(

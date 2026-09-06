@@ -759,7 +759,7 @@ describe(
     );
 
     it(
-      "S5 cross-phase hardening: mutates evidence_file_ids via the atomic remove_evidence_file_id RPC -- no client-side read-then-write, and so no retry logic is needed even when the RPC itself reports an error (its own failure is best-effort, matching this function's established non-atomicity posture for the array step specifically)",
+      "2026-09-07 (S5 review round 4, finding S5R4-AUTHZ-B1): the atomic remove_evidence_file_id RPC now runs FIRST -- an error from it (a concurrent VERIFY racing this call) is EMISSION_DATA_VERIFIED, and stops before storage or the metadata row are touched at all",
       async () => {
         const recorder =
           makeRecorder();
@@ -780,9 +780,55 @@ describe(
             "evidence-file-1" as never,
           );
 
-        // The metadata row and storage object are already genuinely
-        // removed by this point -- a failure on the best-effort array
-        // step does not turn the overall removal into a failure.
+        // The array update is the FIRST mutation and it failed -- the
+        // storage object and the evidence_files metadata row must both
+        // still be genuinely intact, not just "the function said so."
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "EMISSION_DATA_VERIFIED" },
+        );
+
+        expect(
+          recorder.rpcCalls.filter((call) => call.fn === "remove_evidence_file_id"),
+        ).toHaveLength(
+          1,
+        );
+
+        expect(
+          recorder.storageOps,
+        ).toHaveLength(
+          0,
+        );
+
+        expect(
+          recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
+        ).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 4, finding S5R4-AUTHZ-B1): still deletes storage then the metadata row, in order, once the array update succeeds",
+      async () => {
+        const recorder =
+          makeRecorder();
+
+        const result =
+          await removeEvidenceFile(
+            makeMockSupabase(
+              {
+                evidence_files: { data: evidenceFileRow, error: null },
+                emission_data: { data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1", "other"] }, error: null },
+                audit_events: { data: null, error: null },
+              },
+              {},
+              recorder,
+              { remove_evidence_file_id: { data: null, error: null } },
+            ),
+            memberContext(),
+            "evidence-file-1" as never,
+          );
+
         expect(result).toEqual(
           { status: "OK" },
         );
@@ -791,6 +837,18 @@ describe(
           recorder.rpcCalls.filter((call) => call.fn === "remove_evidence_file_id"),
         ).toHaveLength(
           1,
+        );
+
+        expect(
+          recorder.storageOps.filter((op) => op.op === "remove"),
+        ).toHaveLength(
+          1,
+        );
+
+        expect(
+          recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
+        ).toBe(
+          true,
         );
 
         // No client-side read-then-write fallback: the RPC is called
