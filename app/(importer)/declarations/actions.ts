@@ -252,6 +252,15 @@ function filedMessageFor(
     case "CALCULATION_ENGINE_OUTDATED":
       return "One or more lines were calculated by an earlier version of the calculation engine. Recalculate those lines, then record the filing -- the earlier results are kept for provenance.";
 
+    // 2026-09-06 (S5 finding #12, 20260906250000). A default-value line
+    // was determined against a regulatory dataset that has since been
+    // corrected/superseded. Names the action, same as
+    // CALCULATION_ENGINE_OUTDATED above -- redetermining the line picks
+    // up the corrected dataset; the earlier determination is kept for
+    // provenance.
+    case "DATASET_SUPERSEDED":
+      return "One or more lines were determined against a regulatory dataset that has since been corrected. Redetermine those lines against the current dataset, then record the filing -- the earlier determination is kept for provenance.";
+
     // 2026-09-04 (P14). The lines are not the ones this declaration was
     // approved over. Recoverable, and the message says how: re-approving
     // the declaration is what records the new population as approved.

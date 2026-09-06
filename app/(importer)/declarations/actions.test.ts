@@ -766,6 +766,33 @@ describe(
         );
       },
     );
+
+    it(
+      "surfaces the DATASET_SUPERSEDED message, distinct from the other filing-time reasons",
+      async () => {
+        checkMock.mockReturnValueOnce(ALLOWED);
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(ORG_SUMMARY);
+        recordDeclarationFiledMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "DATASET_SUPERSEDED" },
+        );
+
+        const result =
+          await recordDeclarationFiledAction(
+            { status: "idle" },
+            formData(
+              { declarationId: "decl-1", filedReference: "REF-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message:
+              "One or more lines were determined against a regulatory dataset that has since been corrected. Redetermine those lines against the current dataset, then record the filing -- the earlier determination is kept for provenance.",
+          },
+        );
+      },
+    );
   },
 );
 

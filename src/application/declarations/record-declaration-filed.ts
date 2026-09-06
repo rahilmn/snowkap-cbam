@@ -55,6 +55,15 @@ export type RecordDeclarationFiledResult =
         // Distinct from INCOMPLETE on purpose: the line HAS a result,
         // and the remedy is to recalculate rather than to calculate.
         | "CALCULATION_ENGINE_OUTDATED"
+        // 2026-09-06 (S5 finding #12, 20260906250000). A member line's
+        // DEFAULT determination was resolved against a regulatory
+        // dataset that is no longer ACTIVE (corrected/superseded since
+        // the determination was frozen). Distinct from
+        // CALCULATION_ENGINE_OUTDATED on purpose: the engine that ran is
+        // still current, but the regulatory data it read is not -- the
+        // remedy is to redetermine the affected line(s), not just
+        // recalculate.
+        | "DATASET_SUPERSEDED"
         | "INCOMPLETE"
         // The RPC call itself errored, or returned no row at all
         // (network/transport failure -- distinct from every named
@@ -235,6 +244,9 @@ export async function recordDeclarationFiled(
 
     case "CALCULATION_ENGINE_OUTDATED":
       return { status: "REJECTED", reason: "CALCULATION_ENGINE_OUTDATED" };
+
+    case "DATASET_SUPERSEDED":
+      return { status: "REJECTED", reason: "DATASET_SUPERSEDED" };
 
     case "INCOMPLETE":
       return { status: "REJECTED", reason: "INCOMPLETE" };

@@ -76,6 +76,7 @@ describe.skipIf(!localSupabaseReachable)(
     let orgId: string;
     let adminId: string;
     let adminClient: SupabaseClient;
+    let activeDatasetId: string;
 
     /** Each test gets its own year, so filings never collide. */
     let nextYear = 2400;
@@ -89,6 +90,14 @@ describe.skipIf(!localSupabaseReachable)(
       const determination = {
         method: "DEFAULT",
         marker: reference,
+        // 2026-09-06 (S5 cross-phase hardening): record_declaration_
+        // filed now also refuses DATASET_SUPERSEDED for a DEFAULT
+        // determination whose resolution.dataset_id doesn't name a
+        // currently-ACTIVE regulatory_datasets row (20260906250000) --
+        // fetched once in beforeAll, real, so this file's own fixtures
+        // (which only ever cared about period-membership correctness)
+        // keep passing that unrelated gate.
+        resolution: { dataset_id: activeDatasetId },
       };
 
       const { data: shipment, error: shipmentError } =
@@ -219,6 +228,22 @@ describe.skipIf(!localSupabaseReachable)(
     }
 
     beforeAll(async () => {
+      const { data: activeDataset, error: activeDatasetError } =
+        await serviceClient
+          .from("regulatory_datasets")
+          .select("id")
+          .eq("dataset_type", "DEFAULT_EMISSION_VALUES")
+          .eq("status", "ACTIVE")
+          .single();
+
+      if (activeDatasetError || !activeDataset) {
+        throw new Error(
+          `active regulatory dataset lookup failed: ${activeDatasetError?.message}`,
+        );
+      }
+
+      activeDatasetId = activeDataset.id as string;
+
       const { data: org, error: orgError } =
         await serviceClient
           .from("organizations")

@@ -96,9 +96,33 @@ describe.skipIf(!ready)(
     let orgId: string;
     let adminId: string;
     let adminClient: SupabaseClient;
+    // 2026-09-06 (S5 cross-phase hardening): record_declaration_filed
+    // now also refuses DATASET_SUPERSEDED for a DEFAULT determination
+    // whose resolution.dataset_id doesn't name a currently-ACTIVE
+    // regulatory_datasets row (20260906250000) -- fetched once, real,
+    // so this file's own fixtures (which only ever cared about
+    // approved-population correctness) keep passing that unrelated
+    // gate.
+    let activeDatasetId: string;
     let nextYear = 2301;
 
     beforeAll(async () => {
+      const { data: activeDataset, error: activeDatasetError } =
+        await serviceClient
+          .from("regulatory_datasets")
+          .select("id")
+          .eq("dataset_type", "DEFAULT_EMISSION_VALUES")
+          .eq("status", "ACTIVE")
+          .single();
+
+      if (activeDatasetError || !activeDataset) {
+        throw new Error(
+          `active regulatory dataset lookup failed: ${activeDatasetError?.message}`,
+        );
+      }
+
+      activeDatasetId = activeDataset.id as string;
+
       const { data: org, error: orgError } =
         await serviceClient
           .from("organizations")
@@ -182,7 +206,7 @@ describe.skipIf(!ready)(
       approved: string[] | null;
     }> {
       const year = nextYear++;
-      const determination = { method: "DEFAULT", marker: `y${year}` };
+      const determination = { method: "DEFAULT", marker: `y${year}`, resolution: { dataset_id: activeDatasetId } };
 
       const { data: shipment } =
         await serviceClient
@@ -620,7 +644,7 @@ describe.skipIf(!ready)(
         await serviceClient
           .from("shipment_lines")
           .update({
-            emission_determination: { method: "DEFAULT", marker: `y${seeded.year}` },
+            emission_determination: { method: "DEFAULT", marker: `y${seeded.year}`, resolution: { dataset_id: activeDatasetId } },
           })
           .eq("id", seeded.lineIds[0]!);
 
@@ -633,7 +657,7 @@ describe.skipIf(!ready)(
             engine_version: "1.4.0",
             quantity: "10",
             quantity_unit: "TONNES",
-            determination: { method: "DEFAULT", marker: `y${seeded.year}` },
+            determination: { method: "DEFAULT", marker: `y${seeded.year}`, resolution: { dataset_id: activeDatasetId } },
             steps: [],
             embedded_emissions_tco2e: "10",
             calculated_by_user_id: adminId,
@@ -741,7 +765,7 @@ describe.skipIf(!ready)(
           .from("shipment_lines")
           .update({
             net_mass_tonnes: "800",
-            emission_determination: { method: "DEFAULT", marker: `y${seeded.year}` },
+            emission_determination: { method: "DEFAULT", marker: `y${seeded.year}`, resolution: { dataset_id: activeDatasetId } },
           })
           .eq("id", seeded.lineIds[0]!);
 
@@ -754,7 +778,7 @@ describe.skipIf(!ready)(
             engine_version: "1.4.0",
             quantity: "800",
             quantity_unit: "TONNES",
-            determination: { method: "DEFAULT", marker: `y${seeded.year}` },
+            determination: { method: "DEFAULT", marker: `y${seeded.year}`, resolution: { dataset_id: activeDatasetId } },
             steps: [],
             embedded_emissions_tco2e: "800",
             calculated_by_user_id: adminId,

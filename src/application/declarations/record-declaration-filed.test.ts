@@ -228,6 +228,25 @@ describe(
     );
 
     it(
+      "maps DATASET_SUPERSEDED -- a default-value line's regulatory dataset has been corrected since determination",
+      async () => {
+        const result =
+          await recordDeclarationFiled(
+            makeMockSupabase(
+              { data: [{ result_status: "DATASET_SUPERSEDED", result_declaration_id: null }], error: null },
+            ),
+            adminContext,
+            "decl-1" as never,
+            "EU/CBAM/2026/1",
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "DATASET_SUPERSEDED" },
+        );
+      },
+    );
+
+    it(
       "maps ALREADY_FILED (the double-click case)",
       async () => {
         const result =
