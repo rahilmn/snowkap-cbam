@@ -883,12 +883,15 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
-      "P14/F11: the gate is narrow -- a DRAFT record's verification can still move freely",
+      "2026-09-07 (S5 review round 3, finding S5R3-AUTHZ-B1, supersedes the old P14/F11 'the gate is narrow' assertion below). A DRAFT + VERIFIED record's verification can no longer move freely -- this exact write previously reopened app.enforce_dossier_lock and every evidence-delete lock with no ADMIN privilege required and no transition the domain state machine contains. See tests/integration/emission-data-lifecycle-authority.test.ts's B2.12-B2.14 for the fuller adversarial coverage (MEMBER, OWNER/ADMIN, and the DISCARD recovery path).",
       async () => {
-        // A gate that never opens is indistinguishable from a broken
-        // one. Only an ACTIVE record is protected: a DRAFT record is
-        // nobody else's dependency yet, and the ordinary submit /
-        // verify / reject / resubmit loop must keep working.
+        // 2026-09-03 (P14/F11, now superseded): this used to assert
+        // `error` was null, on the stated reasoning that "a DRAFT record
+        // is nobody else's dependency yet." 20260906230000 (S5, the same
+        // day this test's own suite last changed) made that false: a
+        // DRAFT + VERIFIED record is exactly as locked as an ACTIVE one
+        // for app.enforce_dossier_lock and the evidence-delete policies,
+        // and this write is what silently unlocked all of them again.
         const emissionDataId =
           await insertDraftEmissionData(
             {
@@ -909,7 +912,48 @@ describe.skipIf(!localSupabaseReachable)(
               emissionDataId,
             );
 
-        expect(error).toBeNull();
+        expect(error).not.toBeNull();
+        expect(error?.message).toContain(
+          "cannot be un-verified",
+        );
+      },
+    );
+
+    it(
+      "the ordinary submit / verify / reject / resubmit loop still works on a genuinely UNVERIFIED DRAFT record -- the fix above is scoped to a record that is already VERIFIED, not to DRAFT records generally",
+      async () => {
+        const emissionDataId =
+          await insertDraftEmissionData();
+
+        const submit =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update({ verification_status: "VERIFICATION_PENDING" })
+            .eq("id", emissionDataId);
+
+        expect(submit.error).toBeNull();
+
+        const reject =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update({
+              verification_status: "REJECTED",
+              rejection_reason: "missing evidence",
+            })
+            .eq("id", emissionDataId);
+
+        expect(reject.error).toBeNull();
+
+        const resubmit =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update({
+              verification_status: "VERIFICATION_PENDING",
+              rejection_reason: null,
+            })
+            .eq("id", emissionDataId);
+
+        expect(resubmit.error).toBeNull();
       },
     );
 

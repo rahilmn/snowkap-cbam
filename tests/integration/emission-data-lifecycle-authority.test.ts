@@ -228,6 +228,104 @@ describe.skipIf(!localSupabaseReachable)(
       return { emissionDataId, evidenceFileId, reportingPeriodYear };
     }
 
+    /**
+     * 2026-09-07 (S5 review round 3, finding S5R3-AUTHZ-B1). The same
+     * legitimate path as createGenuinelyActiveVerifiedRecord above,
+     * stopped one step short of ACTIVATE -- a record can sit
+     * DRAFT + VERIFIED for as long as the producer wants
+     * (emission-data-lifecycle.ts's own doc comment: verifyEmissionData
+     * and activateEmissionData are separate, non-atomic actions), and
+     * that window is exactly what app.enforce_dossier_lock,
+     * evidence_files_delete_own_org and evidence_storage_delete_own_org
+     * all already treat as locked.
+     */
+    async function createDraftVerifiedRecord(): Promise<{
+      emissionDataId: string;
+      evidenceFileId: string;
+    }> {
+      const reportingPeriodYear = nextReportingPeriodYear++;
+
+      const { data: created, error: createError } =
+        await clientProducerMember
+          .from("emission_data")
+          .insert({
+            installation_id: installationId,
+            entered_by_org_id: producerOrgId,
+            cn_scope: ["72081000"],
+            reporting_period_kind: "ANNUAL",
+            reporting_period_year: reportingPeriodYear,
+            direct_specific: "3.100",
+            indirect_specific: "0.500",
+            emission_unit: "tCO2e/t",
+            methodology: "EU_METHOD",
+          })
+          .select("id")
+          .single();
+
+      if (createError || !created) {
+        throw new Error(`legitimate DRAFT create failed: ${createError?.message}`);
+      }
+
+      const emissionDataId = created.id as string;
+
+      const { data: evidence, error: evidenceError } =
+        await clientProducerMember
+          .from("evidence_files")
+          .insert({
+            org_id: producerOrgId,
+            emission_data_id: emissionDataId,
+            storage_path: `${producerOrgId}/${emissionDataId}/${crypto.randomUUID()}.pdf`,
+            original_filename: "verifier-report.pdf",
+            mime_type: "application/pdf",
+            size_bytes: 1024,
+            sha256: "e".repeat(64),
+            uploaded_by_user_id: producerMemberId,
+          })
+          .select("id")
+          .single();
+
+      if (evidenceError || !evidence) {
+        throw new Error(`evidence seed failed: ${evidenceError?.message}`);
+      }
+
+      const evidenceFileId = evidence.id as string;
+
+      const attach =
+        await clientProducerMember
+          .from("emission_data")
+          .update({ evidence_file_ids: [evidenceFileId] })
+          .eq("id", emissionDataId);
+
+      if (attach.error) {
+        throw new Error(`evidence attach failed: ${attach.error.message}`);
+      }
+
+      const submit =
+        await clientProducerMember
+          .from("emission_data")
+          .update({ verification_status: "VERIFICATION_PENDING" })
+          .eq("id", emissionDataId);
+
+      if (submit.error) {
+        throw new Error(`submit failed: ${submit.error.message}`);
+      }
+
+      const verify =
+        await clientProducerAdmin
+          .from("emission_data")
+          .update({
+            verification_status: "VERIFIED",
+            verifier_user_id: producerAdminId,
+          })
+          .eq("id", emissionDataId);
+
+      if (verify.error) {
+        throw new Error(`verify failed: ${verify.error.message}`);
+      }
+
+      return { emissionDataId, evidenceFileId };
+    }
+
     async function readRecord(emissionDataId: string): Promise<{
       status: string;
       verification_status: string;
@@ -963,6 +1061,90 @@ describe.skipIf(!localSupabaseReachable)(
 
         expect(error).toBeNull();
       });
+
+      it(
+        "B2.12 (S5 review round 3, finding S5R3-AUTHZ-B1) an ordinary MEMBER cannot un-verify a DRAFT + VERIFIED record -- this exact write previously reopened the dossier lock and every evidence-delete lock, with no ADMIN privilege required and no transition the domain state machine contains",
+        async () => {
+          const { emissionDataId, evidenceFileId } =
+            await createDraftVerifiedRecord();
+
+          const downgrade =
+            await clientProducerMember
+              .from("emission_data")
+              .update({ verification_status: "VERIFICATION_PENDING" })
+              .eq("id", emissionDataId);
+
+          expect(downgrade.error).not.toBeNull();
+          expect(downgrade.error?.message).toContain(
+            "cannot be un-verified",
+          );
+
+          // The record itself, and the evidence-delete locks it keys,
+          // must be provably untouched -- not merely that the UPDATE
+          // returned an error.
+          const record = await readRecord(emissionDataId);
+
+          expect(record.status).toBe("DRAFT");
+          expect(record.verification_status).toBe("VERIFIED");
+
+          const removeEvidence =
+            await clientProducerMember
+              .from("emission_data")
+              .update({ evidence_file_ids: [] })
+              .eq("id", emissionDataId);
+
+          expect(removeEvidence.error).not.toBeNull();
+
+          const evidenceFileStillExists =
+            await serviceClient
+              .from("evidence_files")
+              .select("id")
+              .eq("id", evidenceFileId)
+              .maybeSingle();
+
+          expect(evidenceFileStillExists.data).not.toBeNull();
+        },
+      );
+
+      it(
+        "B2.13 the same downgrade is refused for an ADMIN too -- this is not a role gap, no transition the domain state machine contains can produce it for anyone",
+        async () => {
+          const { emissionDataId } =
+            await createDraftVerifiedRecord();
+
+          const downgrade =
+            await clientProducerAdmin
+              .from("emission_data")
+              .update({ verification_status: "UNVERIFIED" })
+              .eq("id", emissionDataId);
+
+          expect(downgrade.error).not.toBeNull();
+          expect(downgrade.error?.message).toContain(
+            "cannot be un-verified",
+          );
+        },
+      );
+
+      it(
+        "B2.14 the legitimate recovery path survives: a DRAFT + VERIFIED record verified by mistake can still be DISCARDED",
+        async () => {
+          const { emissionDataId } =
+            await createDraftVerifiedRecord();
+
+          const discard =
+            await clientProducerMember
+              .from("emission_data")
+              .update({ status: "DISCARDED" })
+              .eq("id", emissionDataId);
+
+          expect(discard.error).toBeNull();
+
+          const record = await readRecord(emissionDataId);
+
+          expect(record.status).toBe("DISCARDED");
+          expect(record.verification_status).toBe("VERIFIED");
+        },
+      );
     });
   },
 );
