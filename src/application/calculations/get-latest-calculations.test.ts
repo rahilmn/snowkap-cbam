@@ -82,6 +82,18 @@ function mockSupabase(
       return builder;
     },
 
+    // 2026-09-07 (S5 review round 3, finding S5R3-A-B2): the query now
+    // pages with .range() (ordered by line_id/id for a stable
+    // tie-break). Every fixture here returns well under
+    // CALCULATION_PAGE_SIZE rows, so the paging loop always terminates
+    // after its first page -- this mock stays a one-shot resolver,
+    // .order()/.range() are pure pass-throughs back to `builder`.
+    order: () =>
+      builder,
+
+    range: () =>
+      builder,
+
     then: (
       resolve: (value: unknown) => unknown,
       reject: (reason: unknown) => unknown,

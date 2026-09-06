@@ -79,32 +79,71 @@ interface CalculationResultRow {
  * fell outside the newest rows would render as "Not calculated" even
  * though they had been.
  */
+// 2026-09-07 (supabase/config.toml `max_rows = 1000`; S5 review round
+// 3, finding S5R3-A-B2). Reading latest_calculation_results (DISTINCT
+// ON line_id) already closed the P6 truncation risk described above --
+// this view's own row count is bounded by the shipment's LINE count,
+// not by its full calculation history -- but a shipment with more than
+// 1000 lines still silently truncates the same way, with no .range()
+// on this query. Lines past the cap would render as "Not calculated"
+// even though they had been, and -- more consequentially -- their
+// embedded emissions would silently drop out of
+// getShipmentEmissionsTotal's headline sum for the shipment (the
+// caller feeds this function's return value straight into that pure
+// summation, which has no way to know rows are missing).
+const CALCULATION_PAGE_SIZE = 1000;
+
 export async function getLatestCalculationsByShipment(
   supabase: SupabaseClient,
   orgId: OrganizationId,
   shipmentId: ShipmentId,
 ): Promise<Record<string, LatestLineCalculation>> {
-  const { data, error } =
-    await supabase
-      .from("latest_calculation_results")
-      .select(
-        "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at, determination",
-      )
-      // Pinned to the ACTIVE org, not left to RLS, for the reason
-      // get-shipment-detail.ts sets out: the view is org-scoped by RLS to
-      // every org the USER belongs to, which is not the same as the org
-      // they are acting as.
-      .eq("org_id", orgId)
-      .eq("shipment_id", shipmentId);
+  const rows: CalculationResultRow[] =
+    [];
 
-  if (error || !data) {
-    return {};
+  let offset =
+    0;
+
+  for (;;) {
+    const { data, error } =
+      await supabase
+        .from("latest_calculation_results")
+        .select(
+          "id, line_id, engine_version, embedded_emissions_tco2e, steps, calculated_at, determination",
+        )
+        // Pinned to the ACTIVE org, not left to RLS, for the reason
+        // get-shipment-detail.ts sets out: the view is org-scoped by RLS
+        // to every org the USER belongs to, which is not the same as the
+        // org they are acting as.
+        .eq("org_id", orgId)
+        .eq("shipment_id", shipmentId)
+        // `id` (calculation_results' own primary key) as a deterministic
+        // tie-breaker so .range() pagination is stable across pages --
+        // the view has no other natural sort key to page against.
+        .order("line_id", { ascending: true })
+        .order("id", { ascending: true })
+        .range(offset, offset + CALCULATION_PAGE_SIZE - 1);
+
+    if (error || !data) {
+      return {};
+    }
+
+    rows.push(
+      ...(data as CalculationResultRow[]),
+    );
+
+    if (data.length < CALCULATION_PAGE_SIZE) {
+      break;
+    }
+
+    offset +=
+      CALCULATION_PAGE_SIZE;
   }
 
   const latestByLine: Record<string, LatestLineCalculation> =
     {};
 
-  for (const row of data as CalculationResultRow[]) {
+  for (const row of rows) {
     latestByLine[row.line_id] =
       {
         id: row.id as CalculationResultId,

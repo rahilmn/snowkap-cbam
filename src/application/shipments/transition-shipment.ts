@@ -164,25 +164,62 @@ export async function transitionShipmentStatus(
     };
   }
 
-  const { data: lineRows, error: linesError } =
-    await supabase
-      .from("shipment_lines")
-      .select(
-        SHIPMENT_LINE_COLUMNS,
-      )
-      .eq("shipment_id", shipmentId);
+  // 2026-09-07 (supabase/config.toml `max_rows = 1000`; S5 review round
+  // 3, finding S5R3-A-B2, second consequence). Un-paged, this silently
+  // truncated at 1000 rows for a shipment with more lines than that --
+  // consequentially so here specifically: transitionShipment's own
+  // MARK_READY gate checks every line for calculation/determination
+  // completeness, so a truncated fetch would only ever see the first
+  // 1000 lines and could admit MARK_READY (and downstream, filing) on a
+  // shipment whose lines past the cap were never actually checked at
+  // all -- not a display gap, a readiness-gate bypass. Same paging
+  // convention as the other fixes for this defect class.
+  const LINE_PAGE_SIZE =
+    1000;
 
-  if (linesError) {
-    return {
-      status: "REJECTED",
-      reason: "FETCH_FAILED",
-    };
+  const lineRows: ShipmentLineRow[] =
+    [];
+
+  let offset =
+    0;
+
+  for (;;) {
+    const { data, error: linesError } =
+      await supabase
+        .from("shipment_lines")
+        .select(
+          SHIPMENT_LINE_COLUMNS,
+        )
+        .eq("shipment_id", shipmentId)
+        .order("line_number", { ascending: true })
+        .range(offset, offset + LINE_PAGE_SIZE - 1);
+
+    if (linesError) {
+      return {
+        status: "REJECTED",
+        reason: "FETCH_FAILED",
+      };
+    }
+
+    const page =
+      (data ?? []) as ShipmentLineRow[];
+
+    lineRows.push(
+      ...page,
+    );
+
+    if (page.length < LINE_PAGE_SIZE) {
+      break;
+    }
+
+    offset +=
+      LINE_PAGE_SIZE;
   }
 
   const shipment =
     toShipment(
       shipmentRow as ShipmentRow,
-      ((lineRows ?? []) as ShipmentLineRow[]).map(
+      lineRows.map(
         toShipmentLine,
       ),
     );

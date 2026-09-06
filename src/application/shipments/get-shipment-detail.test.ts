@@ -73,6 +73,14 @@ function mockSupabase(
       },
 
       order: () =>
+        builder,
+
+      // 2026-09-07 (S5 review round 3, finding S5R3-A-B2): the shipment
+      // line fetch now pages with .range(). Every fixture here returns
+      // well under LINE_PAGE_SIZE rows, so the paging loop always
+      // terminates after its first page -- this mock stays a one-shot
+      // resolver, .range() is a pure pass-through to `result`.
+      range: () =>
         Promise.resolve(
           result,
         ),
@@ -141,6 +149,119 @@ describe(
               emission_determination: null,
             },
           ],
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 3, finding S5R3-A-B2): pages past PostgREST's max_rows cap instead of silently truncating a shipment's lines at 1000",
+      async () => {
+        const firstPage =
+          Array.from(
+            { length: 1000 },
+            (_, index) => (
+              {
+                ...lineRow,
+                id: `line-page1-${index}`,
+                line_number: index + 1,
+              }
+            ),
+          );
+
+        const secondPage =
+          [
+            {
+              ...lineRow,
+              id: "line-page2-0",
+              line_number: 1001,
+            },
+          ];
+
+        let linesCallCount =
+          0;
+
+        const rangesRequested: [number, number][] =
+          [];
+
+        const supabase =
+          {
+            from: (table: string) => {
+              if (table !== "shipment_lines") {
+                return {
+                  select: () => (
+                    {
+                      eq: () => (
+                        {
+                          maybeSingle: () =>
+                            Promise.resolve(
+                              { data: shipmentRow, error: null },
+                            ),
+                        }
+                      ),
+                    }
+                  ),
+                };
+              }
+
+              return {
+                select: () => (
+                  {
+                    eq: () => (
+                      {
+                        eq: () => (
+                          {
+                            order: () => (
+                              {
+                                range: (from: number, to: number) => {
+                                  rangesRequested.push(
+                                    [from, to],
+                                  );
+
+                                  linesCallCount +=
+                                    1;
+
+                                  return Promise.resolve(
+                                    linesCallCount === 1
+                                      ? { data: firstPage, error: null }
+                                      : { data: secondPage, error: null },
+                                  );
+                                },
+                              }
+                            ),
+                          }
+                        ),
+                      }
+                    ),
+                  }
+                ),
+              };
+            },
+          } as never;
+
+        const result =
+          await getShipmentDetail(
+            supabase,
+            "org-1" as never,
+            "ship-1" as never,
+          );
+
+        expect(linesCallCount).toBe(
+          2,
+        );
+
+        expect(rangesRequested).toEqual(
+          [
+            [0, 999],
+            [1000, 1999],
+          ],
+        );
+
+        expect(result?.lines).toHaveLength(
+          1001,
+        );
+
+        expect(result?.lines.at(-1)?.id).toBe(
+          "line-page2-0",
         );
       },
     );

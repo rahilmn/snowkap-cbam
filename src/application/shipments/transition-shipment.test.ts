@@ -105,10 +105,24 @@ function mockSupabase(
         return {
           select: () => (
             {
-              eq: () =>
-                Promise.resolve(
-                  linesResult,
-                ),
+              // 2026-09-07 (S5 review round 3, finding S5R3-A-B2): the
+              // MARK_READY line fetch now pages with .range(). Every
+              // fixture here returns well under LINE_PAGE_SIZE rows, so
+              // the paging loop always terminates after its first page
+              // -- this mock stays a one-shot resolver, .order()/
+              // .range() are pure pass-throughs.
+              eq: () => (
+                {
+                  order: () => (
+                    {
+                      range: () =>
+                        Promise.resolve(
+                          linesResult,
+                        ),
+                    }
+                  ),
+                }
+              ),
             }
           ),
         };
@@ -197,10 +211,18 @@ describe(
                 return {
                   select: () => (
                     {
-                      eq: () =>
-                        Promise.resolve(
-                          { data: [], error: null },
-                        ),
+                      eq: () => (
+                        {
+                          order: () => (
+                            {
+                              range: () =>
+                                Promise.resolve(
+                                  { data: [], error: null },
+                                ),
+                            }
+                          ),
+                        }
+                      ),
                     }
                   ),
                 };
