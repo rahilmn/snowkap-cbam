@@ -68,6 +68,7 @@ describe.skipIf(!localSupabaseReachable)(
     let orgBId: string;
     let memberAId: string;
     let memberBId: string;
+    let ownerAId: string;
     let operatorId: string;
     let installationId: string;
     let emissionDataId: string;
@@ -78,9 +79,11 @@ describe.skipIf(!localSupabaseReachable)(
     let lockedContextId: string;
     let draftVerifiedEmissionDataId: string;
     let draftVerifiedContextId: string;
+    let draftVerifiedPrecursorId: string;
 
     let clientA: SupabaseClient;
     let clientB: SupabaseClient;
+    let ownerAClient: SupabaseClient;
 
     async function signInAnonClient(
       email: string,
@@ -184,6 +187,22 @@ describe.skipIf(!localSupabaseReachable)(
           "member-b",
         );
 
+      // 2026-09-06 (S5 review remediation, findings AUTHZ-B1/S5R-B1). A
+      // real ADMIN/OWNER is needed to transition a fixture record's
+      // verification_status into VERIFIED via a genuine authenticated
+      // UPDATE -- app.enforce_emission_data_verification_gate refuses
+      // that transition for anyone who isn't (service_role's own
+      // auth.uid() is null, so it cannot satisfy this gate either, same
+      // as an ordinary MEMBER). Needed now that the dossier lock covers
+      // INSERT too (20260906260000): a "locked" fixture's dossier rows
+      // must be created BEFORE the parent record is locked, which means
+      // walking the parent through a real verification transition
+      // rather than inserting it pre-locked from birth.
+      ownerAId =
+        await createUser(
+          "owner-a",
+        );
+
       const { error: membershipError } =
         await serviceClient
           .from("memberships")
@@ -191,6 +210,7 @@ describe.skipIf(!localSupabaseReachable)(
             [
               { org_id: orgAId, user_id: memberAId, role: "MEMBER" },
               { org_id: orgBId, user_id: memberBId, role: "MEMBER" },
+              { org_id: orgAId, user_id: ownerAId, role: "OWNER" },
             ],
           );
 
@@ -209,6 +229,12 @@ describe.skipIf(!localSupabaseReachable)(
       clientB =
         await signInAnonClient(
           `s4-dossier-member-b-${runId}@example.com`,
+          password,
+        );
+
+      ownerAClient =
+        await signInAnonClient(
+          `s4-dossier-owner-a-${runId}@example.com`,
           password,
         );
 
@@ -373,7 +399,7 @@ describe.skipIf(!localSupabaseReachable)(
       }
 
       for (
-        const userId of [memberAId, memberBId]
+        const userId of [memberAId, memberBId, ownerAId]
       ) {
         await serviceClient.auth.admin.deleteUser(
           userId,
@@ -838,18 +864,22 @@ describe.skipIf(!localSupabaseReachable)(
       },
     );
 
-    // The remaining lock tests use a SEPARATE, freshly-inserted
-    // emission_data row that is ACTIVE+VERIFIED from birth, rather than
-    // flipping emissionDataId's own status via UPDATE. An UPDATE-based
-    // transition would also cross app.enforce_emission_data_verification_
-    // gate's ADMIN-or-OWNER check (20260829480000) -- correct for a real
-    // client, but this suite signs in only plain MEMBERs, and the
-    // service-role client has no auth.uid() to satisfy it either. A
-    // direct INSERT with status/verification_status already set (the
-    // same shape dossier-context-shared-access.test.ts's own fixture
-    // uses) reaches the identical end state -- app.enforce_emission_
-    // data_lineage_lock stamps verified_active_at on INSERT too -- without
-    // exercising that unrelated gate at all.
+    // The remaining lock tests use a SEPARATE emission_data row, walked
+    // to ACTIVE+VERIFIED rather than inserted pre-locked from birth.
+    //
+    // 2026-09-06 (S5 review remediation, findings AUTHZ-B1/S5R-B1): the
+    // dossier lock now covers INSERT too (20260906260000), and that
+    // trigger binds every role -- including service_role, whose own
+    // auth.uid() is null -- matching the sibling parent-table lock's own
+    // established all-roles posture. A dossier row can therefore no
+    // longer be attached to an already-locked record at all, by ANY
+    // client. The fixture must create the dossier row FIRST, while the
+    // parent is still DRAFT+UNVERIFIED (unlocked), then walk the parent
+    // through a REAL verification transition as the real OWNER
+    // (ownerAClient) -- service_role cannot satisfy
+    // app.enforce_emission_data_verification_gate's ADMIN-or-OWNER check
+    // either (20260829480000), for the identical auth.uid()-is-null
+    // reason.
     it(
       "once a record is ACTIVE and VERIFIED, its declaration context can no longer be edited by anyone in the owning org -- not just a stranger",
       async () => {
@@ -867,9 +897,8 @@ describe.skipIf(!localSupabaseReachable)(
                 indirect_specific: "0.5",
                 emission_unit: "tCO2e/t",
                 methodology: "EU_METHOD",
-                status: "ACTIVE",
-                verification_status: "VERIFIED",
-                verifier_user_id: memberAId,
+                status: "DRAFT",
+                verification_status: "UNVERIFIED",
                 version: 1,
               },
             )
@@ -878,7 +907,7 @@ describe.skipIf(!localSupabaseReachable)(
 
         if (lockedRowError || !lockedRow) {
           throw new Error(
-            `Failed to create a locked emission_data row: ${lockedRowError?.message}`,
+            `Failed to create the pre-lock emission_data row: ${lockedRowError?.message}`,
           );
         }
 
@@ -904,6 +933,57 @@ describe.skipIf(!localSupabaseReachable)(
         }
 
         lockedContextId = lockedContext.id;
+
+        const { error: verifyError } =
+          await ownerAClient
+            .from("emission_data")
+            .update(
+              { verification_status: "VERIFICATION_PENDING" },
+            )
+            .eq(
+              "id",
+              lockedEmissionDataId,
+            );
+
+        if (verifyError) {
+          throw new Error(
+            `Failed to move the fixture to VERIFICATION_PENDING: ${verifyError.message}`,
+          );
+        }
+
+        const { error: verifiedError } =
+          await ownerAClient
+            .from("emission_data")
+            .update(
+              { verification_status: "VERIFIED", verifier_user_id: ownerAId },
+            )
+            .eq(
+              "id",
+              lockedEmissionDataId,
+            );
+
+        if (verifiedError) {
+          throw new Error(
+            `Failed to verify the fixture: ${verifiedError.message}`,
+          );
+        }
+
+        const { error: activateError } =
+          await serviceClient
+            .from("emission_data")
+            .update(
+              { evidence_file_ids: ["s5review-fixture-evidence-1"], status: "ACTIVE" },
+            )
+            .eq(
+              "id",
+              lockedEmissionDataId,
+            );
+
+        if (activateError) {
+          throw new Error(
+            `Failed to activate the fixture: ${activateError.message}`,
+          );
+        }
 
         const { data, error } =
           await clientA
@@ -975,35 +1055,19 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
-      "...and a precursor declared against it can no longer be deleted, even one added after the lock took effect",
+      "2026-09-06 (S5 review remediation, finding AUTHZ-B1/S5R-B1): a NEW declaration context can no longer be INSERTed onto it either -- the lock trigger previously covered UPDATE/DELETE only, so an ordinary MEMBER could inject a fabricated verifier-report declaration onto an already-published, cross-org-shared record",
       async () => {
-        const { data: newPrecursor, error: newPrecursorError } =
-          await serviceClient
-            .from("emission_data_precursors")
+        const { data, error } =
+          await clientA
+            .from("emission_data_declaration_context")
             .insert(
               {
                 org_id: orgAId,
                 emission_data_id: lockedEmissionDataId,
-                material_description: "Precursor added after verification, for the lock regression test",
-                provenance: "UNKNOWN",
+                production_process_description: "S5REVIEW injected post-verification",
+                verifier_report_declared: true,
+                verifier_report_description: "S5REVIEW fabricated verifier report",
               },
-            )
-            .select("id")
-            .single();
-
-        if (newPrecursorError || !newPrecursor) {
-          throw new Error(
-            `Failed to create precursor for the lock test: ${newPrecursorError?.message}`,
-          );
-        }
-
-        const { data, error } =
-          await clientA
-            .from("emission_data_precursors")
-            .delete()
-            .eq(
-              "id",
-              newPrecursor.id,
             )
             .select(
               "id",
@@ -1012,21 +1076,58 @@ describe.skipIf(!localSupabaseReachable)(
         expect(error).not.toBeNull();
         expect(data).toBeNull();
 
-        const { data: stillThere } =
+        const { data: rows } =
           await serviceClient
-            .from("emission_data_precursors")
+            .from("emission_data_declaration_context")
             .select(
               "id",
             )
             .eq(
-              "id",
-              newPrecursor.id,
-            )
-            .maybeSingle();
+              "emission_data_id",
+              lockedEmissionDataId,
+            );
 
-        expect(stillThere).not.toBeNull();
+        expect(rows).toHaveLength(
+          1,
+        );
       },
     );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding AUTHZ-B1/S5R-B1): a NEW precursor can no longer be INSERTed onto it either",
+      async () => {
+        const { data, error } =
+          await clientA
+            .from("emission_data_precursors")
+            .insert(
+              {
+                org_id: orgAId,
+                emission_data_id: lockedEmissionDataId,
+                material_description: "S5REVIEW injected precursor",
+                provenance: "UNKNOWN",
+              },
+            )
+            .select(
+              "id",
+            );
+
+        expect(error).not.toBeNull();
+        expect(data).toBeNull();
+      },
+    );
+
+    // 2026-09-06 (S5 review remediation, findings AUTHZ-B1/S5R-B1). This
+    // slot previously held "...and a precursor declared against it can
+    // no longer be deleted, even one added after the lock took effect"
+    // -- a test that itself relied on the exact gap AUTHZ-B1/S5R-B1
+    // found: inserting a NEW precursor onto an already-locked record via
+    // serviceClient, which the pre-fix trigger (UPDATE/DELETE only)
+    // silently admitted for every role. Now that the lock covers INSERT
+    // too (20260906260000), that setup step itself fails -- the scenario
+    // "a precursor exists AND was added after the lock" is no longer
+    // reachable by any client, which is the fix working as intended. The
+    // "...a NEW declaration context/precursor can no longer be INSERTed
+    // onto it either" tests above are the direct replacement coverage.
 
     // S5 cross-phase hardening (20260906230000). app.enforce_dossier_lock
     // used to fire only once verified_active_at was set, which happens
@@ -1039,6 +1140,12 @@ describe.skipIf(!localSupabaseReachable)(
     it(
       "once a record is VERIFIED -- even while it is still DRAFT, not yet ACTIVE -- its declaration context can no longer be edited by anyone in the owning org",
       async () => {
+        // 2026-09-06 (S5 review remediation, findings AUTHZ-B1/S5R-B1):
+        // insert as DRAFT+UNVERIFIED first (unlocked), attach the
+        // dossier rows, THEN walk verification_status to VERIFIED as
+        // the real OWNER -- see the identical reasoning on the
+        // ACTIVE+VERIFIED fixture above. status stays DRAFT throughout;
+        // only verification_status moves.
         const { data: draftVerifiedRow, error: draftVerifiedRowError } =
           await serviceClient
             .from("emission_data")
@@ -1054,8 +1161,7 @@ describe.skipIf(!localSupabaseReachable)(
                 emission_unit: "tCO2e/t",
                 methodology: "EU_METHOD",
                 status: "DRAFT",
-                verification_status: "VERIFIED",
-                verifier_user_id: memberAId,
+                verification_status: "UNVERIFIED",
                 version: 1,
               },
             )
@@ -1064,31 +1170,11 @@ describe.skipIf(!localSupabaseReachable)(
 
         if (draftVerifiedRowError || !draftVerifiedRow) {
           throw new Error(
-            `Failed to create a DRAFT+VERIFIED emission_data row: ${draftVerifiedRowError?.message}`,
+            `Failed to create the pre-lock emission_data row: ${draftVerifiedRowError?.message}`,
           );
         }
 
         draftVerifiedEmissionDataId = draftVerifiedRow.id;
-
-        const { data: draftVerifiedRowCheck } =
-          await serviceClient
-            .from("emission_data")
-            .select("status, verification_status, verified_active_at")
-            .eq("id", draftVerifiedEmissionDataId)
-            .single();
-
-        // Confirms the fixture actually reached the state under test --
-        // status stays DRAFT and verified_active_at stays null, unlike
-        // the ACTIVE+VERIFIED fixture above.
-        expect(draftVerifiedRowCheck?.status).toBe(
-          "DRAFT",
-        );
-
-        expect(draftVerifiedRowCheck?.verification_status).toBe(
-          "VERIFIED",
-        );
-
-        expect(draftVerifiedRowCheck?.verified_active_at).toBeNull();
 
         const { data: draftVerifiedContext, error: draftVerifiedContextError } =
           await serviceClient
@@ -1110,6 +1196,82 @@ describe.skipIf(!localSupabaseReachable)(
         }
 
         draftVerifiedContextId = draftVerifiedContext.id;
+
+        const { data: draftVerifiedPrecursor, error: draftVerifiedPrecursorError } =
+          await serviceClient
+            .from("emission_data_precursors")
+            .insert(
+              {
+                org_id: orgAId,
+                emission_data_id: draftVerifiedEmissionDataId,
+                material_description: "Precursor on a DRAFT+VERIFIED record, for the S5 lock regression test",
+                provenance: "UNKNOWN",
+              },
+            )
+            .select("id")
+            .single();
+
+        if (draftVerifiedPrecursorError || !draftVerifiedPrecursor) {
+          throw new Error(
+            `Failed to create the DRAFT+VERIFIED row's precursor: ${draftVerifiedPrecursorError?.message}`,
+          );
+        }
+
+        draftVerifiedPrecursorId = draftVerifiedPrecursor.id;
+
+        const { error: pendingError } =
+          await ownerAClient
+            .from("emission_data")
+            .update(
+              { verification_status: "VERIFICATION_PENDING" },
+            )
+            .eq(
+              "id",
+              draftVerifiedEmissionDataId,
+            );
+
+        if (pendingError) {
+          throw new Error(
+            `Failed to move the DRAFT+VERIFIED fixture to VERIFICATION_PENDING: ${pendingError.message}`,
+          );
+        }
+
+        const { error: verifiedError } =
+          await ownerAClient
+            .from("emission_data")
+            .update(
+              { verification_status: "VERIFIED", verifier_user_id: ownerAId },
+            )
+            .eq(
+              "id",
+              draftVerifiedEmissionDataId,
+            );
+
+        if (verifiedError) {
+          throw new Error(
+            `Failed to verify the DRAFT+VERIFIED fixture: ${verifiedError.message}`,
+          );
+        }
+
+        const { data: draftVerifiedRowCheck } =
+          await serviceClient
+            .from("emission_data")
+            .select("status, verification_status, verified_active_at")
+            .eq("id", draftVerifiedEmissionDataId)
+            .single();
+
+        // Confirms the fixture actually reached the state under test --
+        // status stays DRAFT and verified_active_at stays null, unlike
+        // the ACTIVE+VERIFIED fixture above.
+        expect(draftVerifiedRowCheck?.status).toBe(
+          "DRAFT",
+        );
+
+        expect(draftVerifiedRowCheck?.verification_status).toBe(
+          "VERIFIED",
+        );
+
+        expect(draftVerifiedRowCheck?.verified_active_at).toBeNull();
 
         const { data, error } =
           await clientA
@@ -1149,33 +1311,18 @@ describe.skipIf(!localSupabaseReachable)(
     it(
       "...and a precursor declared against the same DRAFT+VERIFIED record can no longer be deleted",
       async () => {
-        const { data: draftVerifiedPrecursor, error: draftVerifiedPrecursorError } =
-          await serviceClient
-            .from("emission_data_precursors")
-            .insert(
-              {
-                org_id: orgAId,
-                emission_data_id: draftVerifiedEmissionDataId,
-                material_description: "Precursor on a DRAFT+VERIFIED record, for the S5 lock regression test",
-                provenance: "UNKNOWN",
-              },
-            )
-            .select("id")
-            .single();
-
-        if (draftVerifiedPrecursorError || !draftVerifiedPrecursor) {
-          throw new Error(
-            `Failed to create precursor for the DRAFT+VERIFIED lock test: ${draftVerifiedPrecursorError?.message}`,
-          );
-        }
-
+        // 2026-09-06 (S5 review remediation, findings AUTHZ-B1/S5R-B1):
+        // uses the precursor created BEFORE the fixture's lock took
+        // effect (draftVerifiedPrecursorId, set up in the previous
+        // test) -- a fresh INSERT here would itself now be refused,
+        // which is the fix working as intended, not a gap.
         const { data, error } =
           await clientA
             .from("emission_data_precursors")
             .delete()
             .eq(
               "id",
-              draftVerifiedPrecursor.id,
+              draftVerifiedPrecursorId,
             )
             .select(
               "id",
@@ -1192,11 +1339,34 @@ describe.skipIf(!localSupabaseReachable)(
             )
             .eq(
               "id",
-              draftVerifiedPrecursor.id,
+              draftVerifiedPrecursorId,
             )
             .maybeSingle();
 
         expect(stillThere).not.toBeNull();
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding AUTHZ-B1/S5R-B1): a NEW precursor can no longer be INSERTed onto a DRAFT+VERIFIED record either",
+      async () => {
+        const { data, error } =
+          await clientA
+            .from("emission_data_precursors")
+            .insert(
+              {
+                org_id: orgAId,
+                emission_data_id: draftVerifiedEmissionDataId,
+                material_description: "S5REVIEW injected precursor on DRAFT+VERIFIED",
+                provenance: "UNKNOWN",
+              },
+            )
+            .select(
+              "id",
+            );
+
+        expect(error).not.toBeNull();
+        expect(data).toBeNull();
       },
     );
   },

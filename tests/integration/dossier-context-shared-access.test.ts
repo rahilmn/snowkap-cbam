@@ -81,6 +81,7 @@ describe.skipIf(!localSupabaseReachable)(
 
     let granteeClient: SupabaseClient;
     let strangerClient: SupabaseClient;
+    let producerClient: SupabaseClient;
 
     async function signInAnonClient(
       email: string,
@@ -220,6 +221,17 @@ describe.skipIf(!localSupabaseReachable)(
           password,
         );
 
+      // 2026-09-06 (S5 review remediation, findings AUTHZ-B1/S5R-B1). A
+      // real OWNER sign-in, needed to walk activeVerifiedEmissionDataId
+      // through a genuine verification transition -- see this file's
+      // own fixture-creation comment below for why service_role can no
+      // longer insert a dossier row directly onto a pre-locked record.
+      producerClient =
+        await signInAnonClient(
+          `s4-shared-dossier-producer-${runId}@example.com`,
+          password,
+        );
+
       const { data: operator, error: operatorError } =
         await serviceClient
           .from("operators")
@@ -307,11 +319,20 @@ describe.skipIf(!localSupabaseReachable)(
         return data.id;
       }
 
+      // 2026-09-06 (S5 review remediation, findings AUTHZ-B1/S5R-B1):
+      // activeVerifiedEmissionDataId is created DRAFT+UNVERIFIED here
+      // (previously born ACTIVE+VERIFIED) so the dossier rows below can
+      // still be attached via serviceClient -- the dossier lock now
+      // covers INSERT too (20260906260000), and that trigger binds
+      // every role including service_role. It is walked to
+      // ACTIVE+VERIFIED via the real producerClient AFTER the dossier
+      // rows exist, mirroring declaration-context-and-precursors-
+      // isolation.test.ts's own identical fix.
       activeVerifiedEmissionDataId =
         await createEmissionData(
           2026,
-          "ACTIVE",
-          "VERIFIED",
+          "DRAFT",
+          "UNVERIFIED",
         );
 
       draftUnverifiedEmissionDataId =
@@ -360,6 +381,57 @@ describe.skipIf(!localSupabaseReachable)(
             `Failed to create precursor for ${emissionDataId}: ${precursorError.message}`,
           );
         }
+      }
+
+      const { error: pendingError } =
+        await producerClient
+          .from("emission_data")
+          .update(
+            { verification_status: "VERIFICATION_PENDING" },
+          )
+          .eq(
+            "id",
+            activeVerifiedEmissionDataId,
+          );
+
+      if (pendingError) {
+        throw new Error(
+          `Failed to move activeVerifiedEmissionDataId to VERIFICATION_PENDING: ${pendingError.message}`,
+        );
+      }
+
+      const { error: verifiedError } =
+        await producerClient
+          .from("emission_data")
+          .update(
+            { verification_status: "VERIFIED", verifier_user_id: producerUserId },
+          )
+          .eq(
+            "id",
+            activeVerifiedEmissionDataId,
+          );
+
+      if (verifiedError) {
+        throw new Error(
+          `Failed to verify activeVerifiedEmissionDataId: ${verifiedError.message}`,
+        );
+      }
+
+      const { error: activateError } =
+        await serviceClient
+          .from("emission_data")
+          .update(
+            { evidence_file_ids: ["s5review-fixture-evidence-1"], status: "ACTIVE" },
+          )
+          .eq(
+            "id",
+            activeVerifiedEmissionDataId,
+          );
+
+      if (activateError) {
+        throw new Error(
+          `Failed to activate activeVerifiedEmissionDataId: ${activateError.message}`,
+        );
       }
 
       const { error: grantError } =
