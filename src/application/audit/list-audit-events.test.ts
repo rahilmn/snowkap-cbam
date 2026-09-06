@@ -404,20 +404,19 @@ describe(
     );
 
     it(
-      "returns an empty array on a query error, without throwing",
+      "2026-09-06 (S5 review remediation, finding S5B-5): THROWS on a query error -- an audit trail is a compliance record, and 'nothing has ever been recorded here' is a false statement about a regulated artifact",
       async () => {
-        const result =
-          await listAuditEvents(
+        await expect(
+          listAuditEvents(
             makeMockSupabase(
               {
                 audit_events: { data: null, error: { message: "denied" } },
               },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );

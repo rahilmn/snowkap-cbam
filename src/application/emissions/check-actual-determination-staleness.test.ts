@@ -331,10 +331,10 @@ describe(
     );
 
     it(
-      "returns an empty record (fails closed, no false staleness signal) on an emission_data fetch error",
+      "2026-09-06 (S5 review remediation, finding S5B-4): THROWS on an emission_data fetch error -- an absent entry downstream renders as an affirmative 'Current' badge, so a swallowed failure must never produce one",
       async () => {
-        const result =
-          await checkActualDeterminationStalenessByShipment(
+        await expect(
+          checkActualDeterminationStalenessByShipment(
             makeMockSupabase(
               {
                 emission_data: { data: null, error: { message: "denied" } },
@@ -343,10 +343,9 @@ describe(
             "org-1" as never,
             [actualLine()],
             annualPeriod,
-          );
-
-        expect(result).toEqual(
-          {},
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
@@ -451,6 +450,27 @@ describe(
 
         expect(result).toEqual(
           { "line-1": "CURRENT" },
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding S5B-4): THROWS on a sharing_grants fetch error -- previously failed closed to 'no grant', suppressing staleness for exactly the cross-org data an importer is least able to verify independently",
+      async () => {
+        await expect(
+          checkActualDeterminationStalenessByShipment(
+            makeMockSupabase(
+              {
+                emission_data: { data: [currentActiveRowNewerVersion], error: null },
+                sharing_grants: { data: null, error: { message: "denied" } },
+              },
+            ),
+            "org-1" as never,
+            [actualLine()],
+            annualPeriod,
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );

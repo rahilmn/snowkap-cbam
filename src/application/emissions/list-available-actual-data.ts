@@ -238,13 +238,29 @@ interface OrganizationNameLookupRow {
  * via a follow-up `organizations` lookup, using the exact two-follow-up-
  * queries-after-the-main-query convention listMyPendingSharingGrantInvitations
  * (src/application/sharing/manage-sharing-grants.ts) already established
- * for this: if the lookup query itself errors, the WHOLE result is
- * dropped to [] (a transport failure must never be indistinguishable from
- * a fabricated "Unknown organization" placeholder shown for every row);
- * if the query succeeds but a specific grantor org id simply isn't
- * returned, that one row degrades to the UNKNOWN_GRANTOR_ORGANIZATION_NAME
- * placeholder rather than being silently dropped, since the lookup itself
- * is now known to have worked.
+ * for this: if the lookup query itself errors, this function THROWS (a
+ * transport failure must never be indistinguishable from a fabricated
+ * "Unknown organization" placeholder shown for every row -- 2026-09-06,
+ * S5 review remediation, finding S5B-2, superseding this comment's own
+ * prior "dropped to []" posture); if the query succeeds but a specific
+ * grantor org id simply isn't returned, that one row degrades to the
+ * UNKNOWN_GRANTOR_ORGANIZATION_NAME placeholder rather than being
+ * silently dropped, since the lookup itself is now known to have worked.
+ *
+ * 2026-09-06 (S5 review remediation, finding S5B-2). Every one of this
+ * function's four query legs (emission_data, sharing_grants,
+ * installations, the grantor-name RPC) now THROWS on a genuine fetch
+ * error, matching this codebase's established "throw is for
+ * infrastructure failures" convention (CLAUDE.md) -- previously each
+ * degraded to emptyListing(), indistinguishable from "nothing is
+ * genuinely available". emptyListing() itself is unchanged and remains
+ * correct for every genuinely-empty case (no ACTIVE+VERIFIED records at
+ * all, none the caller is authorized to see, none matching the
+ * requested cn_scope). None of this function's three real callers
+ * (app/(importer)/emissions/page.tsx, app/(importer)/shipments/[id]/page.tsx,
+ * getBuyerView) wrap this call in a try/catch, so a throw reaches the
+ * app's own root error boundary (app/error.tsx) -- an honest failure
+ * state, not a silent "nothing here".
  */
 export async function listAvailableActualEmissionData(
   supabase: SupabaseClient,
@@ -261,8 +277,21 @@ export async function listAvailableActualEmissionData(
       .eq("verification_status", "VERIFIED")
       .order("created_at", { ascending: false });
 
+  // 2026-09-06 (S5 review remediation, finding S5B-2). All four of this
+  // function's query legs used to fail closed to emptyListing() --
+  // indistinguishable here from "there is genuinely nothing available".
+  // Three real consumers (the shared-in-data picker on
+  // app/(importer)/emissions/page.tsx, the per-line determination picker
+  // on app/(importer)/shipments/[id]/page.tsx, and getBuyerView) call
+  // this with no try/catch of their own -- a throw here reaches Next's
+  // app/error.tsx boundary, an honest "something went wrong", instead of
+  // silently rendering as though nothing were shared, bouncing the S5
+  // Buyer view off to /emissions as NOT_FOUND, or dropping the actual-
+  // data <select> with no message at all.
   if (error || !data) {
-    return emptyListing();
+    throw new Error(
+      `emissions: available actual-data fetch failed (${error?.message ?? "no rows"}).`,
+    );
   }
 
   const records =
@@ -292,7 +321,9 @@ export async function listAvailableActualEmissionData(
       .eq("status", "ACTIVE");
 
   if (grantError) {
-    return emptyListing();
+    throw new Error(
+      `emissions: sharing grants fetch failed (${grantError.message}).`,
+    );
   }
 
   const now =
@@ -362,7 +393,9 @@ export async function listAvailableActualEmissionData(
       .in("id", installationIds);
 
   if (installationError || !installationRows) {
-    return emptyListing();
+    throw new Error(
+      `emissions: installations fetch failed (${installationError?.message ?? "no rows"}).`,
+    );
   }
 
   const installationById =
@@ -423,7 +456,9 @@ export async function listAvailableActualEmissionData(
     // installations) fails the entire picker closed, not just the rows
     // that specific query would have enriched.
     if (organizationError) {
-      return emptyListing();
+      throw new Error(
+        `emissions: grantor org names fetch failed (${organizationError.message}).`,
+      );
     }
 
     for (const row of (organizationRows ?? []) as OrganizationNameLookupRow[]) {

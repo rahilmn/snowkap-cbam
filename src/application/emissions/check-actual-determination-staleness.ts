@@ -69,12 +69,19 @@ function actualSnapshotOf(
  * rather than a false alarm, which is the correct behavior here too, not
  * a gap introduced by this function.
  *
- * A query error degrades the WHOLE result to {} (no staleness signal for
- * any line) rather than a partial result or a thrown error -- this is
- * purely an informational "Stale -- newer data available" UI hint (never
- * gates anything -- master plan §18 keeps re-determination an explicit,
- * audited importer action, never automatic), so failing quiet here is
- * strictly safer than surfacing a broken picker.
+ * 2026-09-06 (S5 review remediation, finding S5B-4). BOTH of this
+ * module's query legs (the primary emission_data lookup, and the
+ * sharing_grants sub-lookup inside activeGrantedInstallationIds) now
+ * THROW on a genuine fetch error, matching this codebase's own "throw is
+ * for infrastructure failures" convention (CLAUDE.md). Previously each
+ * degraded quiet -- reasoning this was "purely informational" and never
+ * gates anything (master plan §18 keeps re-determination an explicit,
+ * audited importer action, never automatic) -- but that reasoning missed
+ * that a MISSING entry in this function's own result is not itself
+ * rendered: list-actual-determined-lines.ts's own
+ * `stalenessByLineId[line.id] ?? "CURRENT"` converts absence into an
+ * AFFIRMATIVE "Current" badge, a positive claim, not a withheld warning.
+ * "We could not check" must never render as "this IS current".
  */
 
 /**
@@ -102,10 +109,21 @@ async function activeGrantedInstallationIds(
       .in("installation_id", installationIds);
 
   if (error || !data) {
-    // Fails CLOSED: no grant evidence means no staleness signal for a
-    // shared installation, which is the same quiet degradation this
-    // module already chooses for a failed primary query.
-    return new Set();
+    // 2026-09-06 (S5 review remediation, finding S5B-4). Previously
+    // failed closed to an empty Set -- "no grant evidence" -- which is
+    // exactly wrong for a SHARED installation: it does not merely
+    // withhold a staleness signal, it makes the row invisible to the
+    // current-data lookup below, and list-actual-determined-lines.ts's
+    // own `stalenessByLineId[line.id] ?? "CURRENT"` then renders that as
+    // an AFFIRMATIVE "Current" badge -- the exact cross-org data an
+    // importer is least able to verify independently. Throwing here
+    // propagates through checkActualDeterminationStalenessByShipment
+    // (no try/catch of its own) and listActualDeterminedLines (same) to
+    // the page's own error boundary, matching this module's sibling
+    // fix below.
+    throw new Error(
+      `emissions: staleness sharing-grants fetch failed (${error?.message ?? "no rows"}).`,
+    );
   }
 
   const now =
@@ -179,7 +197,21 @@ export async function checkActualDeterminationStalenessByShipment(
     await query;
 
   if (error) {
-    return {};
+    // 2026-09-06 (S5 review remediation, finding S5B-4). Previously
+    // degraded the WHOLE result to {} -- no entry for any line -- which
+    // list-actual-determined-lines.ts:481's own
+    // `stalenessByLineId[line.id] ?? "CURRENT"` then renders as an
+    // AFFIRMATIVE "Current" badge on the one screen whose entire purpose
+    // is surfacing STALE determinations (S5 commit b23e500's own header
+    // comment). "We could not check whether newer data exists" must
+    // never render as "this determination IS current" -- that is a
+    // positive claim, not a missing warning. This function's one caller
+    // (listActualDeterminedLines) has no try/catch of its own, so a
+    // throw here reaches the page's error boundary exactly the way that
+    // function's own four query legs already do (see its doc comment).
+    throw new Error(
+      `emissions: staleness emission_data fetch failed (${error.message}).`,
+    );
   }
 
   const rows =

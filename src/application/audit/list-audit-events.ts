@@ -159,14 +159,23 @@ function toAuditEvent(
  * Capped at `limit` (default DEFAULT_LIST_LIMIT) -- see that constant's
  * own comment for why this is a UI-list cap, not an export cap.
  *
- * Returns [] on any query error rather than throwing -- matching this
- * codebase's established read-service convention (listSharedDataStatus,
- * listActualDeterminedLines, listAvailableActualEmissionData) of failing
- * closed to an empty/safe result for a list view, rather than crashing a
- * screen over a transient fetch failure. Nothing about the error itself
- * (message, code) is logged here -- callers that need visibility into
- * *why* a fetch failed should inspect the error at the infrastructure
- * boundary, not have it threaded through a list read-model's return type.
+ * 2026-09-06 (S5 review remediation, finding S5B-5). THROWS on a genuine
+ * query error, matching this codebase's own "throw is for infrastructure
+ * failures" convention (CLAUDE.md) -- previously returned [] the same
+ * way listActualDeterminedLines/listAvailableActualEmissionData used to
+ * (both fixed in this same S5 remediation pass; the cited precedent no
+ * longer holds). An audit trail is a compliance record: rendering
+ * "nothing has ever been recorded here" because a select failed is a
+ * false statement about a regulated artifact, and the page's own
+ * filtered-empty branch issues a SECOND, unfiltered probe through this
+ * same function specifically so a filtered miss is not misreported --
+ * a persistent failure previously resolved both probes to the same
+ * false "no-events" state. Both callers (app/(importer)/audit/page.tsx,
+ * app/(producer)/activity/page.tsx) are plain server components with no
+ * try/catch of their own, so a throw here reaches the app's root error
+ * boundary (app/error.tsx) -- an honest failure, not a fabricated empty
+ * audit history whose CSV export would then look like a genuine,
+ * complete, empty record.
  */
 export async function listAuditEvents(
   supabase: SupabaseClient,
@@ -221,7 +230,9 @@ export async function listAuditEvents(
       .limit(limit);
 
   if (error || !data) {
-    return [];
+    throw new Error(
+      `audit: events fetch failed (${error?.message ?? "no rows"}).`,
+    );
   }
 
   return (data as AuditEventRow[]).map(

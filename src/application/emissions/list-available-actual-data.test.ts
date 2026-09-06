@@ -326,10 +326,10 @@ describe(
     );
 
     it(
-      "returns an empty array on an emission_data fetch error",
+      "2026-09-06 (S5 review remediation, finding S5B-2): THROWS on an emission_data fetch error -- never a fabricated empty listing indistinguishable from 'nothing is genuinely available'",
       async () => {
-        const result =
-          await listAvailableActualEmissionData(
+        await expect(
+          listAvailableActualEmissionData(
             makeMockSupabase(
               {
                 emission_data: { data: null, error: { message: "denied" } },
@@ -337,10 +337,9 @@ describe(
             ),
             orgId,
             matchingCnCode,
-          );
-
-        expect(result.options).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
@@ -376,10 +375,10 @@ describe(
     );
 
     it(
-      "returns an empty array on an installations fetch error",
+      "2026-09-06 (S5 review remediation, finding S5B-2): THROWS on an installations fetch error",
       async () => {
-        const result =
-          await listAvailableActualEmissionData(
+        await expect(
+          listAvailableActualEmissionData(
             makeMockSupabase(
               {
                 emission_data: { data: [ownRow], error: null },
@@ -388,10 +387,29 @@ describe(
             ),
             orgId,
             matchingCnCode,
-          );
+          ),
+        ).rejects.toThrow(
+          "denied",
+        );
+      },
+    );
 
-        expect(result.options).toEqual(
-          [],
+    it(
+      "2026-09-06 (S5 review remediation, finding S5B-2): THROWS on a sharing_grants fetch error",
+      async () => {
+        await expect(
+          listAvailableActualEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: [ownRow], error: null },
+                sharing_grants: { data: null, error: { message: "denied" } },
+              },
+            ),
+            orgId,
+            matchingCnCode,
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
@@ -546,10 +564,10 @@ describe(
     );
 
     it(
-      "returns an empty array -- rather than a false 'Unknown organization' placeholder that could mask a real transport failure -- when the organizations follow-up lookup itself errors",
+      "2026-09-06 (S5 review remediation, finding S5B-2): THROWS -- rather than a false 'Unknown organization' placeholder that could mask a real transport failure -- when the organizations follow-up lookup itself errors",
       async () => {
-        const result =
-          await listAvailableActualEmissionData(
+        await expect(
+          listAvailableActualEmissionData(
             makeMockSupabase(
               {
                 emission_data: { data: [sharedRow], error: null },
@@ -560,10 +578,9 @@ describe(
             ),
             orgId,
             matchingCnCode,
-          );
-
-        expect(result.options).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
