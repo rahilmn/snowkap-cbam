@@ -29,6 +29,10 @@ import {
   checkCalculationCurrency,
 } from "../../domain/emissions/check-calculation-currency";
 
+import {
+  determinationDatasetIsCurrent,
+} from "../../domain/emissions/determination-dataset-currency";
+
 import type {
   EmissionDetermination,
 } from "../../domain/emissions/types";
@@ -186,18 +190,23 @@ export async function computeDeclarationDraftFacts(
   }
 
   if (shipmentsError || !shipmentRows) {
-    // Fails closed to "no members, incomplete" -- never a fabricated
-    // complete: true, and never a partial member list a caller could
-    // mistake for the real one. Matches listPeriodShipmentLines' own
-    // fail-closed posture on a fetch error (that function's own doc
-    // comment).
-    return {
-      member_shipment_ids: [],
-      completeness_report: buildCompletenessReport(
-        [],
-        generatedAt,
-      ),
-    };
+    // 2026-09-06 (S5 review remediation, finding S5B-1). Previously
+    // failed "closed" to a fabricated {member_shipment_ids: [],
+    // completeness_report: NO_SHIPMENTS_IN_PERIOD} -- indistinguishable
+    // from a genuinely empty period, and WRITTEN (not just displayed):
+    // generateOrRefreshDeclarationDraft persists it as the declaration's
+    // real member set and audits it as an observed fact. The posture
+    // this comment used to cite (listPeriodShipmentLines' own
+    // fail-closed return) no longer exists -- this same S5 phase made
+    // that function throw instead (commit b23e500). Throwing here lets
+    // this module's own try/catch callers (generateOrRefreshDeclarationDraft,
+    // markDeclarationReady) and the Server Action layer's try/catch
+    // (app/(importer)/declarations/actions.ts) turn a genuine
+    // infrastructure failure into an explicit error, never a silent
+    // fabricated success.
+    throw new Error(
+      `declarations: shipments fetch failed (${(shipmentsError as { message?: string } | null)?.message ?? "no rows"}).`,
+    );
   }
 
   // Deterministic order -- member_shipment_ids is a frozen, persisted
@@ -267,19 +276,15 @@ export async function computeDeclarationDraftFacts(
   function datasetIsCurrent(
     determination: EmissionDetermination | null,
   ): boolean {
-    // Meaningless for an ACTUAL determination (no regulatory dataset is
-    // resolved for one) or a line with no determination yet
-    // (LINE_NOT_DETERMINED already covers that case, and
-    // buildCompletenessReport never consults dataset_is_current on that
-    // path -- see its own `continue` before this check) -- `true`
-    // either way, matching calculation_is_current's own "meaningless
-    // case defaults true, never itself the reason for a blocker" shape.
-    if (determination === null || determination.method !== "DEFAULT") {
-      return true;
-    }
-
-    return activeDatasetIds.has(
-      determination.resolution.dataset_id,
+    // 2026-09-06 (S5 review remediation): extracted to a shared domain
+    // helper (determination-dataset-currency.ts) once get-declaration-
+    // detail.ts, build-period-summary.ts, build-period-export-rows.ts
+    // and get-shipment-emissions-total.ts all needed the identical
+    // comparison (findings A3/A4/EF-B3) -- see that module's own doc
+    // comment for the LINE_NOT_DETERMINED/legacy-shape reasoning.
+    return determinationDatasetIsCurrent(
+      determination,
+      activeDatasetIds,
     );
   }
 

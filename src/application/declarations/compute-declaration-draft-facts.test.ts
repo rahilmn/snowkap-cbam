@@ -454,10 +454,10 @@ describe(
     );
 
     it(
-      "fails closed to an empty, incomplete result on a shipments fetch error -- never a partial or fabricated-complete report",
+      "2026-09-06 (S5 review remediation, finding S5B-1): THROWS on a shipments fetch error -- never a fabricated empty-but-successful result. The old fail-closed {member_shipment_ids: [], NO_SHIPMENTS_IN_PERIOD} shape was WRITTEN by generateOrRefreshDeclarationDraft as if it were an observed fact and audited as a successful refresh -- indistinguishable from a genuinely empty period.",
       async () => {
-        const facts =
-          await computeDeclarationDraftFacts(
+        await expect(
+          computeDeclarationDraftFacts(
             makeMockSupabase(
               {
                 shipments: { data: null, error: { message: "denied" } },
@@ -465,14 +465,9 @@ describe(
             ),
             orgId,
             annualPeriod,
-          );
-
-        expect(facts.member_shipment_ids).toEqual(
-          [],
-        );
-
-        expect(facts.completeness_report.complete).toBe(
-          false,
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
@@ -513,6 +508,64 @@ describe(
                 // ACTIVE_DATASET_ID is deliberately NOT this line's own
                 // dataset_id -- a different, currently-active dataset
                 // now exists for the same dataset_type.
+                regulatory_datasets: { data: [{ id: ACTIVE_DATASET_ID }], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(facts.completeness_report.complete).toBe(
+          false,
+        );
+
+        expect(facts.completeness_report.blockers).toEqual(
+          [
+            {
+              reason: "LINE_DATASET_SUPERSEDED",
+              shipment_id: "ship-1",
+              shipment_reference: "REF-001",
+              line_id: "line-1",
+              line_number: 1,
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding A1): a legacy-shape DEFAULT determination with no `resolution` object at all does not throw -- it fails safe to LINE_DATASET_SUPERSEDED rather than crashing the whole declaration workflow",
+      async () => {
+        const facts =
+          await computeDeclarationDraftFacts(
+            makeMockSupabase(
+              {
+                shipments: { data: [fullShipmentRow()], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow(
+                      {
+                        emission_determination: {
+                          method: "DEFAULT",
+                          resolved_value_id: null,
+                        } as never,
+                      },
+                    ),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    {
+                      ...calculationRow,
+                      determination: {
+                        method: "DEFAULT",
+                        resolved_value_id: null,
+                      } as never,
+                    },
+                  ],
+                  error: null,
+                },
                 regulatory_datasets: { data: [{ id: ACTIVE_DATASET_ID }], error: null },
               },
             ),

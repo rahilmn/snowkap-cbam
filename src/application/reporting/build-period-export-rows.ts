@@ -39,6 +39,10 @@ import {
   checkCalculationCurrency,
 } from "../../domain/emissions/check-calculation-currency";
 
+import {
+  determinationDatasetIsCurrent,
+} from "../../domain/emissions/determination-dataset-currency";
+
 import type {
   EmissionDetermination,
 } from "../../domain/emissions/types";
@@ -145,10 +149,19 @@ export interface PeriodExportRow {
   /**
    * Whether the figure in this row is the CURRENT calculation of this
    * line: "CURRENT", "STALE" (calculated against a determination the
-   * line no longer carries -- a state the filing gate refuses), or
+   * line no longer carries -- a state the filing gate refuses),
+   * "DATASET_SUPERSEDED" (2026-09-06, S5 review remediation finding A4:
+   * a CURRENT calculation whose DEFAULT determination is resolved
+   * against a regulatory dataset that is no longer ACTIVE -- a
+   * DIFFERENT state the filing gate ALSO refuses, record_declaration_
+   * filed()'s DATASET_SUPERSEDED check; deliberately not folded into
+   * "CURRENT", which this row's own embedded_emissions_tco2e value
+   * still is -- checkCalculationCurrency only ever compares a
+   * determination against itself, never against live regulatory
+   * state, so this is a genuinely independent axis), or
    * "NOT_CALCULATED".
    */
-  calculation_currency: "CURRENT" | "STALE" | "NOT_CALCULATED";
+  calculation_currency: "CURRENT" | "STALE" | "DATASET_SUPERSEDED" | "NOT_CALCULATED";
 }
 
 interface InstallationNameRow {
@@ -202,20 +215,40 @@ function describedDetermination(
 
 function currencyOf(
   entry: PeriodShipmentLine,
+  activeDatasetIds: ReadonlySet<string>,
 ): PeriodExportRow["calculation_currency"] {
   if (entry.calculation === null) {
     return "NOT_CALCULATED";
   }
 
-  return checkCalculationCurrency(
-    entry.calculation.determination,
-    entry.line.emission_determination,
-  );
+  const currency =
+    checkCalculationCurrency(
+      entry.calculation.determination,
+      entry.line.emission_determination,
+    );
+
+  // 2026-09-06 (S5 review remediation, finding A4). A STALE calculation
+  // is already refused for a reason unrelated to dataset currency --
+  // don't relabel it. Only a CURRENT calculation gets checked against
+  // live regulatory state, which checkCalculationCurrency itself never
+  // does.
+  if (
+    currency === "CURRENT" &&
+    !determinationDatasetIsCurrent(
+      entry.line.emission_determination,
+      activeDatasetIds,
+    )
+  ) {
+    return "DATASET_SUPERSEDED";
+  }
+
+  return currency;
 }
 
 function toExportRow(
   entry: PeriodShipmentLine,
   installationNameById: ReadonlyMap<string, string>,
+  activeDatasetIds: ReadonlySet<string>,
 ): PeriodExportRow {
   const determination =
     describedDetermination(entry);
@@ -236,9 +269,15 @@ function toExportRow(
     ...quantityOf(entry.line),
 
     determination_method: determination?.method ?? "NOT_DETERMINED",
-    dataset_version: determination?.method === "DEFAULT" ? determination.resolution.dataset_version : null,
+    // 2026-09-06 (S5 review remediation, finding A1). `resolution` is
+    // typed as required on the DEFAULT branch, but a determination
+    // frozen before this field existed carries no such key -- the same
+    // legacy shape compute-declaration-draft-facts.ts's
+    // datasetIsCurrent() now guards against. Optional-chained rather
+    // than crashing the whole export for every line in the period.
+    dataset_version: determination?.method === "DEFAULT" ? (determination.resolution?.dataset_version ?? null) : null,
     methodology: determination?.method === "ACTUAL" ? determination.snapshot.methodology : null,
-    resolution_reason: determination?.method === "DEFAULT" ? determination.resolution.reason : null,
+    resolution_reason: determination?.method === "DEFAULT" ? (determination.resolution?.reason ?? null) : null,
 
     engine_version: entry.calculation?.engine_version ?? null,
     embedded_emissions_tco2e: entry.calculation?.embedded_emissions_tco2e ?? null,
@@ -246,7 +285,7 @@ function toExportRow(
 
     country_mapping_status:
       determination?.method === "DEFAULT"
-        ? determination.resolution.country_mapping.status
+        ? (determination.resolution?.country_mapping?.status ?? null)
         : null,
 
     emission_data_id: snapshot?.emission_data_id ?? null,
@@ -259,7 +298,7 @@ function toExportRow(
 
     sharing_grant_id: snapshot?.sharing_grant_id ?? null,
 
-    calculation_currency: currencyOf(entry),
+    calculation_currency: currencyOf(entry, activeDatasetIds),
   };
 }
 
@@ -354,12 +393,38 @@ export async function buildPeriodExportRows(
       lines,
     );
 
+  // 2026-09-06 (S5 review remediation, finding A4). Same "fetched once
+  // per call, not per line" shape compute-declaration-draft-facts.ts's
+  // own identical fetch uses -- regulatory_datasets carries no org
+  // scoping.
+  const { data: activeDatasetRows, error: activeDatasetError } =
+    await supabase
+      .from("regulatory_datasets")
+      .select(
+        "id",
+      )
+      .eq("status", "ACTIVE");
+
+  if (activeDatasetError) {
+    throw new Error(
+      `reporting: active regulatory datasets fetch failed (${activeDatasetError.message}).`,
+    );
+  }
+
+  const activeDatasetIds =
+    new Set(
+      ((activeDatasetRows ?? []) as { id: string }[]).map(
+        (row) => row.id,
+      ),
+    );
+
   return lines
     .map(
       (entry) =>
         toExportRow(
           entry,
           installationNameById,
+          activeDatasetIds,
         ),
     )
     .sort(

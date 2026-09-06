@@ -161,6 +161,7 @@ describe(
                   ],
                   error: null,
                 },
+                regulatory_datasets: { data: [{ id: "dataset-1" }], error: null },
               },
             ),
             orgId,
@@ -193,6 +194,41 @@ describe(
               calculation_currency: "CURRENT",
             },
           ],
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding A1): a legacy-shape DEFAULT determination with no `resolution` object at all does not throw -- dataset_version/resolution_reason/country_mapping_status all fall back to null",
+      async () => {
+        const legacyDetermination =
+          { method: "DEFAULT", resolved_value_id: null } as never;
+
+        const result =
+          await buildPeriodExportRows(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: { data: [lineRow({ emission_determination: legacyDetermination })], error: null },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "1.1.0", embedded_emissions_tco2e: "20", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: legacyDetermination },
+                  ],
+                  error: null,
+                },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result[0]).toMatchObject(
+          {
+            determination_method: "DEFAULT",
+            dataset_version: null,
+            resolution_reason: null,
+            country_mapping_status: null,
+          },
         );
       },
     );
@@ -332,6 +368,74 @@ describe(
 
         expect(result).toEqual(
           [],
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding A4): reports calculation_currency as DATASET_SUPERSEDED -- not CURRENT -- for a CURRENT calculation whose dataset is no longer ACTIVE, while still including its figure",
+      async () => {
+        const result =
+          await buildPeriodExportRows(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: { data: [lineRow({ emission_determination: defaultDetermination })], error: null },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "1.1.0", embedded_emissions_tco2e: "20", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                // dataset-1 (defaultDetermination's own dataset_id) is
+                // deliberately NOT in the ACTIVE set.
+                regulatory_datasets: { data: [{ id: "dataset-2" }], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result[0]?.calculation_currency).toBe(
+          "DATASET_SUPERSEDED",
+        );
+
+        expect(result[0]?.embedded_emissions_tco2e).toBe(
+          "20",
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding A4): a STALE calculation stays STALE, never relabelled DATASET_SUPERSEDED even when its dataset is also no longer ACTIVE",
+      async () => {
+        const staleDetermination =
+          { ...defaultDetermination, resolution: { ...defaultDetermination.resolution, reason: "OTHER_COUNTRIES_FALLBACK" } };
+
+        const result =
+          await buildPeriodExportRows(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                // The line's CURRENT determination differs from the
+                // calculation's frozen one -- STALE, independent of
+                // dataset currency.
+                shipment_lines: { data: [lineRow({ emission_determination: staleDetermination })], error: null },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "1.1.0", embedded_emissions_tco2e: "20", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-2" }], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result[0]?.calculation_currency).toBe(
+          "STALE",
         );
       },
     );
