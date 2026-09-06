@@ -357,6 +357,45 @@ describe(
     );
 
     it(
+      "2026-09-07 (S5 review round 5, finding S5R5-GUID-B1): does not flag completeness_report_stale on a VOID declaration, even when a former member shipment has since been reopened to DRAFT -- app.invalidate_declaration_approval_on_reopen only fires for status='READY', never VOID, so this state is reachable and must not send the reader to a 'Generate / refresh draft' control that does not exist for VOID",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "VOID",
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                // The exact state a void-then-reopen-the-shipment
+                // sequence produces: the declaration's own cached
+                // completeness_report is frozen (VOID is terminal), but
+                // the member shipment it once referenced is completely
+                // free to move through its own, unrelated lifecycle.
+                shipments: { data: [{ id: "ship-1", reference: "REF-001", status: "DRAFT" }], error: null },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          false,
+        );
+
+        expect(result?.completeness_report_stale_reason).toBeNull();
+      },
+    );
+
+    it(
       "does not flag completeness_report_stale when the report already claims incomplete -- only a false 'complete' claim is the dangerous direction",
       async () => {
         const result =

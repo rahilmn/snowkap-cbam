@@ -444,13 +444,31 @@ export async function getDeclarationDetail(
     declaration.completeness_report !== null &&
     declaration.completeness_report.complete;
 
-  // 2026-09-06 (S5 review remediation, findings A3/EF-B3). Only worth
-  // checking dataset currency when the report claims complete AND the
-  // member-shipment-status check above didn't already find it stale --
-  // avoids two extra queries on the common paths (DRAFT declarations,
-  // and declarations already known stale).
+  // 2026-09-07 (S5 review round 5, finding S5R5-GUID-B1). Scoped to
+  // DRAFT/READY, matching datasetStale's own guard just below -- for
+  // the identical reason. The original design assumed MEMBER_REOPENED
+  // could only ever be observed on a DRAFT declaration, because
+  // app.invalidate_declaration_approval_on_reopen (20260905140000)
+  // flips a READY declaration back to DRAFT the instant a member
+  // shipment leaves READY. True for READY, but that trigger's own
+  // WHERE clause is `d.status = 'READY'` -- it does nothing for a VOID
+  // declaration. VOID is reachable directly from READY
+  // (declarations_update_own_org_pre_filing, the sanctioned retirement
+  // path), and once VOID, member_shipment_ids/completeness_report
+  // freeze forever (app.prevent_declaration_fact_change) while the
+  // shipment itself stays completely free to be reopened later through
+  // its own, unrelated "Reopen" button -- live-reproduced: void a
+  // declaration, then reopen one of its former member shipments for
+  // any unrelated reason, and this flag went true on a VOID
+  // declaration with no live "Generate / refresh draft" control
+  // anywhere on the page to act on it (DeclarationActions renders
+  // nothing at all for VOID). A retired (VOID) or already-filed
+  // (FILED_RECORDED) declaration has nothing this signal could usefully
+  // drive -- neither can be regenerated -- so it is meaningless, not
+  // merely inconvenient, outside DRAFT/READY.
   const memberStatusStale =
     reportClaimsComplete &&
+    (declaration.status === "DRAFT" || declaration.status === "READY") &&
     memberShipments.some(
       (shipment) => shipment.status !== "READY" && shipment.status !== "LOCKED",
     );
