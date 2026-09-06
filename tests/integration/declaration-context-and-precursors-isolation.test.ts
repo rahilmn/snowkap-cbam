@@ -339,13 +339,33 @@ describe.skipIf(!localSupabaseReachable)(
           [orgAId, orgBId],
         );
 
+      // audit_events_org_id_fkey is ON DELETE RESTRICT (audit_events is
+      // append-only by design, never cascaded away implicitly) -- the
+      // B1 regression tests above deliberately write real rows here, so
+      // without this the organizations delete below fails silently
+      // (supabase-js doesn't throw) and both test orgs leak permanently.
       await serviceClient
-        .from("organizations")
+        .from("audit_events")
         .delete()
         .in(
-          "id",
+          "org_id",
           [orgAId, orgBId],
         );
+
+      const { error: deleteOrgsError } =
+        await serviceClient
+          .from("organizations")
+          .delete()
+          .in(
+            "id",
+            [orgAId, orgBId],
+          );
+
+      if (deleteOrgsError) {
+        throw new Error(
+          `Failed to delete test organizations during cleanup -- would otherwise leak silently: ${deleteOrgsError.message}`,
+        );
+      }
 
       for (
         const userId of [memberAId, memberBId]
