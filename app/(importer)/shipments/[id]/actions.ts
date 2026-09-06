@@ -110,8 +110,17 @@ function lineMessageFor(
     case "SHIPMENT_NOT_FOUND":
       return "That shipment could not be found.";
 
+    // 2026-09-06 (S5 cross-phase hardening). USED to unconditionally say
+    // "locked or void" -- true when 20260904090000 added READY as a
+    // third editable-blocking state, "locked or void" became an
+    // affirmatively FALSE claim for a READY shipment (neither locked
+    // nor void), and discarded the one thing that would let the user
+    // recover: reopening it. Never claims a specific state now; gives
+    // the one recovery path that actually exists (reopen, only
+    // available from READY) as a conditional, true for every case this
+    // reason can actually mean.
     case "SHIPMENT_NOT_EDITABLE":
-      return "This shipment is locked or void and can no longer be edited.";
+      return "This shipment can no longer be edited in its current status. If it's marked READY, reopen it first.";
 
     case "CAPABILITY_NOT_HELD":
       return "Your organization is not set up as a CBAM importer/declarant.";
@@ -135,8 +144,17 @@ function resolveEmissionsRejectionMessageFor(
     case "LINE_NOT_FOUND":
       return "That line could not be found.";
 
+    // 2026-09-06 (S5 cross-phase hardening). USED to unconditionally say
+    // "locked or void" -- true when 20260904090000 added READY as a
+    // third editable-blocking state, "locked or void" became an
+    // affirmatively FALSE claim for a READY shipment (neither locked
+    // nor void), and discarded the one thing that would let the user
+    // recover: reopening it. Never claims a specific state now; gives
+    // the one recovery path that actually exists (reopen, only
+    // available from READY) as a conditional, true for every case this
+    // reason can actually mean.
     case "SHIPMENT_NOT_EDITABLE":
-      return "This shipment is locked or void and can no longer be edited.";
+      return "This shipment can no longer be edited in its current status. If it's marked READY, reopen it first.";
 
     case "CAPABILITY_NOT_HELD":
       return "Your organization is not set up as a CBAM importer/declarant.";
@@ -1121,7 +1139,12 @@ export async function calculateLineAction(
         result.reason === "LINE_NOT_FOUND"
           ? "That line could not be found."
           : result.reason === "SHIPMENT_NOT_EDITABLE"
-            ? "This shipment is locked or void and can no longer be recalculated."
+            // 2026-09-06 (S5 cross-phase hardening). record_calculation_
+            // result's own SHIPMENT_NOT_EDITABLE gate now also refuses
+            // READY (20260906210000), matching shipment_lines' own
+            // DRAFT-only editability -- "locked or void" is no longer
+            // the only state this can mean.
+            ? "This shipment can no longer be recalculated in its current status. If it's marked READY, reopen it first."
             : result.reason === "CAPABILITY_NOT_HELD"
               ? "Your organization is not set up as a CBAM importer/declarant."
               : result.reason === "CALCULATION_INPUTS_CHANGED"

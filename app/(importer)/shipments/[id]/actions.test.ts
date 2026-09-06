@@ -565,7 +565,7 @@ describe(
       ],
       [
         "SHIPMENT_NOT_EDITABLE",
-        "This shipment is locked or void and can no longer be edited.",
+        "This shipment can no longer be edited in its current status. If it's marked READY, reopen it first.",
       ],
       [
         "CAPABILITY_NOT_HELD",
@@ -619,7 +619,7 @@ describe(
     const REMOVE_LINE_REJECTION_CASES: Array<[string, string]> = [
       [
         "SHIPMENT_NOT_EDITABLE",
-        "This shipment is locked or void and can no longer be edited.",
+        "This shipment can no longer be edited in its current status. If it's marked READY, reopen it first.",
       ],
       [
         "CAPABILITY_NOT_HELD",
@@ -795,7 +795,7 @@ describe(
           {
             status: "error",
             message:
-              "This shipment is locked or void and can no longer be edited.",
+              "This shipment can no longer be edited in its current status. If it's marked READY, reopen it first.",
           },
         );
 

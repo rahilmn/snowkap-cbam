@@ -33,8 +33,17 @@ import {
 export function CompletenessReportCard(
   {
     report,
+    stale = false,
   }: {
     report: CompletenessReport | null;
+    // 2026-09-06 (S5 cross-phase hardening). true when a member shipment
+    // has since been reopened (READY -> DRAFT), which reverts this
+    // declaration to DRAFT but cannot also clear the cached report in
+    // the same database statement -- see get-declaration-detail.ts's
+    // own completeness_report_stale doc comment for the full mechanism.
+    // A stale "complete" claim must never render as the same success
+    // badge a genuinely current one does.
+    stale?: boolean;
   },
 ) {
   return (
@@ -55,6 +64,18 @@ export function CompletenessReportCard(
         <p className="p-4 text-sm text-[var(--text-secondary)]">
           No completeness report yet.
         </p>
+      ) : stale ? (
+        <div className="p-4">
+          <Badge tone="warning">
+            Needs refresh
+          </Badge>
+
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">
+            A member shipment was reopened since this was last checked, so
+            this report no longer reflects the current state. Click
+            Generate / refresh draft to recheck completeness.
+          </p>
+        </div>
       ) : report.complete ? (
         <div className="p-4">
           <Badge tone="success">

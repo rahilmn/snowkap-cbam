@@ -54,6 +54,26 @@ export interface DeclarationDetail {
   // (20260829330000) guarantees at most one, so a single row (not a
   // list) is the correct shape here, not a simplification.
   superseded_by: DeclarationLineageEntry | null;
+  // 2026-09-06 (S5 cross-phase hardening). true when the persisted
+  // completeness_report claims complete:true but at least one CURRENT
+  // member shipment (member_shipments, fetched fresh above, not cached)
+  // is no longer READY/LOCKED -- app.invalidate_declaration_approval_on_
+  // reopen (20260905140000) correctly flips a READY declaration back to
+  // DRAFT the instant a member shipment is reopened, but only touches
+  // `status`; it cannot also clear completeness_report/member_shipment_ids
+  // in the same UPDATE (app.prevent_declaration_fact_change forbids
+  // changing those columns except from DRAFT, and old.status is still
+  // READY at that point). Left unchecked, the UI kept rendering the
+  // pre-revert "Complete -- ready to approve for filing" success badge.
+  // Because shipment_lines is DRAFT-only editable for every role
+  // (20260904090000 -- a READY shipment's lines cannot change without
+  // first reopening it), a READY-population completeness_report can
+  // only ever go stale this ONE way -- a member shipment leaving READY/
+  // LOCKED -- so this check, reusing member_shipments' own live read
+  // rather than a second query, is a complete detector, not a partial
+  // one. Never affects markDeclarationReady's own gate, which always
+  // recomputes fresh and never trusts this cached column either way.
+  completeness_report_stale: boolean;
 }
 
 interface ShipmentSummaryRow {
@@ -243,6 +263,13 @@ export async function getDeclarationDetail(
           }
         : null;
 
+  const completenessReportStale =
+    declaration.completeness_report !== null &&
+    declaration.completeness_report.complete &&
+    memberShipments.some(
+      (shipment) => shipment.status !== "READY" && shipment.status !== "LOCKED",
+    );
+
   return {
     declaration,
     member_shipments: memberShipments,
@@ -252,5 +279,6 @@ export async function getDeclarationDetail(
     superseded_by: toLineageEntry(
       successorRow as LineageRow | null,
     ),
+    completeness_report_stale: completenessReportStale,
   };
 }

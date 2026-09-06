@@ -246,8 +246,16 @@ export default async function ShipmentDetailPage(
       ),
     );
 
+  // 2026-09-06 (S5 cross-phase hardening). READY used to be treated as
+  // editable here, but supabase/migrations/20260904090000_p14_ready_
+  // shipments_are_not_editable.sql (2026-09-04) made shipment_lines
+  // writes DRAFT-only for every role, at both the RLS and trigger
+  // layer -- every control this flag gates (Add line, Remove, redeter-
+  // mine, recalculate) was rendering fully active for a READY shipment
+  // while every one of those writes was already guaranteed to fail
+  // server-side. Matches the database's own editability boundary now.
   const editable =
-    shipment.status === "DRAFT" || shipment.status === "READY";
+    shipment.status === "DRAFT";
 
   return (
     <AppShell
@@ -354,6 +362,21 @@ export default async function ShipmentDetailPage(
           <h2 className="text-sm font-medium text-[var(--text-primary)]">
             Lines
           </h2>
+
+          {/*
+            2026-09-06 (S5 cross-phase hardening). Explains WHY the
+            lines below are now read-only, with the exact recovery path
+            -- the database's own error message already says this
+            (app.enforce_shipment_lines_parent_editable), this just
+            surfaces it before a user has to attempt an edit to learn it.
+          */}
+          {shipment.status === "READY" ? (
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+              This shipment is READY, which records the line population
+              approved for filing -- reopen it (above) to edit lines,
+              then mark it ready again.
+            </p>
+          ) : null}
         </div>
 
         <LinesTable

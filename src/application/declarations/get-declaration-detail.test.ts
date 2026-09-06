@@ -268,6 +268,106 @@ describe(
     );
 
     it(
+      "flags completeness_report_stale when a DRAFT declaration's cached report claims complete:true but a member shipment has since been reopened (S5 cross-phase hardening)",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "DRAFT",
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                // The reopen trigger (app.invalidate_declaration_approval_on_reopen)
+                // flips the DECLARATION back to DRAFT but this live
+                // member-shipment read is what actually surfaces the
+                // reopened shipment's own current status.
+                shipments: { data: [{ id: "ship-1", reference: "REF-001", status: "DRAFT" }], error: null },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          true,
+        );
+      },
+    );
+
+    it(
+      "does not flag completeness_report_stale when every current member shipment is still READY or LOCKED",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "FILED_RECORDED",
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: { data: [shipmentSummaryRow], error: null },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "does not flag completeness_report_stale when the report already claims incomplete -- only a false 'complete' claim is the dangerous direction",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "DRAFT",
+                        completeness_report: { complete: false, blockers: [{ reason: "SHIPMENT_NOT_LOCKABLE", shipment_id: "ship-1", shipment_reference: "REF-001" }] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: { data: [{ id: "ship-1", reference: "REF-001", status: "DRAFT" }], error: null },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
       "returns null, never a short member list, when a member batch fails (P14)",
       async () => {
         /**

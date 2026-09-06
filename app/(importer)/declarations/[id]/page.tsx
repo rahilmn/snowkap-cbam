@@ -125,7 +125,13 @@ export default async function DeclarationDetailPage(
     );
   }
 
-  const { declaration, member_shipments: memberShipments, supersedes, superseded_by: supersededBy } =
+  const {
+    declaration,
+    member_shipments: memberShipments,
+    supersedes,
+    superseded_by: supersededBy,
+    completeness_report_stale: completenessReportStale,
+  } =
     detail;
 
   const periodLabel =
@@ -211,6 +217,7 @@ export default async function DeclarationDetailPage(
       <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <CompletenessReportCard
           report={declaration.completeness_report}
+          stale={completenessReportStale}
         />
 
         <Card>
