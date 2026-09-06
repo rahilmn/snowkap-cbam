@@ -34,6 +34,8 @@ export function CompletenessReportCard(
   {
     report,
     stale = false,
+    staleReason = null,
+    declarationStatus,
   }: {
     report: CompletenessReport | null;
     // 2026-09-06 (S5 cross-phase hardening). true when a member shipment
@@ -44,6 +46,22 @@ export function CompletenessReportCard(
     // A stale "complete" claim must never render as the same success
     // badge a genuinely current one does.
     stale?: boolean;
+    // 2026-09-06 (S5 review remediation round 2, finding EF2-B3). Which
+    // of the two independent reasons raised `stale` -- see
+    // get-declaration-detail.ts's own DeclarationDetail.
+    // completeness_report_stale_reason doc comment. The prior version of
+    // this card hardcoded the MEMBER_REOPENED explanation for every
+    // stale cause, which was FALSE (and pointed at a "Generate /
+    // refresh draft" control that isn't even rendered for a READY
+    // declaration) whenever DATASET_SUPERSEDED was the actual reason.
+    staleReason?: "MEMBER_REOPENED" | "DATASET_SUPERSEDED" | null;
+    // Needed alongside staleReason because the DATASET_SUPERSEDED
+    // recovery instruction differs by status: a DRAFT declaration can
+    // still be refreshed directly on this page; a READY declaration has
+    // no refresh control here at all (declaration-actions.tsx renders
+    // only RecordFiledForm for READY) -- the affected shipment must be
+    // reopened first, from the shipment's own detail page.
+    declarationStatus?: "DRAFT" | "READY" | "FILED_RECORDED" | "VOID";
   },
 ) {
   return (
@@ -71,9 +89,11 @@ export function CompletenessReportCard(
           </Badge>
 
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
-            A member shipment was reopened since this was last checked, so
-            this report no longer reflects the current state. Click
-            Generate / refresh draft to recheck completeness.
+            {staleReason === "DATASET_SUPERSEDED"
+              ? declarationStatus === "READY"
+                ? "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. Reopen the affected shipment, redetermine that line against the current dataset, then approve this declaration for filing again."
+                : "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. Click Generate / refresh draft to recheck completeness against the current dataset."
+              : "A member shipment was reopened since this was last checked, so this report no longer reflects the current state. Click Generate / refresh draft to recheck completeness."}
           </p>
         </div>
       ) : report.complete ? (

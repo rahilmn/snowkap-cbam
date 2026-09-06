@@ -86,6 +86,8 @@ function makeMockSupabase(
         inFilters.push({ table, values });
         return chain;
       },
+      order: () => chain,
+      range: () => chain,
       maybeSingle: () =>
         Promise.resolve(
           nextResult(table),
@@ -406,6 +408,10 @@ describe(
         expect(result?.completeness_report_stale).toBe(
           true,
         );
+
+        expect(result?.completeness_report_stale_reason).toBe(
+          "DATASET_SUPERSEDED",
+        );
       },
     );
 
@@ -444,6 +450,238 @@ describe(
 
         expect(result?.completeness_report_stale).toBe(
           false,
+        );
+
+        expect(result?.completeness_report_stale_reason).toBeNull();
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation round 2, finding EF2-B1): a FILED_RECORDED declaration is NEVER reported stale by a dataset supersession -- it is an immutable historical record",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "FILED_RECORDED",
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                // Member shipment is LOCKED (what filing itself sets) --
+                // memberStatusStale is already false via the allowed
+                // set, so this test isolates the datasetStale guard.
+                shipments: { data: [{ id: "ship-1", reference: "REF-001", status: "LOCKED" }], error: null },
+                shipment_lines: {
+                  data: [
+                    { emission_determination: { method: "DEFAULT", resolution: { dataset_id: "dataset-superseded-1" } } },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-current-1" }], error: null },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          false,
+        );
+
+        expect(result?.completeness_report_stale_reason).toBeNull();
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation round 2, finding EF2-B1): a VOID declaration is likewise never reported stale",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "VOID",
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: { data: [shipmentSummaryRow], error: null },
+                shipment_lines: {
+                  data: [
+                    { emission_determination: { method: "DEFAULT", resolution: { dataset_id: "dataset-superseded-1" } } },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-current-1" }], error: null },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation round 2, finding EF2-B1): a DRAFT declaration IS still checked for dataset supersession -- the guard is a status allowlist, not a blanket skip",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "DRAFT",
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: { data: [shipmentSummaryRow], error: null },
+                shipment_lines: {
+                  data: [
+                    { emission_determination: { method: "DEFAULT", resolution: { dataset_id: "dataset-superseded-1" } } },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-current-1" }], error: null },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          true,
+        );
+
+        expect(result?.completeness_report_stale_reason).toBe(
+          "DATASET_SUPERSEDED",
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation round 2, finding EF2-B3): completeness_report_stale_reason is MEMBER_REOPENED, not DATASET_SUPERSEDED, when a member shipment left READY/LOCKED",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "DRAFT",
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: { data: [{ id: "ship-1", reference: "REF-001", status: "DRAFT" }], error: null },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          true,
+        );
+
+        expect(result?.completeness_report_stale_reason).toBe(
+          "MEMBER_REOPENED",
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation round 2, finding EF2-B2): batches member ids at MEMBER_ID_BATCH_SIZE for the dataset-currency check, matching fetchMemberShipments' own batching",
+      async () => {
+        const manyShipmentIds =
+          Array.from(
+            { length: 250 },
+            (_unused, index) => `ship-${index}`,
+          );
+
+        const manyShipmentRows =
+          manyShipmentIds.map(
+            (id) => ({ id, reference: id, status: "READY" }),
+          );
+
+        const inFilters: { table: string; values: unknown }[] =
+          [];
+
+        await getDeclarationDetail(
+          makeMockSupabase(
+            {
+              declarations: [
+                {
+                  data: declarationRow(
+                    {
+                      status: "READY",
+                      member_shipment_ids: manyShipmentIds,
+                      completeness_report: { complete: true, blockers: [] },
+                    },
+                  ),
+                  error: null,
+                },
+                { data: null, error: null },
+              ],
+              shipments: { data: manyShipmentRows, error: null },
+              shipment_lines: { data: [], error: null },
+              regulatory_datasets: { data: [{ id: "dataset-current-1" }], error: null },
+            },
+            inFilters,
+          ),
+          "org-1" as never,
+          "decl-1" as never,
+        );
+
+        const shipmentLineIdFilters =
+          inFilters.filter(
+            (entry) => entry.table === "shipment_lines",
+          );
+
+        // 250 member ids at MEMBER_ID_BATCH_SIZE=200 must produce TWO
+        // batched .in() calls (200 + 50), never one unbounded call.
+        expect(shipmentLineIdFilters.length).toBe(
+          2,
+        );
+
+        expect(
+          (shipmentLineIdFilters[0]!.values as unknown[]).length,
+        ).toBe(
+          200,
+        );
+
+        expect(
+          (shipmentLineIdFilters[1]!.values as unknown[]).length,
+        ).toBe(
+          50,
         );
       },
     );

@@ -131,6 +131,7 @@ export default async function DeclarationDetailPage(
     supersedes,
     superseded_by: supersededBy,
     completeness_report_stale: completenessReportStale,
+    completeness_report_stale_reason: completenessReportStaleReason,
   } =
     detail;
 
@@ -218,6 +219,8 @@ export default async function DeclarationDetailPage(
         <CompletenessReportCard
           report={declaration.completeness_report}
           stale={completenessReportStale}
+          staleReason={completenessReportStaleReason}
+          declarationStatus={declaration.status}
         />
 
         <Card>

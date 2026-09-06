@@ -96,7 +96,19 @@ export interface DeclarationDetail {
   // "Complete -- ready to approve for filing" success badge. Never
   // affects markDeclarationReady's own gate, which always recomputes
   // fresh and never trusts this cached column either way.
+  //
+  // Round 2 (finding EF2-B1): reason (2) is now scoped to DRAFT/READY
+  // declarations only -- a FILED_RECORDED or VOID declaration is an
+  // immutable historical record and can never be reported stale by a
+  // LATER regulatory correction.
   completeness_report_stale: boolean;
+  // 2026-09-06 (S5 review remediation round 2, finding EF2-B3). Which
+  // of the two independent reasons above raised completeness_report_stale
+  // -- null when it is false. Mutually exclusive by construction, so a
+  // caller can render the ACTUAL cause rather than a single hardcoded
+  // "a member shipment was reopened" explanation that was wrong for
+  // reason (2).
+  completeness_report_stale_reason: "MEMBER_REOPENED" | "DATASET_SUPERSEDED" | null;
 }
 
 interface ShipmentSummaryRow {
@@ -194,6 +206,7 @@ async function fetchMemberShipments(
 }
 
 interface LineDeterminationRow {
+  id: string;
   emission_determination: EmissionDetermination | null;
 }
 
@@ -201,18 +214,40 @@ interface ActiveDatasetIdRow {
   id: string;
 }
 
+// Matches compute-declaration-draft-facts.ts's own SHIPMENTS_PAGE_SIZE --
+// same PostgREST max_rows cap (supabase/config.toml), same reasoning:
+// an un-ranged query silently truncates rather than erroring, so a
+// declaration with more DEFAULT-determined member lines than this must
+// be paged, not read in one shot.
+const LINE_PAGE_SIZE =
+  1000;
+
 /**
- * 2026-09-06 (S5 review remediation, findings A3/EF-B3). Whether ANY
- * member shipment's line carries a DEFAULT determination resolved
- * against a regulatory dataset that is no longer ACTIVE -- the second,
- * independent half of completeness_report_stale (see that field's own
- * doc comment). Fails OPEN to "not stale" on a query error rather than
- * throwing: this is a supplementary staleness SIGNAL on a read-only
- * detail page whose primary content (the declaration, its member
- * shipments) already succeeded -- a transient failure here should not
- * take down the whole page, and markDeclarationReady's own gate (which
- * DOES throw, per S5's earlier fix) is what actually blocks an
- * incorrect filing regardless of what this signal shows.
+ * 2026-09-06 (S5 review remediation, findings A3/EF-B3; hardened round
+ * 2, finding EF2-B2). Whether ANY member shipment's line carries a
+ * DEFAULT determination resolved against a regulatory dataset that is
+ * no longer ACTIVE -- the second, independent half of
+ * completeness_report_stale (see that field's own doc comment). Fails
+ * OPEN to "not stale" on a query error rather than throwing: this is a
+ * supplementary staleness SIGNAL on a read-only detail page whose
+ * primary content (the declaration, its member shipments) already
+ * succeeded -- a transient failure here should not take down the whole
+ * page, and markDeclarationReady's own gate (which DOES throw, per S5's
+ * earlier fix) is what actually blocks an incorrect filing regardless
+ * of what this signal shows.
+ *
+ * Round-2 finding EF2-B2: the original version issued one unbounded
+ * `.in("shipment_id", memberIds)` with no `.range()` -- PostgREST
+ * refuses the URL outright above ~207 member ids (immediately above
+ * this file's own MEMBER_ID_BATCH_SIZE, live-measured), and silently
+ * caps the result at max_rows=1000 with no `.order()` even below that.
+ * Both failure modes converted to a false "not stale" via the `return
+ * false` error branch, exactly the fabricated-negative fetchMemberShipments'
+ * own doc comment (above) was written to prevent for the member list
+ * itself. Now batches member ids (MEMBER_ID_BATCH_SIZE, matching
+ * fetchMemberShipments exactly) and pages each batch's lines
+ * (LINE_PAGE_SIZE, matching compute-declaration-draft-facts.ts's own
+ * shipments-paging shape) with a stable `.order("id")`.
  */
 async function anyMemberLineDatasetSuperseded(
   supabase: SupabaseClient,
@@ -222,26 +257,13 @@ async function anyMemberLineDatasetSuperseded(
     return false;
   }
 
-  const [
-    { data: lineRows, error: lineError },
-    { data: datasetRows, error: datasetError },
-  ] =
-    await Promise.all(
-      [
-        supabase
-          .from("shipment_lines")
-          .select("emission_determination")
-          .in("shipment_id", memberIds)
-          .eq("determination_method", "DEFAULT"),
+  const { data: datasetRows, error: datasetError } =
+    await supabase
+      .from("regulatory_datasets")
+      .select("id")
+      .eq("status", "ACTIVE");
 
-        supabase
-          .from("regulatory_datasets")
-          .select("id")
-          .eq("status", "ACTIVE"),
-      ],
-    );
-
-  if (lineError || !lineRows || datasetError || !datasetRows) {
+  if (datasetError || !datasetRows) {
     return false;
   }
 
@@ -252,13 +274,56 @@ async function anyMemberLineDatasetSuperseded(
       ),
     );
 
-  return (lineRows as LineDeterminationRow[]).some(
-    (row) =>
-      !determinationDatasetIsCurrent(
-        row.emission_determination,
-        activeDatasetIds,
-      ),
-  );
+  for (
+    let batchStart = 0;
+    batchStart < memberIds.length;
+    batchStart += MEMBER_ID_BATCH_SIZE
+  ) {
+    const batch =
+      memberIds.slice(
+        batchStart,
+        batchStart + MEMBER_ID_BATCH_SIZE,
+      );
+
+    for (let offset = 0; ; offset += LINE_PAGE_SIZE) {
+      const { data: lineRows, error: lineError } =
+        await supabase
+          .from("shipment_lines")
+          .select("id, emission_determination")
+          .in("shipment_id", batch)
+          .eq("determination_method", "DEFAULT")
+          .order("id", { ascending: true })
+          .range(
+            offset,
+            offset + LINE_PAGE_SIZE - 1,
+          );
+
+      if (lineError || !lineRows) {
+        return false;
+      }
+
+      const rows =
+        lineRows as LineDeterminationRow[];
+
+      if (
+        rows.some(
+          (row) =>
+            !determinationDatasetIsCurrent(
+              row.emission_determination,
+              activeDatasetIds,
+            ),
+        )
+      ) {
+        return true;
+      }
+
+      if (rows.length < LINE_PAGE_SIZE) {
+        break;
+      }
+    }
+  }
+
+  return false;
 }
 
 export async function getDeclarationDetail(
@@ -369,9 +434,21 @@ export async function getDeclarationDetail(
       (shipment) => shipment.status !== "READY" && shipment.status !== "LOCKED",
     );
 
+  // 2026-09-06 (S5 review remediation round 2, finding EF2-B1). Scoped
+  // to declarations that can still be PREPARED or FILED (DRAFT/READY)
+  // -- a FILED_RECORDED declaration IS the historical result
+  // (RegulatoryResolutionSnapshot's own doc comment: "a later dataset
+  // supersession can never change a historical result"; its
+  // filed_snapshot is the archived truth and its completeness report
+  // was correct as of filing), and a VOID declaration is retired.
+  // Without this guard, a regulatory correction landing AFTER filing
+  // made an already-filed, immutable compliance record falsely report
+  // "Needs refresh" -- the exact "no historical version may silently
+  // change meaning" invariant this whole review was run against.
   const datasetStale =
     reportClaimsComplete &&
     !memberStatusStale &&
+    (declaration.status === "DRAFT" || declaration.status === "READY") &&
     (await anyMemberLineDatasetSuperseded(
       supabase,
       memberIds,
@@ -379,6 +456,19 @@ export async function getDeclarationDetail(
 
   const completenessReportStale =
     memberStatusStale || datasetStale;
+
+  // 2026-09-06 (S5 review remediation round 2, finding EF2-B3). Lets
+  // the UI explain the ACTUAL reason rather than always printing the
+  // "a member shipment was reopened" copy -- memberStatusStale and
+  // datasetStale are mutually exclusive by construction (datasetStale
+  // is gated on `!memberStatusStale`), so this is a true discriminant,
+  // never both/neither when completenessReportStale is true.
+  const completenessReportStaleReason: DeclarationDetail["completeness_report_stale_reason"] =
+    memberStatusStale
+      ? "MEMBER_REOPENED"
+      : datasetStale
+      ? "DATASET_SUPERSEDED"
+      : null;
 
   return {
     declaration,
@@ -390,5 +480,6 @@ export async function getDeclarationDetail(
       successorRow as LineageRow | null,
     ),
     completeness_report_stale: completenessReportStale,
+    completeness_report_stale_reason: completenessReportStaleReason,
   };
 }
