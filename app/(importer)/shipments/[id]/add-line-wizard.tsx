@@ -16,6 +16,10 @@ import {
 } from "../../../../components/ui/input";
 
 import {
+  Select,
+} from "../../../../components/ui/select";
+
+import {
   Label,
 } from "../../../../components/ui/label";
 
@@ -346,13 +350,12 @@ export function AddLineWizard(
               Quantity unit
             </Label>
 
-            <select
+            <Select
               id="quantityKind"
               name="quantityKind"
               value={quantityKind}
               onChange={(event) => setQuantityKind(event.target.value)}
               disabled={pending}
-              className="h-10 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--surface-page)] px-2.5 text-sm text-[var(--text-primary)] disabled:opacity-50"
             >
               <option value="MASS">
                 Tonnes
@@ -361,7 +364,7 @@ export function AddLineWizard(
               <option value="ENERGY">
                 MWh
               </option>
-            </select>
+            </Select>
           </div>
 
           <div className="flex flex-col gap-1.5">

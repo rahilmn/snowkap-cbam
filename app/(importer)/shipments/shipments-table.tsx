@@ -40,15 +40,21 @@ const SHIPMENT_COLUMNS: DataTableColumn<Shipment>[] =
       header: "Reference",
       sortValue: (shipment) => shipment.reference,
       render: (shipment) => (
-        // min-h-11 (44px): on the mobile card fallback this IS the
-        // card's title AND its only interactive control (data-table.tsx
+        // min-h-11 below md (44px): on the mobile card fallback this IS
+        // the card's title AND its only interactive control (data-table.tsx
         // renders it bare, with no padding/min-height of its own) --
-        // found under-sized in a fresh S3 review (N4). inline-flex
-        // rather than block so it doesn't force the desktop <td> onto
-        // its own line.
+        // found under-sized in a fresh S3 review (N4). Scoped to below
+        // `md` with md:min-h-0, matching this codebase's own convention
+        // for a touch target that only needs to be 44px on a touch
+        // viewport (select.tsx's own h-11 md:h-10, topbar.tsx/
+        // mobile-nav.tsx/feedback-trigger.tsx's own size-11 md:size-8) --
+        // a second review (N11) found the first fix applied unscoped,
+        // growing every desktop row for no reason. inline-flex rather
+        // than block so it doesn't force the desktop <td> onto its own
+        // line.
         <Link
           href={`/shipments/${shipment.id}`}
-          className="inline-flex min-h-11 items-center font-medium text-[var(--text-primary)] hover:underline"
+          className="inline-flex min-h-11 items-center font-medium text-[var(--text-primary)] hover:underline md:min-h-0"
         >
           {shipment.reference}
         </Link>

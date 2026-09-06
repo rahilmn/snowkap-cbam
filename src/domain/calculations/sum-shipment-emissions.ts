@@ -45,10 +45,10 @@ export type ShipmentEmissionsTotal =
  * layer (2026-09-03, P14) and it is not this function's job to
  * re-derive that filter itself (it has no way to: it only receives
  * bare DecimalStrings, not the determinations needed to check
- * currency) -- the caller (the shipment detail page) does it, the same
- * way calculation-cell.tsx's own per-line staleness badge does.
+ * currency) -- the caller (get-shipment-emissions-total.ts) does it,
+ * the same way calculation-cell.tsx's own per-line staleness badge
+ * does.
  *
-
  * NONE (not zero) when no line has been calculated yet, so the UI can
  * render "not yet calculated" rather than a misleading "0 tCO2e" --
  * the same "no value" is never "value is zero" discipline
