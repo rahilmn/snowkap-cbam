@@ -397,6 +397,62 @@ describe(
       },
     );
 
+    describe(
+      "2026-09-07 (S5 review round 6, finding S5R6-A-GUID1): excludes VOID declarations from the period lookup",
+      () => {
+        it(
+          "an unrelated VOID declaration for the same period that does NOT include the shipment must not force a genuinely FILING-eligible shipment down to APPROVAL",
+          () => {
+            const items =
+              deriveI19Items(
+                [shipment()],
+                [
+                  // The live, active declaration -- ship-1 IS a member.
+                  declaration({
+                    id: "decl-live" as Declaration["id"],
+                    status: "DRAFT",
+                    member_shipment_ids: ["ship-1" as Declaration["member_shipment_ids"][number]],
+                  }),
+                  // An unrelated, retired declaration for the SAME
+                  // period that does NOT include ship-1 -- its frozen
+                  // member_shipment_ids is a dead fact, not a live one.
+                  declaration({
+                    id: "decl-void" as Declaration["id"],
+                    status: "VOID",
+                    member_shipment_ids: [],
+                  }),
+                ],
+              );
+
+            expect(items).toHaveLength(1);
+            expect(items[0]?.impact).toBe("FILING");
+          },
+        );
+
+        it(
+          "a period whose ONLY declaration is VOID (even one that happens to include the shipment as a member) must not report FILING -- a VOID declaration can never be filed",
+          () => {
+            const items =
+              deriveI19Items(
+                [shipment()],
+                [
+                  declaration({
+                    status: "VOID",
+                    member_shipment_ids: ["ship-1" as Declaration["member_shipment_ids"][number]],
+                  }),
+                ],
+              );
+
+            expect(items).toHaveLength(1);
+            expect(items[0]?.impact).toBe("APPROVAL");
+            expect(items[0]?.reason).not.toMatch(
+              /eligible to be included/,
+            );
+          },
+        );
+      },
+    );
+
     it(
       "does not consider a declaration in a DIFFERENT reporting period",
       () => {

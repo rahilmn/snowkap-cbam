@@ -113,9 +113,30 @@ export function deriveI19Items(
       continue;
     }
 
+    // 2026-09-07 (S5 review round 6, finding S5R6-A-GUID1). Excludes
+    // VOID -- every other declaration-period lookup in this codebase
+    // already does (generate-or-refresh-declaration-draft.ts's own
+    // existing-declaration query, and the schema itself:
+    // declarations_period_original_uq/declarations_period_in_preparation_uq,
+    // both scoped `where status <> 'VOID'`, are exactly what permits a
+    // new original DRAFT to be started for a period after an earlier
+    // declaration for it was voided). A VOID declaration's
+    // member_shipment_ids stays frozen (app.prevent_declaration_fact_change)
+    // but is a dead fact, not a live one -- left unfiltered, it produced
+    // two opposite-direction wrong outcomes, live-reproduced: (1) an
+    // unrelated VOID declaration for the same period that happens NOT
+    // to include this shipment forces a genuinely FILING-eligible
+    // shipment (named by a real, live declaration) down to APPROVAL,
+    // hiding its true urgency; (2) a period whose ONLY declaration is
+    // VOID but happens to include this shipment reports FILING, falsely
+    // claiming "marking this shipment ready keeps it eligible to be
+    // included when that declaration is filed" -- impossible, since
+    // record_declaration_filed only ever transitions READY ->
+    // FILED_RECORDED, never a VOID one.
     const declarationsInPeriod =
       declarations.filter(
         (declaration) =>
+          declaration.status !== "VOID" &&
           sameReportingPeriod(
             declaration.reporting_period,
             shipment.reporting_period,
