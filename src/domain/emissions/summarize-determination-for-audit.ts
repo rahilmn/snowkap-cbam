@@ -46,10 +46,21 @@ export function summarizeDeterminationForAudit(
     };
   }
 
+  // 2026-09-07 (S5 review round 3, finding S5R3-A-B1's own sweep). The
+  // DEFAULT branch above was guarded in round 2 (S5R2-A-B1) after the
+  // identical unguarded-throw-after-commit problem was found there --
+  // this ACTUAL branch was left exposed to the symmetric gap: no
+  // legacy-shape ACTUAL row exists in the local database today, but
+  // `snapshot` is equally a compile-time-only guarantee for the same
+  // unchecked-jsonb-cast reason `resolution` is. Optional-chained for
+  // the same reason: an unguarded throw here runs after the mutating
+  // UPDATE that replaces this determination has already committed, so
+  // a crash would leave the write live with no corresponding audit
+  // event -- worse than a plain crash.
   return {
     method: "ACTUAL",
-    emission_data_id: determination.snapshot.emission_data_id,
-    emission_data_version: determination.snapshot.emission_data_version,
-    sharing_grant_id: determination.snapshot.sharing_grant_id,
+    emission_data_id: determination.snapshot?.emission_data_id ?? null,
+    emission_data_version: determination.snapshot?.emission_data_version ?? null,
+    sharing_grant_id: determination.snapshot?.sharing_grant_id ?? null,
   };
 }

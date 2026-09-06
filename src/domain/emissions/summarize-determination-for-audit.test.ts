@@ -134,6 +134,34 @@ describe(
     );
 
     it(
+      "2026-09-07 (S5 review round 3, finding S5R3-A-B1's own sweep): never throws on a legacy-shape ACTUAL determination with no `snapshot` object at all -- every field falls back to null",
+      () => {
+        const legacyDetermination =
+          { method: "ACTUAL" } as unknown as EmissionDetermination;
+
+        expect(
+          () =>
+            summarizeDeterminationForAudit(
+              legacyDetermination,
+            ),
+        ).not.toThrow();
+
+        expect(
+          summarizeDeterminationForAudit(
+            legacyDetermination,
+          ),
+        ).toEqual(
+          {
+            method: "ACTUAL",
+            emission_data_id: null,
+            emission_data_version: null,
+            sharing_grant_id: null,
+          },
+        );
+      },
+    );
+
+    it(
       "an ACTUAL determination with a null sharing_grant_id (own-org data) carries that through as null, not omitted",
       () => {
         const determination: EmissionDetermination =

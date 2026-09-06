@@ -234,6 +234,40 @@ describe(
     );
 
     it(
+      "2026-09-07 (S5 review round 3, finding S5R3-A-B1's own sweep, prophylactic): a legacy-shape ACTUAL determination with no `snapshot` object at all is skipped, never thrown -- the rest of the list is unaffected",
+      async () => {
+        const result =
+          await listActualDeterminedLines(
+            makeMockSupabase(
+              {
+                shipment_lines: {
+                  data: [
+                    actualLineRow(),
+                    actualLineRow(
+                      {
+                        id: "line-legacy",
+                        emission_determination: { method: "ACTUAL" },
+                      },
+                    ),
+                  ],
+                  error: null,
+                },
+                shipments: { data: [shipmentRow], error: null },
+                emission_data: { data: [currentActiveRowSameVersion], error: null },
+              },
+            ),
+            orgId,
+          );
+
+        expect(
+          result.map((row) => row.line_id),
+        ).toEqual(
+          ["line-1"],
+        );
+      },
+    );
+
+    it(
       "labels a SHARED determination and resolves the grantor org's name via the sharing grant it was read through",
       async () => {
         const result =

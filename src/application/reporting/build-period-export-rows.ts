@@ -253,8 +253,18 @@ function toExportRow(
   const determination =
     describedDetermination(entry);
 
+  // 2026-09-07 (S5 review round 3, finding S5R3-A-B1's own sweep,
+  // prophylactic -- no legacy-shape ACTUAL row exists today, but
+  // `snapshot` is typed as required on the ACTUAL branch the same way
+  // `resolution` was on the DEFAULT branch above (finding A1), and that
+  // promise is equally a compile-time fiction for the same unchecked-
+  // jsonb-cast reason. `?? null` rather than a bare access so `snapshot`
+  // is genuinely `T | null` here, matching every downstream use's own
+  // `snapshot === null` / `snapshot?.` check -- without it a legacy-
+  // shape row would make `snapshot` `undefined`, which `=== null`
+  // checks below would not catch.
   const snapshot =
-    determination?.method === "ACTUAL" ? determination.snapshot : null;
+    determination?.method === "ACTUAL" ? (determination.snapshot ?? null) : null;
 
   return {
     shipment_reference: entry.shipment_reference,
@@ -276,7 +286,7 @@ function toExportRow(
     // datasetIsCurrent() now guards against. Optional-chained rather
     // than crashing the whole export for every line in the period.
     dataset_version: determination?.method === "DEFAULT" ? (determination.resolution?.dataset_version ?? null) : null,
-    methodology: determination?.method === "ACTUAL" ? determination.snapshot.methodology : null,
+    methodology: snapshot?.methodology ?? null,
     resolution_reason: determination?.method === "DEFAULT" ? (determination.resolution?.reason ?? null) : null,
 
     engine_version: entry.calculation?.engine_version ?? null,
@@ -331,11 +341,18 @@ async function fetchInstallationNames(
             (determination): determination is EmissionDetermination =>
               determination?.method === "ACTUAL",
           )
+          // 2026-09-07 (S5 review round 3, finding S5R3-A-B1's own
+          // sweep, prophylactic -- same unchecked-jsonb-cast gap as
+          // above: `snapshot` is compile-time-required but not
+          // runtime-guaranteed for a legacy-shape row).
           .map(
             (determination) =>
               determination.method === "ACTUAL"
-                ? determination.snapshot.installation_id as string
+                ? (determination.snapshot?.installation_id as string | undefined) ?? ""
                 : "",
+          )
+          .filter(
+            (id) => id !== "",
           ),
       ),
     );

@@ -33,8 +33,15 @@ import {
 function actualSnapshotOf(
   line: ShipmentLine,
 ): ActualEmissionSnapshot | null {
+  // 2026-09-07 (S5 review round 3, finding S5R3-A-B1's own sweep,
+  // prophylactic -- no legacy-shape ACTUAL row exists today, but
+  // `snapshot` is compile-time-required, not runtime-guaranteed, for
+  // the same unchecked-jsonb-cast reason `resolution` isn't either.
+  // `?? null` rather than a bare access: every caller filters on
+  // `!== null`, which a bare `undefined` result would silently pass
+  // through.
   return line.emission_determination?.method === "ACTUAL"
-    ? line.emission_determination.snapshot
+    ? (line.emission_determination.snapshot ?? null)
     : null;
 }
 

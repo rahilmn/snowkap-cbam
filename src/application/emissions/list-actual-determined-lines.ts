@@ -336,11 +336,17 @@ export async function listActualDeterminedLines(
     );
   }
 
+  // 2026-09-07 (S5 review round 3, finding S5R3-A-B1's own sweep,
+  // prophylactic -- no legacy-shape ACTUAL row exists today, but
+  // `snapshot` is compile-time-required, not runtime-guaranteed, for
+  // the same unchecked-jsonb-cast reason `resolution` isn't either --
+  // isActualDeterminedLine only checks `method === "ACTUAL"`, not that
+  // `snapshot` is actually present.
   const sharingGrantIds =
     Array.from(
       new Set(
         actualLines
-          .map((line) => line.emission_determination.snapshot.sharing_grant_id)
+          .map((line) => line.emission_determination.snapshot?.sharing_grant_id ?? null)
           .filter((id): id is SharingGrantId => id !== null),
       ),
     );
@@ -447,8 +453,22 @@ export async function listActualDeterminedLines(
       continue;
     }
 
+    // 2026-09-07 (S5 review round 3, finding S5R3-A-B1's own sweep,
+    // prophylactic -- no legacy-shape ACTUAL row exists today, but
+    // `snapshot` is compile-time-required, not runtime-guaranteed, for
+    // the same unchecked-jsonb-cast reason `resolution` isn't either.
+    // Skipped like the missing-shipment case just above rather than
+    // guarded field-by-field below: there is no partial row to build
+    // without methodology/sharing_grant_id, and this is the one place
+    // in this sweep where an unguarded access would crash the entire
+    // cross-org listing (every other site degrades one field or one
+    // row, not the whole response).
     const snapshot =
       line.emission_determination.snapshot;
+
+    if (!snapshot) {
+      continue;
+    }
 
     const provenance: ActualDataProvenance =
       snapshot.sharing_grant_id === null
