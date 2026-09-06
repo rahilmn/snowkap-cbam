@@ -107,6 +107,33 @@ describe(
     );
 
     it(
+      "2026-09-06 (S5 review remediation round 2, finding S5R2-A-B1): never throws on a legacy-shape DEFAULT determination with no `resolution` object at all -- reason/dataset_version fall back to null",
+      () => {
+        const legacyDetermination =
+          { method: "DEFAULT", resolved_value_id: null } as unknown as EmissionDetermination;
+
+        expect(
+          () =>
+            summarizeDeterminationForAudit(
+              legacyDetermination,
+            ),
+        ).not.toThrow();
+
+        expect(
+          summarizeDeterminationForAudit(
+            legacyDetermination,
+          ),
+        ).toEqual(
+          {
+            method: "DEFAULT",
+            reason: null,
+            dataset_version: null,
+          },
+        );
+      },
+    );
+
+    it(
       "an ACTUAL determination with a null sharing_grant_id (own-org data) carries that through as null, not omitted",
       () => {
         const determination: EmissionDetermination =

@@ -28,10 +28,21 @@ export function summarizeDeterminationForAudit(
   }
 
   if (determination.method === "DEFAULT") {
+    // 2026-09-06 (S5 review remediation round 2, finding S5R2-A-B1).
+    // `resolution` is typed as required on the DEFAULT branch, but a
+    // determination frozen before this field existed carries no such
+    // key (the same legacy shape finding A1 guards against in
+    // determination-dataset-currency.ts). This function is called with
+    // the PRIOR determination AFTER the shipment_lines UPDATE that
+    // replaces it has already been issued (resolve-line-emissions.ts's
+    // performResolution, manage-lines.ts's updateLine) -- an unguarded
+    // throw here previously left the write committed with no
+    // corresponding audit event, which is worse than a plain crash.
+    // Optional-chained, matching that sibling fix's own posture.
     return {
       method: "DEFAULT",
-      reason: determination.resolution.reason,
-      dataset_version: determination.resolution.dataset_version,
+      reason: determination.resolution?.reason ?? null,
+      dataset_version: determination.resolution?.dataset_version ?? null,
     };
   }
 
