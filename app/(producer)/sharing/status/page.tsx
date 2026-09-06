@@ -25,6 +25,10 @@ import {
   type SharedDataStatusRowView,
 } from "./shared-data-status-list";
 
+import {
+  effectiveSharingGrantStatus,
+} from "../../../../src/domain/sharing/effective-grant-status";
+
 /**
  * Master plan §27 screen 32 ("Shared-data status" -- "transparency; who
  * sees what, consumption events"). A separate screen from
@@ -66,6 +70,14 @@ export default async function SharedDataStatusPage() {
       orgSummary.context.org_id,
     );
 
+  // 2026-09-07 (S5 review round 4, finding S5R4-VOCAB-1). One clock
+  // reading for the whole page -- see effective-grant-status.ts's own
+  // doc comment for why nothing ever flips a time-lapsed ACTIVE grant's
+  // stored `status` to EXPIRED, so a raw read here would show "Active"
+  // for a grant whose real access has already lapsed.
+  const now =
+    new Date();
+
   const rows: SharedDataStatusRowView[] =
     statusRows.map(
       (row) => (
@@ -73,7 +85,11 @@ export default async function SharedDataStatusPage() {
           id: row.grant.id,
           installationName: row.installationName,
           granteeLabel: row.granteeLabel,
-          status: row.grant.status,
+          status: effectiveSharingGrantStatus(
+            row.grant.status,
+            row.grant.expires_at,
+            now,
+          ),
           events: row.consumptionEvents.map(
             (event) => (
               {

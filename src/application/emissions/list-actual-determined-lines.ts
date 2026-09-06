@@ -42,6 +42,10 @@ import {
 } from "./check-actual-determination-staleness";
 
 import {
+  effectiveSharingGrantStatus,
+} from "../../domain/sharing/effective-grant-status";
+
+import {
   UNKNOWN_GRANTOR_ORGANIZATION_NAME,
   type ActualDataProvenance,
 } from "./list-available-actual-data";
@@ -100,6 +104,7 @@ interface SharingGrantGrantorLookupRow {
   status: SharingGrantStatus;
   id: string;
   grantor_org_id: string;
+  expires_at: string | null;
 }
 
 interface OrganizationNameLookupRow {
@@ -401,7 +406,7 @@ export async function listActualDeterminedLines(
       await supabase
         .from("sharing_grants")
         .select(
-          "id, grantor_org_id, status",
+          "id, grantor_org_id, status, expires_at",
         )
         .in("id", sharingGrantIds);
 
@@ -417,15 +422,37 @@ export async function listActualDeterminedLines(
       );
     }
 
+    // 2026-09-07 (S5 review round 4, finding S5R4-VOCAB-1). One clock
+    // reading for the whole page, matching the other spot in this
+    // codebase that already does this for the identical reason
+    // (list-shared-data-status.ts's own `now`): two grants that lapse
+    // either side of an evaluation must not render inconsistently
+    // within a single response.
+    const now =
+      new Date();
+
     for (const row of (grantRows ?? []) as SharingGrantGrantorLookupRow[]) {
       grantorOrgIdBySharingGrantId.set(
         row.id,
         row.grantor_org_id,
       );
 
+      // Every real access-control predicate this row's own visibility
+      // already passed through (app.user_shared_installation_ids())
+      // combines status='ACTIVE' with an explicit expires_at check --
+      // nothing ever flips a time-lapsed ACTIVE grant's stored `status`
+      // to EXPIRED (no cron/scheduled job exists for that transition;
+      // see effective-grant-status.ts's own doc comment), so the raw
+      // column alone would render "Active" for a grant whose access has
+      // already lapsed, contradicting this same row's own "Access since
+      // expired" annotation two cells over.
       grantStatusBySharingGrantId.set(
         row.id,
-        row.status,
+        effectiveSharingGrantStatus(
+          row.status,
+          row.expires_at,
+          now,
+        ),
       );
     }
   }

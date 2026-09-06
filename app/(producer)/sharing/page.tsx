@@ -43,6 +43,10 @@ import {
   type IssuedGrantRow,
 } from "./issued-grants-list";
 
+import {
+  effectiveSharingGrantStatus,
+} from "../../../src/domain/sharing/effective-grant-status";
+
 /**
  * The producer-side "issue a sharing grant" screen -- previously
  * nonexistent (P7-D, 20260829260000, built only the schema + application
@@ -101,6 +105,14 @@ export default async function SharingPage() {
       orgSummary.context,
     );
 
+  // 2026-09-07 (S5 review round 4, finding S5R4-VOCAB-1). One clock
+  // reading for the whole page -- see effective-grant-status.ts's own
+  // doc comment for why nothing ever flips a time-lapsed ACTIVE grant's
+  // stored `status` to EXPIRED, so a raw read here would show "Active"
+  // for a grant whose real access has already lapsed.
+  const now =
+    new Date();
+
   const grantRows: IssuedGrantRow[] =
     grants.map(
       (grant) => (
@@ -112,7 +124,11 @@ export default async function SharingPage() {
             grant.invited_email
               ? `Invited: ${grant.invited_email}`
               : "Direct grant",
-          status: grant.status,
+          status: effectiveSharingGrantStatus(
+            grant.status,
+            grant.expires_at,
+            now,
+          ),
           canManage,
         }
       ),

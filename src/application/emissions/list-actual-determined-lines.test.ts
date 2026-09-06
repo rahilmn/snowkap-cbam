@@ -734,6 +734,52 @@ describe(
     );
 
     it(
+      "2026-09-07 (S5 review round 4, finding S5R4-VOCAB-1): reports EXPIRED for the realistic case -- an ACTIVE grant whose expires_at has already passed, never actually written to the status column as the literal string 'EXPIRED'",
+      async () => {
+        const result =
+          await listActualDeterminedLines(
+            makeMockSupabase(
+              {
+                shipment_lines: {
+                  data: [
+                    actualLineRow({
+                      emission_determination: {
+                        method: "ACTUAL",
+                        snapshot: sharedSnapshot,
+                      },
+                    }),
+                  ],
+                  error: null,
+                },
+                shipments: { data: [shipmentRow], error: null },
+                emission_data: { data: [], error: null },
+                sharing_grants: {
+                  data: [
+                    {
+                      id: "grant-1",
+                      grantor_org_id: "org-2",
+                      status: "ACTIVE",
+                      expires_at: "2020-01-01T00:00:00.000Z",
+                    },
+                  ],
+                  error: null,
+                },
+                organizations: {
+                  data: [{ id: "org-2", name: "Acme Steel Producer" }],
+                  error: null,
+                },
+              },
+            ),
+            orgId,
+          );
+
+        expect(result[0]?.sharing_grant_status).toBe(
+          "EXPIRED",
+        );
+      },
+    );
+
+    it(
       "never narrows the sharing_grants lookup by status -- a terminal grant must still resolve its own grantor",
       async () => {
         // The regression this guards is a filter, not an output: if a
