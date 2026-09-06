@@ -71,6 +71,13 @@ export function getShipmentEmissionsTotal(
   let datasetSupersededLineCount =
     0;
 
+  // 2026-09-07 (S5 review round 4, finding S5R4-VOCAB-2). Tracked
+  // separately from a line with no calculation at all -- see
+  // sum-shipment-emissions.ts's own doc comment on staleLineCount for
+  // why the two must not collapse into the same bare count.
+  let staleLineCount =
+    0;
+
   for (const line of lines) {
     const calculation =
       latestCalculations[line.id];
@@ -85,6 +92,7 @@ export function getShipmentEmissionsTotal(
         line.emission_determination,
       ) !== "CURRENT"
     ) {
+      staleLineCount += 1;
       continue;
     }
 
@@ -106,6 +114,7 @@ export function getShipmentEmissionsTotal(
     total: sumShipmentEmissions(
       currentComputedEmissions,
       lines.length,
+      staleLineCount,
     ),
     datasetSupersededLineCount,
   };

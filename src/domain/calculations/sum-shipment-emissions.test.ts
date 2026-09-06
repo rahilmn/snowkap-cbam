@@ -90,6 +90,28 @@ describe(
             total_tco2e: "10.5",
             calculatedLineCount: 1,
             totalLineCount: 3,
+            staleLineCount: 0,
+          },
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 4, finding S5R4-VOCAB-2): carries a distinct staleLineCount, separate from the never-calculated count",
+      () => {
+        expect(
+          sumShipmentEmissions(
+            ["10.5" as DecimalString],
+            3,
+            1,
+          ),
+        ).toEqual(
+          {
+            status: "PARTIAL",
+            total_tco2e: "10.5",
+            calculatedLineCount: 1,
+            totalLineCount: 3,
+            staleLineCount: 1,
           },
         );
       },

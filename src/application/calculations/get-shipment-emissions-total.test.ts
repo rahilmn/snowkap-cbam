@@ -147,12 +147,18 @@ describe(
         // line-2's 999 must NOT appear anywhere in the total -- proves
         // this is not merely "PARTIAL excludes it from the count" but
         // that the stale figure genuinely never entered the sum.
+        //
+        // 2026-09-07 (S5 review round 4, finding S5R4-VOCAB-2):
+        // staleLineCount must be 1 here, not folded into an
+        // undifferentiated "not yet calculated" count -- line-2
+        // already has a calculation, it's excluded for being stale.
         expect(result.total).toEqual(
           {
             status: "PARTIAL",
             total_tco2e: "10.5",
             calculatedLineCount: 1,
             totalLineCount: 2,
+            staleLineCount: 1,
           },
         );
       },

@@ -357,6 +357,29 @@ export default async function ShipmentDetailPage(
               </p>
             ) : null}
 
+            {
+              // 2026-09-07 (S5 review round 4, finding S5R4-VOCAB-2).
+              // "Calculated so far" reads as "the rest simply haven't
+              // been done yet" -- false for a line that already HAS a
+              // calculation but was excluded because it is STALE
+              // (redetermined without being recalculated; its own
+              // "Stale -- recalculate" badge is visible in the lines
+              // table below). Named separately, matching how the
+              // dataset-superseded exclusion just below already gets
+              // its own caption rather than being folded into the bare
+              // count.
+              emissionsTotal.total.status === "PARTIAL" &&
+              emissionsTotal.total.staleLineCount > 0 ? (
+                <p className="mt-1 text-xs text-[var(--color-warning-700)]">
+                  {emissionsTotal.total.staleLineCount} of{" "}
+                  {emissionsTotal.total.totalLineCount} line(s) were
+                  redetermined since their last calculation -- their
+                  embedded emissions are excluded from this total until
+                  recalculated.
+                </p>
+              ) : null
+            }
+
             {emissionsTotal.datasetSupersededLineCount > 0 ? (
               <p className="mt-1 text-xs text-[var(--color-warning-700)]">
                 {emissionsTotal.datasetSupersededLineCount} of{" "}

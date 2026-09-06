@@ -11,6 +11,20 @@ export type ShipmentEmissionsTotal =
       total_tco2e: DecimalString;
       calculatedLineCount: number;
       totalLineCount: number;
+      // 2026-09-07 (S5 review round 4, finding S5R4-VOCAB-2). How many
+      // of the lines NOT counted in calculatedLineCount already have a
+      // calculation sitting in calculation_results, but it was excluded
+      // because it is STALE (recalculated determination, not yet
+      // recalculated) rather than because the line has never been
+      // calculated at all. Both cases previously collapsed into the
+      // same bare count, so the caller's own "N of M lines calculated
+      // so far" caption read as "the rest simply haven't been done
+      // yet" for a line that is, in fact, already flagged with its own
+      // "Stale -- recalculate" badge elsewhere on the same page --
+      // matching the distinction build-period-summary.ts's own
+      // IncompleteLineReason (NOT_CALCULATED vs CALCULATION_STALE)
+      // already makes one level up, at the period-report layer.
+      staleLineCount: number;
     }
   | {
       status: "COMPLETE";
@@ -58,6 +72,7 @@ export type ShipmentEmissionsTotal =
 export function sumShipmentEmissions(
   computedLineEmissions: DecimalString[],
   totalLineCount: number,
+  staleLineCount = 0,
 ): ShipmentEmissionsTotal {
   if (totalLineCount === 0 || computedLineEmissions.length === 0) {
     return {
@@ -85,5 +100,6 @@ export function sumShipmentEmissions(
         total_tco2e,
         calculatedLineCount: computedLineEmissions.length,
         totalLineCount,
+        staleLineCount,
       };
 }
