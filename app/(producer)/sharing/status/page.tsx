@@ -120,11 +120,10 @@ export default async function SharedDataStatusPage() {
         <p className="text-sm text-[var(--text-secondary)]">
           Every grant your organization has issued and every time that
           data has actually been read to determine a shipment line. The
-          grantee&apos;s name resolves only for a currently ACTIVE grant
-          -- once revoked, this shows &quot;Unknown organization&quot;
-          rather than the name, so the consumption history stays
-          visible without indefinitely disclosing who a lapsed grant
-          named.
+          grantee&apos;s name keeps showing after a grant is revoked or
+          expires -- consumption history is a record of what already
+          happened, and revoking a grant does not erase who it was
+          issued to.
         </p>
       </div>
 
