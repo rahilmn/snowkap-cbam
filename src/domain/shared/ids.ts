@@ -54,3 +54,9 @@ export type EvidenceFileId =
 
 export type ImportBatchId =
   Brand<string, "ImportBatchId">;
+
+export type DeclarationContextId =
+  Brand<string, "DeclarationContextId">;
+
+export type PrecursorId =
+  Brand<string, "PrecursorId">;

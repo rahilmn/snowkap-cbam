@@ -24,7 +24,9 @@ export type AuditAggregateType =
   | "SHARING_GRANT"
   | "CALCULATION_RESULT"
   | "DECLARATION"
-  | "EVIDENCE_FILE";
+  | "EVIDENCE_FILE"
+  | "DECLARATION_CONTEXT"
+  | "PRECURSOR";
 
 /**
  * One immutable entry in the audit trail. `event_type` is a namespaced
