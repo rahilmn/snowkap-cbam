@@ -221,6 +221,13 @@ export default async function DeclarationDetailPage(
           stale={completenessReportStale}
           staleReason={completenessReportStaleReason}
           declarationStatus={declaration.status}
+          // 2026-09-07 (S5 review round 3, findings S5R3-VOCAB-B1/
+          // S5R3-GAS-B1). member_shipments is already fetched with its
+          // own .status per shipment -- no extra query needed to know
+          // whether "reopen the shipment" is actually possible.
+          anyMemberShipmentLocked={memberShipments.some(
+            (shipment) => shipment.status === "LOCKED",
+          )}
         />
 
         <Card>

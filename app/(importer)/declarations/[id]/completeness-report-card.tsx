@@ -36,6 +36,7 @@ export function CompletenessReportCard(
     stale = false,
     staleReason = null,
     declarationStatus,
+    anyMemberShipmentLocked = false,
   }: {
     report: CompletenessReport | null;
     // 2026-09-06 (S5 cross-phase hardening). true when a member shipment
@@ -62,6 +63,26 @@ export function CompletenessReportCard(
     // only RecordFiledForm for READY) -- the affected shipment must be
     // reopened first, from the shipment's own detail page.
     declarationStatus?: "DRAFT" | "READY" | "FILED_RECORDED" | "VOID";
+    // 2026-09-07 (S5 review round 3, findings S5R3-VOCAB-B1/S5R3-GAS-B1).
+    // "Reopen the affected shipment" is impossible once that shipment is
+    // LOCKED -- and a READY declaration whose members are LOCKED is not
+    // an edge case, it is the routine shape of an AMENDMENT
+    // (buildCompletenessReport/record_declaration_filed both deliberately
+    // accept LOCKED as lockable, so an amendment over already-filed,
+    // LOCKED shipments reaches complete:true and READY normally).
+    // REOPEN requires shipment.status === "READY"
+    // (src/domain/shipments/lifecycle.ts), RLS's own
+    // shipments_update_own_org_not_terminal excludes LOCKED, and
+    // transition-actions.tsx renders no controls at all for a LOCKED
+    // shipment -- so the old unconditional instruction sent the reader
+    // to a page with nothing on it. Whether ANY member shipment is
+    // LOCKED, not which specific one carries the stale line -- this
+    // card has no way to name the specific shipment (buildCompletenessReport's
+    // dataset-currency check is declaration-wide, not per-shipment), so
+    // this mirrors declarations/actions.ts's own DATASET_SUPERSEDED/
+    // CALCULATION_ENGINE_OUTDATED messages (finding A2), which hedge the
+    // same way for the identical reason.
+    anyMemberShipmentLocked?: boolean;
   },
 ) {
   return (
@@ -91,7 +112,9 @@ export function CompletenessReportCard(
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
             {staleReason === "DATASET_SUPERSEDED"
               ? declarationStatus === "READY"
-                ? "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. Reopen the affected shipment, redetermine that line against the current dataset, then approve this declaration for filing again."
+                ? anyMemberShipmentLocked
+                  ? "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. If the affected member shipment is still editable, reopen it, redetermine that line against the current dataset, then approve this declaration for filing again. If it has already been LOCKED (for example by an earlier filing -- the routine case for an amendment), this cannot be corrected through the normal declaration flow -- contact support."
+                  : "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. Reopen the affected shipment, redetermine that line against the current dataset, then approve this declaration for filing again."
                 : "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. Click Generate / refresh draft to recheck completeness against the current dataset."
               : "A member shipment was reopened since this was last checked, so this report no longer reflects the current state. Click Generate / refresh draft to recheck completeness."}
           </p>
