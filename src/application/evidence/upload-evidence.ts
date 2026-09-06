@@ -748,40 +748,81 @@ export async function getEvidenceDownloadUrl(
 
 /**
  * All evidence files belonging to the caller's active org, newest
- * first -- mirrors manage-emission-data.ts's own listEmissionData
- * shape exactly (empty array, not a thrown error, on a fetch failure).
- * The UI groups these by emission_data_id client-side rather than this
- * function taking an emissionDataId filter, so one screen render needs
- * one query instead of one per record.
+ * first. The UI groups these by emission_data_id client-side rather
+ * than this function taking an emissionDataId filter, so one screen
+ * render needs one query instead of one per record.
+ *
+ * 2026-09-07 (supabase/config.toml `max_rows = 1000`; S5 review round
+ * 5, finding S5R5-SHARE-EVID-01). Paged with .range() -- an org's
+ * evidence_files only grows over time (files are removed individually,
+ * never bulk-purged), so a long-lived producer eventually crosses
+ * PostgREST's row cap. The completeness gate itself
+ * (checkEmissionDataEvidenceCompleteness, get-buyer-view.ts's
+ * countEvidenceFiles) is unaffected -- both read emission_data.
+ * evidence_file_ids, a separate column -- but this function's own
+ * caller-facing file LIST is what a producer's ADMIN/OWNER actually
+ * opens to review evidence before deciding VERIFY/REJECT
+ * (evidence-section.tsx); a truncated result silently shows fewer
+ * files than genuinely exist, with no signal anything was dropped.
  */
+const EVIDENCE_FILES_PAGE_SIZE =
+  1000;
+
 export async function listEvidenceFiles(
   supabase: SupabaseClient,
   orgId: OrganizationId,
 ): Promise<EvidenceFile[]> {
-  const { data, error } =
-    await supabase
-      .from("evidence_files")
-      .select(
-        EVIDENCE_FILES_COLUMNS,
-      )
-      .eq("org_id", orgId)
-      .order("created_at", { ascending: false });
+  const rows: EvidenceFileRow[] =
+    [];
 
-  // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2). THROWS on a
-  // genuine query error rather than degrading to [] -- both callers
-  // (app/(producer)/emission-data/page.tsx, app/(importer)/external-
-  // emissions/page.tsx) are plain server components with no try/catch
-  // of their own, so this reaches app/error.tsx the same way every
-  // other sibling fixed this same S5 phase does. A transport failure
-  // previously rendered as "no evidence files" -- a false all-clear on
-  // the exact records a producer/importer relies on for verification.
-  if (error) {
-    throw new Error(
-      `upload-evidence: evidence_files fetch failed (${error.message}).`,
+  let offset =
+    0;
+
+  for (;;) {
+    const { data, error } =
+      await supabase
+        .from("evidence_files")
+        .select(
+          EVIDENCE_FILES_COLUMNS,
+        )
+        .eq("org_id", orgId)
+        .order("created_at", { ascending: false })
+        // `id` as a deterministic tie-breaker so .range() pagination
+        // stays stable across pages sharing a created_at value.
+        .order("id", { ascending: false })
+        .range(offset, offset + EVIDENCE_FILES_PAGE_SIZE - 1);
+
+    // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2). THROWS on
+    // a genuine query error rather than degrading to [] -- both
+    // callers (app/(producer)/emission-data/page.tsx, app/(importer)/
+    // external-emissions/page.tsx) are plain server components with
+    // no try/catch of their own, so this reaches app/error.tsx the
+    // same way every other sibling fixed this same S5 phase does. A
+    // transport failure previously rendered as "no evidence files" --
+    // a false all-clear on the exact records a producer/importer
+    // relies on for verification.
+    if (error) {
+      throw new Error(
+        `upload-evidence: evidence_files fetch failed (${error.message}).`,
+      );
+    }
+
+    const page =
+      (data ?? []) as EvidenceFileRow[];
+
+    rows.push(
+      ...page,
     );
+
+    if (page.length < EVIDENCE_FILES_PAGE_SIZE) {
+      break;
+    }
+
+    offset +=
+      EVIDENCE_FILES_PAGE_SIZE;
   }
 
-  return ((data ?? []) as EvidenceFileRow[]).map(
+  return rows.map(
     toEvidenceFile,
   );
 }

@@ -162,6 +162,13 @@ function makeMockSupabase(
         return chain;
       },
       order: () => chain,
+      // 2026-09-07 (S5 review round 5, finding S5R5-SHARE-EVID-01):
+      // listEvidenceFiles now pages with .range(). Every fixture here
+      // returns well under EVIDENCE_FILES_PAGE_SIZE rows, so the
+      // paging loop always terminates after its first page -- this
+      // mock stays a one-shot resolver, .range() is a pure
+      // pass-through.
+      range: () => chain,
       insert: (payload: unknown) => {
         recorder.ops.push({ table, op: "insert", payload, filters });
         return chain;
