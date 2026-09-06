@@ -353,26 +353,61 @@ export async function listAvailableActualEmissionData(
   // exist per (installation, grantee): the partial unique index
   // sharing_grants_installation_grantee_active_uq, which
   // determine-from-actual-data.ts relies on for the same lookup.
-  const { data: grantRows, error: grantError } =
-    await supabase
-      .from("sharing_grants")
-      .select(
-        "id, installation_id, expires_at",
-      )
-      .eq("grantee_org_id", orgId)
-      .eq("status", "ACTIVE");
+  //
+  // 2026-09-07 (supabase/config.toml `max_rows = 1000`; S5 review round
+  // 5, finding S5R5-B). A third, missed instance of the same
+  // sharing_grants truncation class round 4 already fixed twice on this
+  // exact table (S5R4-SHARE-02: listSharingGrantsIssued/Received,
+  // listSharedDataStatus's own primary query) -- sharing_grants rows
+  // are never deleted, so a long-lived grantee org's row count only
+  // grows. A truncated grantedInstallationIds set here silently treats
+  // a legitimately-granted installation as not granted, hiding its real
+  // ACTIVE+VERIFIED records from this org's actual-data picker with no
+  // signal anything was dropped.
+  const grantRows: SharingGrantLookupRow[] =
+    [];
 
-  if (grantError) {
-    throw new Error(
-      `emissions: sharing grants fetch failed (${grantError.message}).`,
+  let grantOffset =
+    0;
+
+  for (;;) {
+    const { data, error: grantError } =
+      await supabase
+        .from("sharing_grants")
+        .select(
+          "id, installation_id, expires_at",
+        )
+        .eq("grantee_org_id", orgId)
+        .eq("status", "ACTIVE")
+        .order("id", { ascending: true })
+        .range(grantOffset, grantOffset + AVAILABLE_ACTUAL_DATA_PAGE_SIZE - 1);
+
+    if (grantError) {
+      throw new Error(
+        `emissions: sharing grants fetch failed (${grantError.message}).`,
+      );
+    }
+
+    const page =
+      (data ?? []) as SharingGrantLookupRow[];
+
+    grantRows.push(
+      ...page,
     );
+
+    if (page.length < AVAILABLE_ACTUAL_DATA_PAGE_SIZE) {
+      break;
+    }
+
+    grantOffset +=
+      AVAILABLE_ACTUAL_DATA_PAGE_SIZE;
   }
 
   const now =
     new Date();
 
   const liveGrants =
-    ((grantRows ?? []) as SharingGrantLookupRow[])
+    grantRows
       .filter(
         (grant) => grant.expires_at === null || new Date(grant.expires_at) > now,
       );
