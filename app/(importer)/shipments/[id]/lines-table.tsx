@@ -81,6 +81,7 @@ export function LinesTable(
     availableActualDataByLineId,
     actualDeterminationStaleness,
     defaultReferenceByLineId,
+    datasetSupersededByLineId,
   }: {
     shipmentId: string;
     lines: ShipmentLine[];
@@ -89,6 +90,8 @@ export function LinesTable(
     availableActualDataByLineId: Record<string, ActualEmissionDataOptionForLine[]>;
     actualDeterminationStaleness: Record<string, ActualSnapshotStaleness>;
     defaultReferenceByLineId: Record<string, DefaultReferenceDisplay>;
+    // 2026-09-06 (S5 review remediation, finding A4).
+    datasetSupersededByLineId: Record<string, boolean>;
   },
 ) {
   if (lines.length === 0) {
@@ -151,6 +154,7 @@ export function LinesTable(
                 availableActualData={availableActualDataByLineId[line.id] ?? []}
                 staleness={actualDeterminationStaleness[line.id]}
                 defaultReference={defaultReferenceByLineId[line.id]}
+                datasetSuperseded={datasetSupersededByLineId[line.id] ?? false}
               />
             ),
           )}
@@ -169,6 +173,7 @@ function LineRow(
     availableActualData,
     staleness,
     defaultReference,
+    datasetSuperseded,
   }: {
     shipmentId: string;
     line: ShipmentLine;
@@ -177,6 +182,7 @@ function LineRow(
     availableActualData: ActualEmissionDataOptionForLine[];
     staleness: ActualSnapshotStaleness | undefined;
     defaultReference: DefaultReferenceDisplay | undefined;
+    datasetSuperseded: boolean;
   },
 ) {
   const [
@@ -366,6 +372,7 @@ function LineRow(
               latestCalculation={latestCalculation}
               resolveState={resolveState}
               defaultReference={defaultReference}
+              datasetSuperseded={datasetSuperseded}
             />
           </td>
         </tr>

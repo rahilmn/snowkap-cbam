@@ -42,6 +42,7 @@ import {
 
 import {
   buildPeriodSummary,
+  type DatasetSupersededPeriodLine,
   type IncompletePeriodLine,
   type PeriodBreakdownEntry,
   type PeriodSummary,
@@ -308,6 +309,12 @@ function ReportBody(
       <IncompleteLinesCard
         lines={summary.incomplete_lines}
       />
+
+      {summary.dataset_superseded_lines.length > 0 ? (
+        <DatasetSupersededLinesCard
+          lines={summary.dataset_superseded_lines}
+        />
+      ) : null}
     </div>
   );
 }
@@ -485,6 +492,91 @@ function IncompleteLinesCard(
           </table>
         </div>
       )}
+    </Card>
+  );
+}
+
+// 2026-09-06 (S5 review remediation, finding A4). Deliberately does NOT
+// exclude these lines' figures from the totals/breakdowns above (see
+// DatasetSupersededPeriodLine's own doc comment) -- this card's whole
+// purpose is to surface the fact those figures are ones the filing
+// gate currently refuses (record_declaration_filed's DATASET_SUPERSEDED
+// check), not to hide them a second time. Only rendered when non-empty
+// -- unlike IncompleteLinesCard's always-shown "every line is fine"
+// reassurance, this is a rarer, more surprising warning that should not
+// clutter an ordinary report.
+function DatasetSupersededLinesCard(
+  {
+    lines,
+  }: {
+    lines: DatasetSupersededPeriodLine[];
+  },
+) {
+  return (
+    <Card>
+      <div className="border-b border-[var(--border-default)] p-4">
+        <h2 className="text-sm font-medium text-[var(--text-primary)]">
+          Regulatory dataset since corrected
+        </h2>
+
+        <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+          These lines are calculated and included in the totals above, but
+          their default value was resolved against a regulatory dataset
+          that has since been corrected. Redetermine them before filing --
+          the filing gate will refuse a declaration that includes them
+          unchanged.
+        </p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-[var(--border-default)] text-[var(--text-tertiary)]">
+              <th className="px-4 py-2 font-medium">
+                Shipment
+              </th>
+
+              <th className="px-4 py-2 font-medium">
+                Line
+              </th>
+
+              <th className="px-4 py-2 font-medium">
+                CN / TARIC code
+              </th>
+
+              <th className="px-4 py-2 font-medium">
+                Status
+              </th>
+            </tr>
+          </thead>
+
+          <tbody className="divide-y divide-[var(--border-default)]">
+            {lines.map(
+              (line) => (
+                <tr key={line.line_id}>
+                  <td className="px-4 py-2 text-[var(--text-primary)]">
+                    {line.shipment_reference}
+                  </td>
+
+                  <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
+                    {line.line_number}
+                  </td>
+
+                  <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
+                    {line.cn_code}
+                  </td>
+
+                  <td className="px-4 py-2">
+                    <StatusBadge
+                      statusKey="blocker.LINE_DATASET_SUPERSEDED"
+                    />
+                  </td>
+                </tr>
+              ),
+            )}
+          </tbody>
+        </table>
+      </div>
     </Card>
   );
 }

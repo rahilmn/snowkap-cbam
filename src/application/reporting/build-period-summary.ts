@@ -12,6 +12,10 @@ import {
 } from "../../domain/emissions/check-calculation-currency";
 
 import {
+  determinationDatasetIsCurrent,
+} from "../../domain/emissions/determination-dataset-currency";
+
+import {
   toDecimal,
   toDecimalString,
 } from "../../domain/shared/decimal";
@@ -84,6 +88,29 @@ export interface IncompletePeriodLine {
 }
 
 /**
+ * 2026-09-06 (S5 review remediation, finding A4). A CALCULATED,
+ * CURRENT-calculation line (so it's counted in total_embedded_emissions_tco2e
+ * and every breakdown, same as any other calculated line -- this is
+ * deliberately NOT excluded the way a CALCULATION_STALE line is) whose
+ * DEFAULT determination is resolved against a regulatory_datasets row
+ * that is no longer ACTIVE. Listed separately from incomplete_lines
+ * because it is the opposite kind of fact: the figure IS in the total,
+ * but a caller (a declarant deciding whether to trust this report, or
+ * an export consumer) needs to know it is a figure the filing gate
+ * would currently refuse (LINE_DATASET_SUPERSEDED,
+ * src/domain/declarations/completeness.ts) -- see this module's own
+ * doc comment for why dropping it from the total instead would just
+ * substitute one wrong total for another.
+ */
+export interface DatasetSupersededPeriodLine {
+  shipment_id: ShipmentId;
+  shipment_reference: string;
+  line_id: ShipmentLineId;
+  line_number: number;
+  cn_code: string;
+}
+
+/**
  * One bucket of the period's line population, sliced by one dimension
  * (CN code / origin country / production route / determination
  * method). `calculated_line_count` is always <= `line_count`;
@@ -143,6 +170,13 @@ export interface PeriodSummary {
   // trail and P5/P7's resolution UI already apply to every other
   // incomplete regulatory state in this codebase.
   incomplete_lines: IncompletePeriodLine[];
+
+  // 2026-09-06 (S5 review remediation, finding A4). Every CALCULATED,
+  // CURRENT line whose regulatory dataset has since been superseded --
+  // see DatasetSupersededPeriodLine's own doc comment for why these
+  // stay IN total_embedded_emissions_tco2e/the breakdowns rather than
+  // being excluded like incomplete_lines.
+  dataset_superseded_lines: DatasetSupersededPeriodLine[];
 }
 
 interface BreakdownAccumulator {
@@ -273,6 +307,34 @@ export async function buildPeriodSummary(
       period,
     );
 
+  // 2026-09-06 (S5 review remediation, finding A4). One small query for
+  // the whole period, same "fetched once per call, not per line"
+  // shape compute-declaration-draft-facts.ts's own identical fetch
+  // uses -- regulatory_datasets carries no org scoping.
+  const { data: activeDatasetRows, error: activeDatasetError } =
+    await supabase
+      .from("regulatory_datasets")
+      .select(
+        "id",
+      )
+      .eq("status", "ACTIVE");
+
+  if (activeDatasetError) {
+    throw new Error(
+      `reporting: active regulatory datasets fetch failed (${activeDatasetError.message}).`,
+    );
+  }
+
+  const activeDatasetIds =
+    new Set(
+      ((activeDatasetRows ?? []) as { id: string }[]).map(
+        (row) => row.id,
+      ),
+    );
+
+  const datasetSupersededLines: DatasetSupersededPeriodLine[] =
+    [];
+
   const cnCodeBreakdown =
     new Map<string, BreakdownAccumulator>();
 
@@ -308,6 +370,29 @@ export async function buildPeriodSummary(
 
       total =
         total ? total.plus(amount) : amount;
+
+      // 2026-09-06 (S5 review remediation, finding A4). A CURRENT
+      // calculation can still be resolved against a now-superseded
+      // dataset -- checkCalculationCurrency (calculationIsCurrent
+      // above) only ever compares a determination against itself,
+      // never against live regulatory state, so this is a genuinely
+      // independent check, not a narrowing of the one above.
+      if (
+        !determinationDatasetIsCurrent(
+          entry.line.emission_determination,
+          activeDatasetIds,
+        )
+      ) {
+        datasetSupersededLines.push(
+          {
+            shipment_id: entry.shipment_id,
+            shipment_reference: entry.shipment_reference,
+            line_id: entry.line.id,
+            line_number: entry.line.line_number,
+            cn_code: entry.line.cn_code,
+          },
+        );
+      }
     } else {
       incompleteLines.push(
         {
@@ -358,6 +443,18 @@ export async function buildPeriodSummary(
     },
   );
 
+  datasetSupersededLines.sort(
+    (a, b) => {
+      if (a.shipment_reference !== b.shipment_reference) {
+        return a.shipment_reference.localeCompare(
+          b.shipment_reference,
+        );
+      }
+
+      return a.line_number - b.line_number;
+    },
+  );
+
   return {
     period,
     shipment_count,
@@ -369,5 +466,6 @@ export async function buildPeriodSummary(
     breakdown_by_production_route: toBreakdownEntries(productionRouteBreakdown),
     breakdown_by_determination_method: toBreakdownEntries(determinationMethodBreakdown),
     incomplete_lines: incompleteLines,
+    dataset_superseded_lines: datasetSupersededLines,
   };
 }

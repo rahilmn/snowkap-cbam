@@ -16,13 +16,17 @@ import type {
   DecimalString,
 } from "../../domain/shared/decimal";
 
+const ACTIVE_DATASET_ID =
+  "dataset-1";
+
 function determination(
   reason = "EXACT_CN8_MATCH",
+  datasetId: string = ACTIVE_DATASET_ID,
 ) {
   return {
     method: "DEFAULT",
     resolution: {
-      dataset_id: "dataset-1",
+      dataset_id: datasetId,
       dataset_version: "2026-definitive-corrected",
       resolved_at: "2026-08-28T00:00:00.000Z",
       reason,
@@ -64,6 +68,9 @@ function calculation(
   };
 }
 
+const activeDatasetIds =
+  new Set([ACTIVE_DATASET_ID]);
+
 describe(
   "getShipmentEmissionsTotal",
   () => {
@@ -74,10 +81,15 @@ describe(
           getShipmentEmissionsTotal(
             [{ id: "line-1", emission_determination: determination() }],
             {},
+            activeDatasetIds,
           );
 
-        expect(result).toEqual(
+        expect(result.total).toEqual(
           { status: "NONE" },
+        );
+
+        expect(result.datasetSupersededLineCount).toBe(
+          0,
         );
       },
     );
@@ -95,14 +107,19 @@ describe(
               "line-1": calculation({ embedded_emissions_tco2e: "10.5" }),
               "line-2": calculation({ embedded_emissions_tco2e: "5.5" }),
             },
+            activeDatasetIds,
           );
 
-        expect(result).toEqual(
+        expect(result.total).toEqual(
           {
             status: "COMPLETE",
             total_tco2e: "16",
             totalLineCount: 2,
           },
+        );
+
+        expect(result.datasetSupersededLineCount).toBe(
+          0,
         );
       },
     );
@@ -124,12 +141,13 @@ describe(
               // now stale.
               "line-2": calculation({ embedded_emissions_tco2e: "999", calculatedAgainst: determination("EXACT_CN8_MATCH") }),
             },
+            activeDatasetIds,
           );
 
         // line-2's 999 must NOT appear anywhere in the total -- proves
         // this is not merely "PARTIAL excludes it from the count" but
         // that the stale figure genuinely never entered the sum.
-        expect(result).toEqual(
+        expect(result.total).toEqual(
           {
             status: "PARTIAL",
             total_tco2e: "10.5",
@@ -151,10 +169,66 @@ describe(
             {
               "line-1": calculation({ embedded_emissions_tco2e: "42" }),
             },
+            activeDatasetIds,
           );
 
-        expect(result).toEqual(
+        expect(result.total).toEqual(
           { status: "NONE" },
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding A4): counts a CURRENT calculation whose dataset is no longer ACTIVE as datasetSupersededLineCount -- but STILL includes its figure in the total",
+      () => {
+        const supersededDetermination =
+          determination("EXACT_CN8_MATCH", "dataset-superseded-1");
+
+        const result =
+          getShipmentEmissionsTotal(
+            [
+              { id: "line-1", emission_determination: supersededDetermination },
+            ],
+            {
+              "line-1": calculation({ embedded_emissions_tco2e: "10.5", calculatedAgainst: supersededDetermination }),
+            },
+            activeDatasetIds,
+          );
+
+        expect(result.total).toEqual(
+          {
+            status: "COMPLETE",
+            total_tco2e: "10.5",
+            totalLineCount: 1,
+          },
+        );
+
+        expect(result.datasetSupersededLineCount).toBe(
+          1,
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding A4): does not double-count a STALE line as also dataset-superseded",
+      () => {
+        const result =
+          getShipmentEmissionsTotal(
+            [
+              { id: "line-1", emission_determination: determination("REGULATORY_REDETERMINED", "dataset-superseded-1") },
+            ],
+            {
+              "line-1": calculation({ embedded_emissions_tco2e: "999", calculatedAgainst: determination("EXACT_CN8_MATCH", "dataset-superseded-1") }),
+            },
+            activeDatasetIds,
+          );
+
+        expect(result.total).toEqual(
+          { status: "NONE" },
+        );
+
+        expect(result.datasetSupersededLineCount).toBe(
+          0,
         );
       },
     );

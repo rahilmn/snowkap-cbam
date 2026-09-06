@@ -599,5 +599,125 @@ describe(
         );
       },
     );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding A4): lists a CURRENT, calculated line as dataset_superseded_lines when its regulatory dataset is no longer ACTIVE -- but STILL counts its figure in the total, unlike an incomplete/stale line",
+      async () => {
+        const result =
+          await buildPeriodSummary(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow({ id: "line-1", emission_determination: defaultDetermination }),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "1.1.0", embedded_emissions_tco2e: "1.39", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                // dataset-1 (defaultDetermination's own dataset_id) is
+                // deliberately NOT in the ACTIVE set.
+                regulatory_datasets: { data: [{ id: "dataset-2" }], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result.total_embedded_emissions_tco2e).toBe(
+          "1.39",
+        );
+
+        expect(result.calculated_line_count).toBe(
+          1,
+        );
+
+        expect(result.incomplete_lines).toEqual(
+          [],
+        );
+
+        expect(result.dataset_superseded_lines).toEqual(
+          [
+            {
+              shipment_id: "ship-1",
+              shipment_reference: "REF-001",
+              line_id: "line-1",
+              line_number: 1,
+              cn_code: "25232100",
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding A4): does NOT list a line as dataset_superseded_lines when its dataset is still ACTIVE",
+      async () => {
+        const result =
+          await buildPeriodSummary(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow({ id: "line-1", emission_determination: defaultDetermination }),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "1.1.0", embedded_emissions_tco2e: "1.39", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-1" }], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result.dataset_superseded_lines).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding A4): THROWS on an active-regulatory-datasets fetch error",
+      async () => {
+        await expect(
+          buildPeriodSummary(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow({ id: "line-1", emission_determination: defaultDetermination }),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "1.1.0", embedded_emissions_tco2e: "1.39", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: null, error: { message: "denied" } },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          ),
+        ).rejects.toThrow(
+          "denied",
+        );
+      },
+    );
   },
 );

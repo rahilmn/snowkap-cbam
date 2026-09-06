@@ -37,6 +37,10 @@ import {
 } from "../../../../src/application/calculations/get-shipment-emissions-total";
 
 import {
+  determinationDatasetIsCurrent,
+} from "../../../../src/domain/emissions/determination-dataset-currency";
+
+import {
   markActualOptionsForLine,
   type ActualEmissionDataOptionForLine,
 } from "../../../../src/application/emissions/mark-actual-options-for-line";
@@ -127,6 +131,50 @@ export default async function ShipmentDetailPage(
       shipment.id,
     );
 
+  // 2026-09-06 (S5 review remediation, finding A4). Same "fetched once
+  // per call, not per line" shape compute-declaration-draft-facts.ts's
+  // own identical fetch uses -- regulatory_datasets carries no org
+  // scoping.
+  const { data: activeDatasetRows, error: activeDatasetError } =
+    await supabase
+      .from("regulatory_datasets")
+      .select(
+        "id",
+      )
+      .eq("status", "ACTIVE");
+
+  if (activeDatasetError) {
+    throw new Error(
+      `shipments: active regulatory datasets fetch failed (${activeDatasetError.message}).`,
+    );
+  }
+
+  const activeDatasetIds =
+    new Set(
+      ((activeDatasetRows ?? []) as { id: string }[]).map(
+        (row) => row.id,
+      ),
+    );
+
+  // 2026-09-06 (S5 review remediation, finding A4). Computed server-side
+  // -- the client never receives activeDatasetIds itself, only the
+  // resulting per-line boolean, matching this page's own established
+  // "server decides, only the result is sent" convention.
+  const datasetSupersededByLineId: Record<string, boolean> =
+    Object.fromEntries(
+      shipment.lines.map(
+        (line) => (
+          [
+            line.id,
+            !determinationDatasetIsCurrent(
+              line.emission_determination,
+              activeDatasetIds,
+            ),
+          ]
+        ),
+      ),
+    );
+
   // S3 (v2.1.1 §6), prominent result: the one number a user actually
   // came here for. See get-shipment-emissions-total.ts's own doc
   // comment for why a STALE calculation (a line re-determined without
@@ -136,6 +184,7 @@ export default async function ShipmentDetailPage(
     getShipmentEmissionsTotal(
       shipment.lines,
       latestCalculations,
+      activeDatasetIds,
     );
 
   // Per-line, not org-wide -- listAvailableActualEmissionData now filters
@@ -287,24 +336,32 @@ export default async function ShipmentDetailPage(
           Total embedded emissions
         </p>
 
-        {emissionsTotal.status === "NONE" ? (
+        {emissionsTotal.total.status === "NONE" ? (
           <p className="mt-1 text-lg font-medium text-[var(--text-secondary)]">
             Not yet calculated
           </p>
         ) : (
           <>
             <p className="mt-1 text-3xl font-semibold tabular-nums text-[var(--text-primary)]">
-              {emissionsTotal.total_tco2e}
+              {emissionsTotal.total.total_tco2e}
               {" "}
               <span className="text-base font-normal text-[var(--text-tertiary)]">
                 tCO2e
               </span>
             </p>
 
-            {emissionsTotal.status === "PARTIAL" ? (
+            {emissionsTotal.total.status === "PARTIAL" ? (
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                {emissionsTotal.calculatedLineCount} of{" "}
-                {emissionsTotal.totalLineCount} lines calculated so far
+                {emissionsTotal.total.calculatedLineCount} of{" "}
+                {emissionsTotal.total.totalLineCount} lines calculated so far
+              </p>
+            ) : null}
+
+            {emissionsTotal.datasetSupersededLineCount > 0 ? (
+              <p className="mt-1 text-xs text-[var(--color-warning-700)]">
+                {emissionsTotal.datasetSupersededLineCount} of{" "}
+                {shipment.lines.length} line(s) used a regulatory dataset
+                that has since been corrected -- redetermine before filing.
               </p>
             ) : null}
           </>
@@ -387,6 +444,7 @@ export default async function ShipmentDetailPage(
           availableActualDataByLineId={availableActualDataByLineId}
           actualDeterminationStaleness={actualDeterminationStaleness}
           defaultReferenceByLineId={defaultReferenceByLineId}
+          datasetSupersededByLineId={datasetSupersededByLineId}
         />
       </Card>
 

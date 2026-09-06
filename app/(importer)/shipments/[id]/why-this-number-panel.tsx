@@ -386,10 +386,22 @@ export function WhyThisNumberPanel(
     latestCalculation,
     resolveState,
     defaultReference,
+    datasetSuperseded,
   }: {
     line: ShipmentLine;
     latestCalculation: LatestLineCalculation | undefined;
     resolveState: ResolveEmissionsActionState;
+    /**
+     * 2026-09-06 (S5 review remediation, finding A4). Whether this
+     * line's CURRENT, DEFAULT-determined calculation is resolved
+     * against a regulatory dataset that is no longer ACTIVE -- computed
+     * server-side (the client never receives the active-dataset-id set
+     * itself, matching this page's own "server decides, only the
+     * resulting boolean is sent" convention for the actual-data picker
+     * above). Meaningless, and always false, for an ACTUAL determination
+     * or an undetermined line.
+     */
+    datasetSuperseded: boolean;
     /**
      * S3 (v2.1.1 §9), display only -- absent for a DEFAULT-determined
      * line (its own "Regulatory determination" section below already
@@ -526,6 +538,17 @@ export function WhyThisNumberPanel(
             </p>
 
             <TraceList trace={resolution.trace} />
+
+            {datasetSuperseded ? (
+              <div className="mt-2 rounded-[var(--radius-sm)] bg-[var(--color-warning-100)] px-3 py-2 text-xs text-[var(--color-warning-700)]">
+                Regulatory dataset since corrected -- the dataset this
+                result was resolved against ({resolution.dataset_version})
+                is no longer the active one. This result is still current
+                for the determination shown above, but the filing gate
+                will refuse a declaration that includes it unchanged.
+                Redetermine this line against the current dataset.
+              </div>
+            ) : null}
           </div>
         ) : actualSnapshot ? (
           <div className="flex flex-col gap-1.5">
