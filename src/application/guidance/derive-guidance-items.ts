@@ -2,8 +2,9 @@ import type {
   SupabaseClient,
 } from "@supabase/supabase-js";
 
-import type {
-  OrgContext,
+import {
+  hasCapability,
+  type OrgContext,
 } from "../organizations/org-context";
 
 import {
@@ -19,8 +20,16 @@ import {
 } from "./list-guidance-dismissals";
 
 import {
+  listRejectedEmissionDataForGuidance,
+} from "../emissions/list-rejected-emission-data-for-guidance";
+
+import {
   deriveI19Items,
 } from "../../domain/guidance/i19";
+
+import {
+  deriveProducerRejectedEmissionDataItems,
+} from "../../domain/guidance/producer-rejected-emission-data";
 
 import {
   runGuidancePipeline,
@@ -70,7 +79,7 @@ export async function deriveGuidanceItems(
   context: OrgContext,
 ): Promise<GuidanceItemsResult> {
   try {
-    const [draftShipments, declarations, dismissedItemIds] =
+    const [draftShipments, declarations, dismissedItemIds, rejectedEmissionData] =
       await Promise.all(
         [
           listDraftShipmentsWithLines(
@@ -85,6 +94,19 @@ export async function deriveGuidanceItems(
             supabase,
             context.org_id,
           ),
+          // 2026-09-06 (S5 cross-phase hardening). Only queried for an
+          // org that actually holds PRODUCER_OPERATOR -- an importer-
+          // only org can have no emission_data rows at all, so this
+          // fetch would always return [] for one; skipping it is a
+          // cheap, correct optimization, not a behavior change.
+          hasCapability(context, "PRODUCER_OPERATOR")
+            ? listRejectedEmissionDataForGuidance(
+                supabase,
+                context.org_id,
+              )
+            : Promise.resolve(
+                [],
+              ),
         ],
       );
 
@@ -93,6 +115,9 @@ export async function deriveGuidanceItems(
         ...deriveI19Items(
           draftShipments,
           declarations,
+        ),
+        ...deriveProducerRejectedEmissionDataItems(
+          rejectedEmissionData,
         ),
       ];
 

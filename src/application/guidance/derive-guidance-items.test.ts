@@ -16,6 +16,14 @@ const context =
     capabilities: ["IMPORTER_DECLARANT"],
   } as never;
 
+const producerContext =
+  {
+    org_id: "org-1",
+    user_id: "user-1",
+    role: "MEMBER",
+    capabilities: ["PRODUCER_OPERATOR"],
+  } as never;
+
 function shipmentRow(
   overrides: Record<string, unknown> = {},
 ) {
@@ -77,15 +85,21 @@ function mockSupabase(
     lineRows = [],
     declarationRows = [],
     dismissalRows = [],
+    rejectedEmissionDataRows = [],
+    installationRows = [],
     shipmentsError = null,
     declarationsError = null,
+    rejectedEmissionDataError = null,
   }: {
     shipmentRows?: Record<string, unknown>[];
     lineRows?: Record<string, unknown>[];
     declarationRows?: Record<string, unknown>[];
     dismissalRows?: { item_key: string }[];
+    rejectedEmissionDataRows?: Record<string, unknown>[];
+    installationRows?: Record<string, unknown>[];
     shipmentsError?: { message: string } | null;
     declarationsError?: { message: string } | null;
+    rejectedEmissionDataError?: { message: string } | null;
   } = {},
 ) {
   return {
@@ -128,6 +142,18 @@ function mockSupabase(
           if (table === "declarations") {
             return resolve(
               { data: declarationsError ? null : declarationRows, error: declarationsError },
+            );
+          }
+
+          if (table === "emission_data") {
+            return resolve(
+              { data: rejectedEmissionDataError ? null : rejectedEmissionDataRows, error: rejectedEmissionDataError },
+            );
+          }
+
+          if (table === "installations") {
+            return resolve(
+              { data: installationRows, error: null },
             );
           }
 
@@ -253,6 +279,95 @@ describe(
         }
 
         expect(result.items).toHaveLength(1);
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 cross-phase hardening): derives a REQUIRED PRODUCER_REJECTED item for a producer org with a rejected emission_data record -- the guidance dashboard used to have zero rule coverage for any S4 producer-domain gate",
+      async () => {
+        const result =
+          await deriveGuidanceItems(
+            mockSupabase(
+              {
+                rejectedEmissionDataRows: [
+                  { id: "ed-1", installation_id: "inst-1", rejection_reason: "Missing evidence" },
+                ],
+                installationRows: [
+                  { id: "inst-1", name: "Steel Works A" },
+                ],
+              },
+            ),
+            producerContext,
+          );
+
+        expect(result.status).toBe(
+          "OK",
+        );
+
+        if (result.status !== "OK") {
+          throw new Error(
+            "expected OK",
+          );
+        }
+
+        expect(result.items).toHaveLength(
+          1,
+        );
+
+        expect(result.items[0]?.rule).toBe(
+          "PRODUCER_REJECTED",
+        );
+
+        expect(result.items[0]?.priority).toBe(
+          "REQUIRED",
+        );
+
+        expect(result.items[0]?.parent).toEqual(
+          { type: "installation", id: "inst-1", label: "Steel Works A" },
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5): a real fetch failure on the rejected-emission-data leg also returns UNAVAILABLE, never a false empty queue for a producer org",
+      async () => {
+        const result =
+          await deriveGuidanceItems(
+            mockSupabase(
+              {
+                rejectedEmissionDataError: { message: "boom" },
+              },
+            ),
+            producerContext,
+          );
+
+        expect(result).toEqual(
+          { status: "UNAVAILABLE" },
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5): never queries emission_data for an org that holds only IMPORTER_DECLARANT -- cheap, correct skip, not merely an empty result",
+      async () => {
+        const result =
+          await deriveGuidanceItems(
+            mockSupabase(
+              {
+                rejectedEmissionDataRows: [
+                  { id: "ed-1", installation_id: "inst-1", rejection_reason: null },
+                ],
+                installationRows: [
+                  { id: "inst-1", name: "Steel Works A" },
+                ],
+              },
+            ),
+            context,
+          );
+
+        expect(result).toEqual(
+          { status: "OK", items: [] },
+        );
       },
     );
   },
