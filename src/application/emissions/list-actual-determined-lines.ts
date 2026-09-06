@@ -118,6 +118,46 @@ function isActualDeterminedLine(
   return line.emission_determination?.method === "ACTUAL";
 }
 
+// 2026-09-07 (S5 review round 6, finding S5R6-SHARE-B3). The `shipments`
+// follow-up query below is filtered by `.in("id", shipmentIds)`, where
+// shipmentIds is every DISTINCT shipment among this org's ACTUAL-
+// determined lines -- unlike the shipment_lines query above (paged by
+// row count via .range()), an oversized `.in()` list overflows the
+// REQUEST URL itself (PostgREST/the API gateway rejects it with HTTP
+// 414), well before max_rows=1000 row-count truncation would ever
+// apply. Matches the identical, already live-verified fix shape used
+// for this exact hazard shape elsewhere in this codebase
+// (list-draft-shipments-with-lines.ts's own SHIPMENT_ID_CHUNK_SIZE/
+// chunk() -- see that file's own doc comment for the ~219-id threshold
+// confirmed live for a comparable query shape); reusing its same
+// conservative chunk size here rather than re-deriving a new threshold
+// for what is the same class of query.
+const SHIPMENT_ID_CHUNK_SIZE =
+  100;
+
+function chunk<T>(
+  items: T[],
+  size: number,
+): T[][] {
+  const chunks: T[][] =
+    [];
+
+  for (
+    let index = 0;
+    index < items.length;
+    index += size
+  ) {
+    chunks.push(
+      items.slice(
+        index,
+        index + size,
+      ),
+    );
+  }
+
+  return chunks;
+}
+
 /**
  * Every ACTUAL-determined shipment line across the ENTIRE org, decoupled
  * from any single shipment -- the cross-shipment counterpart to
@@ -305,24 +345,71 @@ export async function listActualDeterminedLines(
       ),
     );
 
-  const { data: shipmentRows, error: shipmentError } =
-    await supabase
-      .from("shipments")
-      .select(
-        SHIPMENT_COLUMNS,
-      )
-      .eq("org_id", orgId)
-      .in("id", shipmentIds);
+  const SHIPMENT_PAGE_SIZE =
+    1000;
 
-  if (shipmentError) {
-    throw new Error(
-      `list-actual-determined-lines: shipments fetch failed (${shipmentError.message}).`,
+  const shipmentIdChunks =
+    chunk(
+      shipmentIds,
+      SHIPMENT_ID_CHUNK_SIZE,
     );
-  }
+
+  const shipmentRowChunks =
+    await Promise.all(
+      shipmentIdChunks.map(
+        async (ids) => {
+          const rows: ShipmentRow[] =
+            [];
+
+          let offset =
+            0;
+
+          for (;;) {
+            const { data, error: shipmentError } =
+              await supabase
+                .from("shipments")
+                .select(
+                  SHIPMENT_COLUMNS,
+                )
+                .eq("org_id", orgId)
+                .in("id", ids)
+                // A stable order is required for .range() pagination
+                // to be correct across pages -- without it Postgres
+                // makes no guarantee two separate queries see rows in
+                // the same order, risking a skipped or duplicated row
+                // across a page boundary.
+                .order("id")
+                .range(offset, offset + SHIPMENT_PAGE_SIZE - 1);
+
+            if (shipmentError) {
+              throw new Error(
+                `list-actual-determined-lines: shipments fetch failed (${shipmentError.message}).`,
+              );
+            }
+
+            const page =
+              (data ?? []) as ShipmentRow[];
+
+            rows.push(
+              ...page,
+            );
+
+            if (page.length < SHIPMENT_PAGE_SIZE) {
+              break;
+            }
+
+            offset +=
+              SHIPMENT_PAGE_SIZE;
+          }
+
+          return rows;
+        },
+      ),
+    );
 
   const shipmentById =
     new Map<string, Shipment>(
-      ((shipmentRows ?? []) as ShipmentRow[]).map(
+      shipmentRowChunks.flat().map(
         (row) => [row.id, toShipment(row)],
       ),
     );
@@ -532,7 +619,18 @@ export async function listActualDeterminedLines(
     const snapshot =
       line.emission_determination.snapshot;
 
-    if (!snapshot) {
+    // 2026-09-07 (S5 review round 6, finding S5R6-NUM-B). The guard
+    // above only checked that `snapshot` itself exists, not that
+    // `methodology` -- the one other field this row-construction
+    // actually requires -- does too, despite this function's own doc
+    // comment already stating "there is no partial row to build
+    // without methodology" as the stated reason for skipping rather
+    // than guarding field-by-field. `sharing_grant_id` deliberately
+    // needs no equivalent check: it is nullable BY DESIGN (null means
+    // OWN provenance), so its absence is valid data, not a malformed
+    // row -- only `methodology`, a required non-nullable field, must
+    // exist for this row to be renderable at all.
+    if (!snapshot || !snapshot.methodology) {
       continue;
     }
 

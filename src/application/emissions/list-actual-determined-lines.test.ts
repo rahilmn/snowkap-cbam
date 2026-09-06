@@ -274,6 +274,43 @@ describe(
     );
 
     it(
+      "2026-09-07 (S5 review round 6, finding S5R6-NUM-B): a snapshot present but missing `methodology` is skipped, never rendered with methodology undefined -- the rest of the list is unaffected",
+      async () => {
+        const result =
+          await listActualDeterminedLines(
+            makeMockSupabase(
+              {
+                shipment_lines: {
+                  data: [
+                    actualLineRow(),
+                    actualLineRow(
+                      {
+                        id: "line-incomplete-snapshot",
+                        emission_determination: {
+                          method: "ACTUAL",
+                          snapshot: { ...ownSnapshot, methodology: undefined },
+                        },
+                      },
+                    ),
+                  ],
+                  error: null,
+                },
+                shipments: { data: [shipmentRow], error: null },
+                emission_data: { data: [currentActiveRowSameVersion], error: null },
+              },
+            ),
+            orgId,
+          );
+
+        expect(
+          result.map((row) => row.line_id),
+        ).toEqual(
+          ["line-1"],
+        );
+      },
+    );
+
+    it(
       "labels a SHARED determination and resolves the grantor org's name via the sharing grant it was read through",
       async () => {
         const result =
@@ -475,6 +512,75 @@ describe(
           ),
         ).rejects.toThrow(
           "denied",
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 6, finding S5R6-SHARE-B3): chunks the shipments follow-up query rather than issuing one oversized .in() call, when ACTUAL-determined lines span more than SHIPMENT_ID_CHUNK_SIZE distinct shipments",
+      async () => {
+        const SHIPMENT_COUNT =
+          150;
+
+        const lineRows =
+          Array.from(
+            { length: SHIPMENT_COUNT },
+            (_, index) =>
+              actualLineRow(
+                {
+                  id: `line-${index}`,
+                  shipment_id: `shipment-${index}`,
+                },
+              ),
+          );
+
+        const shipmentRows =
+          Array.from(
+            { length: SHIPMENT_COUNT },
+            (_, index) => (
+              {
+                ...shipmentRow,
+                id: `shipment-${index}`,
+                reference: `SHIP-${index}`,
+              }
+            ),
+          );
+
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await listActualDeterminedLines(
+            makeMockSupabase(
+              {
+                shipment_lines: { data: lineRows, error: null },
+                // The mock resolves every from("shipments") call to
+                // this SAME full set regardless of which ids were
+                // actually requested -- realistic enough to prove every
+                // line resolves its shipment across however many
+                // chunked queries actually ran, without the mock itself
+                // needing to understand chunking.
+                shipments: { data: shipmentRows, error: null },
+              },
+              recorder,
+            ),
+            orgId,
+          );
+
+        expect(result).toHaveLength(
+          SHIPMENT_COUNT,
+        );
+
+        // 150 ids at SHIPMENT_ID_CHUNK_SIZE=100 -- exactly 2 chunks, so
+        // exactly 2 separate `shipments` queries, never 1 (the old,
+        // oversized-.in() shape) and never 150 (a naive one-per-id
+        // fallback).
+        expect(
+          recorder.fromCalls.filter(
+            (name) => name === "shipments",
+          ),
+        ).toHaveLength(
+          2,
         );
       },
     );
