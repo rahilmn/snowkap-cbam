@@ -85,7 +85,7 @@ describe(
           );
 
         expect(result.total).toEqual(
-          { status: "NONE" },
+          { status: "NONE", staleLineCount: 0 },
         );
 
         expect(result.datasetSupersededLineCount).toBe(
@@ -179,7 +179,7 @@ describe(
           );
 
         expect(result.total).toEqual(
-          { status: "NONE" },
+          { status: "NONE", staleLineCount: 1 },
         );
       },
     );
@@ -230,7 +230,7 @@ describe(
           );
 
         expect(result.total).toEqual(
-          { status: "NONE" },
+          { status: "NONE", staleLineCount: 1 },
         );
 
         expect(result.datasetSupersededLineCount).toBe(

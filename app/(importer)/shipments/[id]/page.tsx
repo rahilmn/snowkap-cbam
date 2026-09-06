@@ -337,9 +337,31 @@ export default async function ShipmentDetailPage(
         </p>
 
         {emissionsTotal.total.status === "NONE" ? (
-          <p className="mt-1 text-lg font-medium text-[var(--text-secondary)]">
-            Not yet calculated
-          </p>
+          <>
+            <p className="mt-1 text-lg font-medium text-[var(--text-secondary)]">
+              Not yet calculated
+            </p>
+
+            {
+              // 2026-09-07 (S5 review round 5, finding S5R5-A-1). When
+              // every line is simultaneously stale, "Not yet
+              // calculated" alone reads as "never touched" -- false
+              // for a line that already has a frozen calculation,
+              // excluded here only because it is stale (redetermined
+              // without being recalculated), the identical distinction
+              // PARTIAL's own staleLineCount caption already makes
+              // just below.
+              emissionsTotal.total.staleLineCount > 0 ? (
+                <p className="mt-1 text-xs text-[var(--color-warning-700)]">
+                  {emissionsTotal.total.staleLineCount} of{" "}
+                  {shipment.lines.length} line(s) were redetermined
+                  since their last calculation -- their embedded
+                  emissions are excluded from this total until
+                  recalculated.
+                </p>
+              ) : null
+            }
+          </>
         ) : (
           <>
             <p className="mt-1 text-3xl font-semibold tabular-nums text-[var(--text-primary)]">

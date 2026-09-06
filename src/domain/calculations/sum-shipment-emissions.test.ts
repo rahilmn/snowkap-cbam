@@ -24,7 +24,7 @@ describe(
             0,
           ),
         ).toEqual(
-          { status: "NONE" },
+          { status: "NONE", staleLineCount: 0 },
         );
       },
     );
@@ -38,7 +38,22 @@ describe(
             3,
           ),
         ).toEqual(
-          { status: "NONE" },
+          { status: "NONE", staleLineCount: 0 },
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 5, finding S5R5-A-1): carries a nonzero staleLineCount even under NONE, when every line is simultaneously stale",
+      () => {
+        expect(
+          sumShipmentEmissions(
+            [],
+            1,
+            1,
+          ),
+        ).toEqual(
+          { status: "NONE", staleLineCount: 1 },
         );
       },
     );

@@ -5,7 +5,20 @@ import {
 } from "../shared/decimal";
 
 export type ShipmentEmissionsTotal =
-  | { status: "NONE" }
+  | {
+      status: "NONE";
+      // 2026-09-07 (S5 review round 5, finding S5R5-A-1). NONE means
+      // "nothing to sum," not "nothing was ever calculated" -- the
+      // identical distinction PARTIAL's own staleLineCount already
+      // makes, extended to the shape that occurs when EVERY line is
+      // simultaneously stale (the common single-line-shipment case).
+      // Without it, a shipment with one real, frozen calculation --
+      // excluded here only because it is stale, not because it was
+      // never computed -- rendered the bare "Not yet calculated"
+      // headline, disagreeing with that same line's own "Stale --
+      // recalculate" badge shown in the lines table on the same page.
+      staleLineCount: number;
+    }
   | {
       status: "PARTIAL";
       total_tco2e: DecimalString;
@@ -77,6 +90,7 @@ export function sumShipmentEmissions(
   if (totalLineCount === 0 || computedLineEmissions.length === 0) {
     return {
       status: "NONE",
+      staleLineCount,
     };
   }
 
