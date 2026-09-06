@@ -456,11 +456,23 @@ export async function listPendingInvitationsForOrg(
         { ascending: false },
       );
 
-  if (error || !data) {
-    return [];
+  // 2026-09-07 (S5 review round 4, findings S5R4-EMPTY-A2/S5R4-TEAM-01
+  // -- the same bug found independently by two reviewers). THROWS on a
+  // genuine query error rather than degrading to [] -- the identical
+  // conversion round 3's commit 34d07e0 already applied to this
+  // function's own sibling in this same file, listMyPendingInvitations,
+  // just below. The one caller, app/team/page.tsx, is a plain server
+  // component with no try/catch of its own; a transport failure
+  // previously rendered the Team screen's "Pending invitations"
+  // section exactly as "nobody has been invited," which could lead an
+  // ADMIN/OWNER to send a duplicate invitation or miss a stuck one.
+  if (error) {
+    throw new Error(
+      `invitations: pending organization invitations fetch failed (${error.message}).`,
+    );
   }
 
-  return data.map(
+  return ((data ?? []) as InvitationRow[]).map(
     toInvitation,
   );
 }

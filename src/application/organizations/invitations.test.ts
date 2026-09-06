@@ -574,20 +574,19 @@ describe(
     );
 
     it(
-      "returns an empty array on error",
+      "2026-09-07 (S5 review round 4, findings S5R4-EMPTY-A2/S5R4-TEAM-01): throws on a fetch error rather than degrading to [] -- app/team/page.tsx has no try/catch of its own, so this now reaches app/error.tsx instead of a false 'nobody has been invited'",
       async () => {
-        const result =
-          await listPendingInvitationsForOrg(
+        await expect(
+          listPendingInvitationsForOrg(
             mockUserScopedSupabase(
               {
                 selectResult: { data: null, error: { message: "boom" } },
               },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "boom",
         );
       },
     );
