@@ -913,34 +913,71 @@ export async function listMyPendingSharingGrantInvitations(
   supabase: SupabaseClient,
   callerEmail: string,
 ): Promise<MyPendingSharingGrantInvitation[]> {
-  const { data, error } =
-    await supabase
-      .from("sharing_grants")
-      .select(
-        SHARING_GRANT_COLUMNS,
-      )
-      .eq("status", "INVITED")
-      .eq("invited_email", callerEmail.trim().toLowerCase())
-      .order("created_at", { ascending: false });
+  const rows: SharingGrantRow[] =
+    [];
 
-  // 2026-09-07 (S5 review round 3, finding S5R3-SES-02). THROWS on a
-  // genuine query error rather than degrading to [] -- this function's
-  // one caller (app/accept-invitation/page.tsx) folds an empty result
-  // here together with an empty listMyPendingInvitations result into
-  // "No pending invitations for {email}," a message that specifically
-  // tells a real invitee their invitation does not exist and offers
-  // recovery steps (wrong address, expired, never set a password) --
-  // none of which apply when the actual cause is a failed fetch. A
-  // real invited user spending a support cycle on a false negative here
-  // is the exact failure this same fix pattern closes everywhere else.
-  if (error) {
-    throw new Error(
-      `manage-sharing-grants: pending sharing-grant invitations fetch failed (${error.message}).`,
+  let offset =
+    0;
+
+  for (;;) {
+    const { data, error } =
+      await supabase
+        .from("sharing_grants")
+        .select(
+          SHARING_GRANT_COLUMNS,
+        )
+        .eq("status", "INVITED")
+        .eq("invited_email", callerEmail.trim().toLowerCase())
+        .order("created_at", { ascending: false })
+        // `id` as a deterministic tie-breaker so .range() pagination
+        // stays stable across pages sharing a created_at value --
+        // matches this file's own listSharingGrantsIssued/Received.
+        .order("id", { ascending: false })
+        .range(offset, offset + SHARING_GRANTS_PAGE_SIZE - 1);
+
+    // 2026-09-07 (S5 review round 3, finding S5R3-SES-02). THROWS on a
+    // genuine query error rather than degrading to [] -- this function's
+    // one caller (app/accept-invitation/page.tsx) folds an empty result
+    // here together with an empty listMyPendingInvitations result into
+    // "No pending invitations for {email}," a message that specifically
+    // tells a real invitee their invitation does not exist and offers
+    // recovery steps (wrong address, expired, never set a password) --
+    // none of which apply when the actual cause is a failed fetch. A
+    // real invited user spending a support cycle on a false negative here
+    // is the exact failure this same fix pattern closes everywhere else.
+    if (error) {
+      throw new Error(
+        `manage-sharing-grants: pending sharing-grant invitations fetch failed (${error.message}).`,
+      );
+    }
+
+    // 2026-09-07 (supabase/config.toml `max_rows = 1000`; S5 review
+    // round 6, finding S5R6-SHARE-Y1). Paged with .range() -- this
+    // query has no per-org scope at all (it is keyed on the caller's
+    // own email, across every org that has ever invited them), so it
+    // was the one sharing_grants read in this file NOT already paged
+    // when its siblings (listSharingGrantsIssued/Received, S5R4-SHARE-02
+    // above) were. sharing_grants rows are never deleted (revoking only
+    // flips `status`), so an email invited by many counterparties over
+    // time would eventually cross PostgREST's row cap and silently lose
+    // its oldest still-INVITED rows.
+    const page =
+      (data ?? []) as SharingGrantRow[];
+
+    rows.push(
+      ...page,
     );
+
+    if (page.length < SHARING_GRANTS_PAGE_SIZE) {
+      break;
+    }
+
+    offset +=
+      SHARING_GRANTS_PAGE_SIZE;
   }
 
   const grants =
-    ((data ?? []) as SharingGrantRow[]).map(
+    rows.map(
       toSharingGrant,
     );
 
