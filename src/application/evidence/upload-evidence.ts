@@ -367,15 +367,26 @@ export async function uploadEvidenceFile(
       insertedRow as EvidenceFileRow,
     );
 
+  // 2026-09-06 (S5 cross-phase hardening). Was a client-side read
+  // (step 1's ownership.evidenceFileIds) + write of a whole new array
+  // -- two concurrent writers (this call and a concurrent
+  // removeEvidenceFile) could each read the SAME baseline before
+  // either wrote, and the second writer's own write would silently
+  // overwrite the first's, live-reproduced end to end. append_evidence_
+  // file_id (20260906240000) performs this as a single atomic
+  // `array_append` UPDATE, so two concurrent calls against the same
+  // row serialize at the row level instead of racing -- SECURITY
+  // INVOKER, so RLS (including the evidence_file_ids anti-join) still
+  // governs this write exactly as it did the bare UPDATE it replaces.
   const { error: arrayUpdateError } =
     await supabase
-      .from("emission_data")
-      .update(
+      .rpc(
+        "append_evidence_file_id",
         {
-          evidence_file_ids: [...ownership.evidenceFileIds, file.id],
+          p_emission_data_id: input.emissionDataId,
+          p_evidence_file_id: file.id,
         },
-      )
-      .eq("id", input.emissionDataId);
+      );
 
   if (arrayUpdateError) {
     // Compensate: delete the just-created metadata row and object
@@ -466,25 +477,22 @@ export type RemoveEvidenceFileResult =
  * failure stops here (nothing else is touched): the safer failure mode
  * is "both still exist, retryable" rather than "metadata gone but a
  * storage object now orphaned with no owning row." The
- * evidence_file_ids array update is best-effort after the metadata row
- * is already gone (same non-atomicity posture documented on
- * uploadEvidenceFile above) -- its error IS now captured (P13
- * adversarial audit: it previously wasn't, at all) and, on failure,
- * retried exactly once against a fresh read of the array. This closes
- * the concurrent-second-removal race that made this genuinely
- * dangerous rather than merely best-effort: two removals reading the
- * array before either writes would otherwise leave the second writer's
- * filtered array still naming the FIRST writer's already-deleted id,
- * which 20260829480000's evidence_file_ids anti-join then permanently
- * rejects -- bricking every future UPDATE to that emission_data row,
- * not just this one. A single retry against a fresh read picks up the
- * concurrent writer's own result instead of the stale pre-race array.
- * Residual, stated plainly: a THIRD overlapping removal, or a genuine
- * persistent DB error surviving the retry, still leaves a dangling id
- * -- the same non-atomicity posture activateEmissionData's own doc
- * comment already names for its two-row supersede-then-activate
- * sequence, now narrowed from "the common case" to "a rare compound
- * race."
+ * evidence_file_ids array update runs after the metadata row is
+ * already gone (same non-atomicity posture documented on
+ * uploadEvidenceFile above, between the metadata delete and this
+ * array update specifically) -- best-effort in the sense that its own
+ * failure is not itself surfaced to the caller (the file is already
+ * genuinely removed by that point), but the array mutation ITSELF is
+ * no longer racy: remove_evidence_file_id (20260906240000) performs it
+ * as a single atomic `array_remove` UPDATE, so a concurrent removal or
+ * upload against the same row serializes at the row level instead of
+ * silently overwriting this call's own result (or vice versa) -- the
+ * class of bug a P13 audit round partially closed with a single retry
+ * for the narrower two-concurrent-removals case, and an S5 audit round
+ * found the retry never covered a concurrent upload racing a removal
+ * (live-reproduced end to end: an uploaded file's own citation silently
+ * dropped, with no error anywhere). The atomic RPC closes both, by
+ * construction, with no retry logic needed at all.
  */
 export async function removeEvidenceFile(
   supabase: SupabaseClient,
@@ -598,51 +606,27 @@ export async function removeEvidenceFile(
   }
 
   if (ownership.status === "OK") {
-    const { error: arrayUpdateError } =
-      await supabase
-        .from("emission_data")
-        .update(
-          {
-            evidence_file_ids: ownership.evidenceFileIds.filter(
-              (id) => id !== evidenceFileId,
-            ),
-          },
-        )
-        .eq("id", fetched.file.emission_data_id);
-
-    // P13 adversarial audit: this write was previously unguarded and
-    // its error uncaptured. The failure this closes is a concurrent
-    // second removal racing this one -- both read the array before
-    // either writes, so the second writer's own filtered array still
-    // names the FIRST writer's already-deleted id, which
-    // 20260829480000's evidence_file_ids anti-join then permanently
-    // rejects (every future UPDATE to this row fails the same way,
-    // since the dangling id never leaves the array). A single retry
-    // against a FRESH read closes it: by the time this runs, the
-    // concurrent writer's own update has already landed, so re-reading
-    // and re-filtering picks up its result instead of the stale
-    // pre-race array this call started with.
-    if (arrayUpdateError) {
-      const retryOwnership =
-        await fetchOwnedEmissionDataForEvidence(
-          supabase,
-          orgId,
-          fetched.file.emission_data_id,
-        );
-
-      if (retryOwnership.status === "OK") {
-        await supabase
-          .from("emission_data")
-          .update(
-            {
-              evidence_file_ids: retryOwnership.evidenceFileIds.filter(
-                (id) => id !== evidenceFileId,
-              ),
-            },
-          )
-          .eq("id", fetched.file.emission_data_id);
-      }
-    }
+    // 2026-09-06 (S5 cross-phase hardening). Was a client-side read
+    // (the `ownership` fetch above) + filter + write of a whole new
+    // array, with a single retry-on-error added by the P13 adversarial
+    // audit for the narrower case of two concurrent REMOVALS racing
+    // each other. remove_evidence_file_id (20260906240000) performs
+    // this as a single atomic `array_remove` UPDATE instead -- two
+    // concurrent writers (including the broader case the P13 retry
+    // never covered: this removal racing a concurrent uploadEvidence
+    // File, live-reproduced end to end) now serialize at the row level
+    // rather than racing, so no retry is needed at all. SECURITY
+    // INVOKER, so RLS (including the evidence_file_ids anti-join)
+    // still governs this write exactly as it did the bare UPDATE it
+    // replaces.
+    await supabase
+      .rpc(
+        "remove_evidence_file_id",
+        {
+          p_emission_data_id: fetched.file.emission_data_id,
+          p_evidence_file_id: evidenceFileId,
+        },
+      );
   }
 
   await recordAuditEvent(

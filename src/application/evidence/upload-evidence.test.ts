@@ -72,10 +72,16 @@ interface StorageOp {
   bytes?: Uint8Array;
 }
 
+interface RpcCall {
+  fn: string;
+  params: unknown;
+}
+
 interface Recorder {
   fromCalls: string[];
   ops: Op[];
   storageOps: StorageOp[];
+  rpcCalls: RpcCall[];
 }
 
 function makeRecorder(): Recorder {
@@ -83,6 +89,7 @@ function makeRecorder(): Recorder {
     fromCalls: [],
     ops: [],
     storageOps: [],
+    rpcCalls: [],
   };
 }
 
@@ -91,6 +98,17 @@ interface StorageConfig {
   removeError?: { message: string } | null;
   signedUrl?: string | null;
   signedUrlError?: { message: string } | null;
+}
+
+// 2026-09-06 (S5 cross-phase hardening). uploadEvidenceFile/
+// removeEvidenceFile now mutate emission_data.evidence_file_ids via the
+// atomic append_evidence_file_id/remove_evidence_file_id RPCs
+// (20260906240000) instead of a client-side read-then-write -- keyed
+// by function name here, defaulting to a clean {data: null, error:
+// null}, matching this file's own error/no-op default for an unlisted
+// table.
+interface RpcConfig {
+  [fnName: string]: { data?: unknown; error: unknown } | undefined;
 }
 
 /**
@@ -104,6 +122,7 @@ function makeMockSupabase(
   tables: Record<string, { data: unknown; error: unknown } | { data: unknown; error: unknown }[]>,
   storageConfig: StorageConfig = {},
   recorder: Recorder = makeRecorder(),
+  rpcConfig: RpcConfig = {},
 ) {
   const cursors: Record<string, number> = {};
 
@@ -179,6 +198,15 @@ function makeMockSupabase(
     from: (table: string) => {
       recorder.fromCalls.push(table);
       return builder(table);
+    },
+    rpc: (fn: string, params: unknown) => {
+      recorder.rpcCalls.push({ fn, params });
+      const configured =
+        rpcConfig[fn];
+
+      return Promise.resolve(
+        configured ?? { data: null, error: null },
+      );
     },
     storage: {
       from: (bucket: string) => ({
@@ -259,15 +287,15 @@ describe(
           /^org-1\/emission-data-1\/.+\.pdf$/,
         );
 
-        const arrayUpdateOp =
-          recorder.ops.find(
-            (op) => op.table === "emission_data" && op.op === "update",
+        const appendCall =
+          recorder.rpcCalls.find(
+            (call) => call.fn === "append_evidence_file_id",
           );
 
         expect(
-          (arrayUpdateOp?.payload as { evidence_file_ids: string[] }).evidence_file_ids,
-        ).toEqual(
-          ["evidence-file-1"],
+          (appendCall?.params as { p_evidence_file_id: string })?.p_evidence_file_id,
+        ).toBe(
+          "evidence-file-1",
         );
 
         expect(
@@ -323,7 +351,7 @@ describe(
     );
 
     it(
-      "appends onto an existing evidence_file_ids array rather than overwriting it",
+      "appends via the atomic RPC (never a client-computed whole-array overwrite) -- the id it appends is unaffected by whatever else the array already holds",
       async () => {
         const recorder =
           makeRecorder();
@@ -342,15 +370,29 @@ describe(
           validInput,
         );
 
-        const arrayUpdateOp =
-          recorder.ops.find(
-            (op) => op.table === "emission_data" && op.op === "update",
+        const appendCall =
+          recorder.rpcCalls.find(
+            (call) => call.fn === "append_evidence_file_id",
           );
 
         expect(
-          (arrayUpdateOp?.payload as { evidence_file_ids: string[] }).evidence_file_ids,
-        ).toEqual(
-          ["existing-file", "evidence-file-1"],
+          (appendCall?.params as { p_emission_data_id: string; p_evidence_file_id: string })?.p_emission_data_id,
+        ).toBe(
+          "emission-data-1",
+        );
+
+        expect(
+          (appendCall?.params as { p_emission_data_id: string; p_evidence_file_id: string })?.p_evidence_file_id,
+        ).toBe(
+          "evidence-file-1",
+        );
+
+        // No client-side read-then-write: the pre-existing array is
+        // never sent back to the server, only the one id to append.
+        expect(
+          recorder.ops.some((op) => op.table === "emission_data" && op.op === "update"),
+        ).toBe(
+          false,
         );
       },
     );
@@ -550,14 +592,12 @@ describe(
           await uploadEvidenceFile(
             makeMockSupabase(
               {
-                emission_data: [
-                  { data: { entered_by_org_id: "org-1", evidence_file_ids: [] }, error: null },
-                  { data: null, error: { message: "denied" } },
-                ],
+                emission_data: { data: { entered_by_org_id: "org-1", evidence_file_ids: [] }, error: null },
                 evidence_files: { data: evidenceFileRow, error: null },
               },
               {},
               recorder,
+              { append_evidence_file_id: { data: null, error: { message: "denied" } } },
             ),
             memberContext(),
             validInput,
@@ -677,15 +717,15 @@ describe(
           true,
         );
 
-        const arrayUpdateOp =
-          recorder.ops.find(
-            (op) => op.table === "emission_data" && op.op === "update",
+        const removeCall =
+          recorder.rpcCalls.find(
+            (call) => call.fn === "remove_evidence_file_id",
           );
 
         expect(
-          (arrayUpdateOp?.payload as { evidence_file_ids: string[] }).evidence_file_ids,
-        ).toEqual(
-          ["other"],
+          (removeCall?.params as { p_evidence_file_id: string })?.p_evidence_file_id,
+        ).toBe(
+          "evidence-file-1",
         );
 
         expect(
@@ -697,7 +737,7 @@ describe(
     );
 
     it(
-      "retries the evidence_file_ids array update against a FRESH read when the first attempt fails -- P13 audit: a concurrent second removal previously left a dangling id that permanently bricked the parent emission_data record",
+      "S5 cross-phase hardening: mutates evidence_file_ids via the atomic remove_evidence_file_id RPC -- no client-side read-then-write, and so no retry logic is needed even when the RPC itself reports an error (its own failure is best-effort, matching this function's established non-atomicity posture for the array step specifically)",
       async () => {
         const recorder =
           makeRecorder();
@@ -707,50 +747,37 @@ describe(
             makeMockSupabase(
               {
                 evidence_files: { data: evidenceFileRow, error: null },
-                emission_data: [
-                  // 1. Initial read: the pre-race array this call itself started with.
-                  { data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1", "stale-other"] }, error: null },
-                  // 2. First update attempt: fails (a concurrent second
-                  //    removal's own write landed first, and this
-                  //    stale-array-derived payload no longer satisfies
-                  //    the evidence-integrity WITH CHECK).
-                  { data: null, error: { message: "new row violates row-level security policy for table \"emission_data\"" } },
-                  // 3. Retry read: the ARRAY AS IT ACTUALLY IS NOW, after
-                  //    the concurrent writer's own update landed.
-                  { data: { entered_by_org_id: "org-1", evidence_file_ids: ["fresh-other"] }, error: null },
-                  // 4. Retry update: succeeds.
-                  { data: null, error: null },
-                ],
+                emission_data: { data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1", "other"] }, error: null },
                 audit_events: { data: null, error: null },
               },
               {},
               recorder,
+              { remove_evidence_file_id: { data: null, error: { message: "denied" } } },
             ),
             memberContext(),
             "evidence-file-1" as never,
           );
 
+        // The metadata row and storage object are already genuinely
+        // removed by this point -- a failure on the best-effort array
+        // step does not turn the overall removal into a failure.
         expect(result).toEqual(
           { status: "OK" },
         );
 
-        const emissionDataUpdateOps =
-          recorder.ops.filter(
-            (op) => op.table === "emission_data" && op.op === "update",
-          );
-
-        expect(emissionDataUpdateOps).toHaveLength(
-          2,
+        expect(
+          recorder.rpcCalls.filter((call) => call.fn === "remove_evidence_file_id"),
+        ).toHaveLength(
+          1,
         );
 
-        // The retry's payload must come from the FRESH read (entry 3),
-        // not the stale pre-race array (entry 1) -- "fresh-other" only
-        // appears in the fresh read, "stale-other" only in the initial
-        // one.
+        // No client-side read-then-write fallback: the RPC is called
+        // exactly once, never retried, and no `emission_data` table
+        // UPDATE is ever issued directly.
         expect(
-          (emissionDataUpdateOps[1]?.payload as { evidence_file_ids: string[] }).evidence_file_ids,
-        ).toEqual(
-          ["fresh-other"],
+          recorder.ops.some((op) => op.table === "emission_data" && op.op === "update"),
+        ).toBe(
+          false,
         );
       },
     );
