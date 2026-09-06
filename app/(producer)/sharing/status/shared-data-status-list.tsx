@@ -27,6 +27,11 @@ export interface SharedDataStatusRowView {
   granteeLabel: string;
   status: "INVITED" | "ACTIVE" | "REVOKED" | "EXPIRED";
   events: SharedDataStatusEventView[];
+  // 2026-09-06 (S5 review remediation round 2, finding S5R2-B-01). true
+  // when the consumption-history lookup itself failed -- distinct from
+  // `events` genuinely being empty. Must render as "couldn't check",
+  // never as the affirmative "not yet used".
+  eventsUnavailable: boolean;
 }
 
 const DETERMINATION_KIND_LABEL: Record<string, string> = {
@@ -109,14 +114,25 @@ function SharedDataStatusCard(
           </div>
 
           <span className="shrink-0 text-xs text-[var(--text-tertiary)]">
-            {lastUsedAt
+            {row.eventsUnavailable
+              ? "Couldn't check"
+              : lastUsedAt
               ? `Last used ${formatTimestamp(lastUsedAt)}`
               : "Not yet used"}
           </span>
         </CardHeader>
 
         <div className="p-4">
-          {row.events.length === 0 ? (
+          {row.eventsUnavailable ? (
+            <p
+              role="alert"
+              className="text-sm text-[var(--color-warning-700)]"
+            >
+              Couldn't load this grant's consumption history right now.
+              This does not mean the grantee hasn't used the data --
+              try reloading.
+            </p>
+          ) : row.events.length === 0 ? (
             <p className="text-sm text-[var(--text-secondary)]">
               No consumption events recorded -- the grantee has not yet
               determined a shipment line from this data.

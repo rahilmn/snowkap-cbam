@@ -235,18 +235,17 @@ describe(
     );
 
     it(
-      "returns an empty array on a fetch error",
+      "2026-09-06 (S5 review remediation round 2, finding S5R2-B-01): THROWS on a fetch error -- never a fabricated empty listing indistinguishable from 'no grants issued'",
       async () => {
-        const result =
-          await listSharingGrantsIssued(
+        await expect(
+          listSharingGrantsIssued(
             makeMockSupabase(
               { sharing_grants: { data: null, error: { message: "denied" } } },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
@@ -278,18 +277,17 @@ describe(
     );
 
     it(
-      "returns an empty array on a fetch error",
+      "2026-09-06 (S5 review remediation round 2, finding S5R2-B-01): THROWS on a fetch error",
       async () => {
-        const result =
-          await listSharingGrantsReceived(
+        await expect(
+          listSharingGrantsReceived(
             makeMockSupabase(
               { sharing_grants: { data: null, error: { message: "denied" } } },
             ),
             granteeOrgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );

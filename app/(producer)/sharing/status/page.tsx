@@ -83,6 +83,7 @@ export default async function SharedDataStatusPage() {
               }
             ),
           ),
+          eventsUnavailable: row.consumptionEventsUnavailable,
         }
       ),
     );

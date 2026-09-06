@@ -37,6 +37,15 @@ import {
   type SharingGrantRow,
 } from "./sharing-grant-mapper";
 
+// 2026-09-06 (S5 review remediation round 2, finding S5R2-B-01). Both
+// listSharingGrantsIssued and listSharingGrantsReceived now THROW on a
+// genuine query error, matching the throw-is-for-infrastructure-
+// failures fix already applied to eight sibling read services this same
+// S5 phase (b23e500, 662d843, a062226). Previously each degraded to []
+// on error, which app/(producer)/sharing/page.tsx (no try/catch of its
+// own) rendered as the affirmative "No data-sharing grants issued yet"
+// -- a false all-clear on the exact privacy/access-transparency
+// boundary this screen exists for.
 export async function listSharingGrantsIssued(
   supabase: SupabaseClient,
   orgId: OrganizationId,
@@ -51,7 +60,9 @@ export async function listSharingGrantsIssued(
       .order("created_at", { ascending: false });
 
   if (error || !data) {
-    return [];
+    throw new Error(
+      `sharing: issued grants fetch failed (${error?.message ?? "no rows"}).`,
+    );
   }
 
   return (data as SharingGrantRow[]).map(
@@ -73,7 +84,9 @@ export async function listSharingGrantsReceived(
       .order("created_at", { ascending: false });
 
   if (error || !data) {
-    return [];
+    throw new Error(
+      `sharing: received grants fetch failed (${error?.message ?? "no rows"}).`,
+    );
   }
 
   return (data as SharingGrantRow[]).map(

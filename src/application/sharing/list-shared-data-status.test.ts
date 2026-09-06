@@ -156,20 +156,19 @@ describe(
     );
 
     it(
-      "returns an empty array on a fetch error for the grants themselves",
+      "2026-09-06 (S5 review remediation round 2, finding S5R2-B-01): THROWS on a fetch error for the grants themselves -- never a fabricated 'no grants issued' all-clear",
       async () => {
-        const result =
-          await listSharedDataStatus(
+        await expect(
+          listSharedDataStatus(
             makeMockSupabase(
               {
                 sharing_grants: { data: null, error: { message: "denied" } },
               },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
@@ -526,14 +525,55 @@ describe(
         expect(result[0]!.consumptionEvents).toEqual(
           [],
         );
+
+        // 2026-09-06 (S5 review remediation round 2, finding S5R2-B-01):
+        // this must be distinguishable from a genuinely empty history --
+        // consumptionEvents alone being [] does not tell the caller
+        // whether the lookup failed or the grantee simply hasn't used
+        // the data yet.
+        expect(result[0]!.consumptionEventsUnavailable).toBe(
+          true,
+        );
       },
     );
 
     it(
-      "returns an empty array when the installation or organization name lookups themselves error",
+      "2026-09-06 (S5 review remediation round 2, finding S5R2-B-01): consumptionEventsUnavailable is false when the audit_events lookup succeeds, even with zero rows",
       async () => {
         const result =
           await listSharedDataStatus(
+            makeMockSupabase(
+              {
+                sharing_grants: { data: [directGrantRow], error: null },
+                installations: {
+                  data: [{ id: "installation-1", name: "Duisburg Plant" }],
+                  error: null,
+                },
+                organizations: {
+                  data: [{ id: "org-2", name: "Acme Steel GmbH" }],
+                  error: null,
+                },
+                audit_events: { data: [], error: null },
+              },
+            ),
+            orgId,
+          );
+
+        expect(result[0]!.consumptionEvents).toEqual(
+          [],
+        );
+
+        expect(result[0]!.consumptionEventsUnavailable).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation round 2, finding S5R2-B-01): THROWS when the installation or organization name lookups themselves error -- previously blanked genuinely-fetched grants",
+      async () => {
+        await expect(
+          listSharedDataStatus(
             makeMockSupabase(
               {
                 sharing_grants: { data: [directGrantRow], error: null },
@@ -546,10 +586,9 @@ describe(
               },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );

@@ -53,6 +53,14 @@ export interface SharedDataStatusRow {
   // grant's own id -- see the aggregate_id filter below for why a
   // shared org_id-only audit_events query is not enough on its own.
   consumptionEvents: SharedDataConsumptionEvent[];
+  // 2026-09-06 (S5 review remediation round 2, finding S5R2-B-01). true
+  // when the audit_events lookup itself failed -- distinct from a
+  // genuinely empty consumptionEvents array. Previously a failed lookup
+  // was indistinguishable from "the grantee has not used this", an
+  // affirmative claim about the grantee's behaviour the app has no
+  // actual basis for. The caller must render this as "couldn't check",
+  // never as "not yet used".
+  consumptionEventsUnavailable: boolean;
 }
 
 interface InstallationNameRow {
@@ -212,14 +220,21 @@ function toConsumptionEvent(
  * embedded joins.
  *
  * Failure posture deliberately differs between the two kinds of
- * lookup: an installations/organizations lookup failure blanks the
- * whole result (same posture as listMyPendingSharingGrantInvitations --
- * a name this screen cannot even attempt to resolve makes every row
- * suspect). An audit_events lookup failure degrades each grant's own
- * consumptionEvents to an empty list instead, rather than hiding the
- * grants/status list entirely -- the core "who currently holds access"
- * transparency this screen exists for should not go dark just because
- * the secondary "and here's their usage history" data failed to load.
+ * lookup: a sharing_grants, installations, or organizations lookup
+ * failure now THROWS (2026-09-06, S5 review remediation round 2,
+ * finding S5R2-B-01 -- matching the throw-is-for-infrastructure-
+ * failures fix already applied to eight sibling read services this same
+ * S5 phase; a name this screen cannot even attempt to resolve makes
+ * every row suspect, and hiding a genuinely-fetched grants list behind
+ * a false "no grants issued yet" is exactly the anti-pattern that
+ * remediation closed elsewhere). An audit_events lookup failure still
+ * does NOT blank the whole grants/status list -- the core "who
+ * currently holds access" transparency this screen exists for should
+ * not go dark just because the secondary "and here's their usage
+ * history" data failed to load -- but it now marks each affected row's
+ * consumptionEventsUnavailable: true instead of silently defaulting to
+ * an empty array, so the caller can render "couldn't check" rather than
+ * the affirmative "not yet used".
  */
 export async function listSharedDataStatus(
   supabase: SupabaseClient,
@@ -234,8 +249,20 @@ export async function listSharedDataStatus(
       .eq("grantor_org_id", orgId)
       .order("created_at", { ascending: false });
 
+  // 2026-09-06 (S5 review remediation round 2, finding S5R2-B-01).
+  // THROWS on a genuine query error, matching the throw-is-for-
+  // infrastructure-failures fix already applied to eight sibling read
+  // services this same S5 phase (b23e500, 662d843, a062226).
+  // Previously degraded to [], which the caller (app/(producer)/
+  // sharing/status/page.tsx, no try/catch of its own) rendered as the
+  // affirmative "No data-sharing grants issued yet -- issue one from
+  // the Sharing screen to see who holds access here" -- a false
+  // all-clear on the exact privacy/access-transparency boundary this
+  // screen exists to make visible.
   if (grantError || !grantData) {
-    return [];
+    throw new Error(
+      `sharing: sharing_grants fetch failed (${grantError?.message ?? "no rows"}).`,
+    );
   }
 
   const grants =
@@ -307,8 +334,14 @@ export async function listSharedDataStatus(
       ],
     );
 
+  // 2026-09-06 (S5 review remediation round 2, finding S5R2-B-01).
+  // THROWS -- previously blanked genuinely-fetched grants to [],
+  // producing the identical false all-clear as the grantError branch
+  // above.
   if (installationError || orgError) {
-    return [];
+    throw new Error(
+      `sharing: installation/organization name lookup failed (${(installationError ?? orgError)?.message ?? "unknown"}).`,
+    );
   }
 
   const installationNameById =
@@ -326,9 +359,9 @@ export async function listSharedDataStatus(
     );
 
   // See this function's own doc comment for why an audit_events error
-  // degrades to "no events for any grant" rather than blanking the
-  // whole result the way an installation/organization lookup error
-  // does.
+  // degrades each row's own consumptionEvents/consumptionEventsUnavailable
+  // rather than blanking the whole result the way an installation/
+  // organization lookup error does.
   const eventsByGrantId =
     new Map<string, SharedDataConsumptionEvent[]>();
 
@@ -352,6 +385,9 @@ export async function listSharedDataStatus(
     }
   }
 
+  const consumptionEventsUnavailable =
+    auditError !== null;
+
   // One clock reading for the whole page, so two grants that lapse
   // either side of an evaluation cannot render inconsistently within a
   // single render.
@@ -372,6 +408,7 @@ export async function listSharedDataStatus(
           ),
         consumptionEvents:
           eventsByGrantId.get(grant.id) ?? [],
+        consumptionEventsUnavailable,
       }
     ),
   );
