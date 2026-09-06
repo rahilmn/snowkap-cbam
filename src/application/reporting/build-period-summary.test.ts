@@ -646,6 +646,49 @@ describe(
             {
               shipment_id: "ship-1",
               shipment_reference: "REF-001",
+              shipment_status: "READY",
+              line_id: "line-1",
+              line_number: 1,
+              cn_code: "25232100",
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 6, finding S5R6-A-GUID2): carries the shipment's own status on a dataset_superseded_lines entry, so a consumer can tell a LOCKED (unfixable through the normal flow) line apart from an editable one",
+      async () => {
+        const result =
+          await buildPeriodSummary(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow({ status: "LOCKED" })], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow({ id: "line-1", emission_determination: defaultDetermination }),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "1.1.0", embedded_emissions_tco2e: "1.39", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-2" }], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result.dataset_superseded_lines).toEqual(
+          [
+            {
+              shipment_id: "ship-1",
+              shipment_reference: "REF-001",
+              shipment_status: "LOCKED",
               line_id: "line-1",
               line_number: 1,
               cn_code: "25232100",

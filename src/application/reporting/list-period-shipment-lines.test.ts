@@ -164,6 +164,7 @@ describe(
             {
               shipment_id: "ship-1",
               shipment_reference: "REF-001",
+              shipment_status: "READY",
               line: expect.objectContaining({ id: "line-1", cn_code: "72081000" }),
               calculation: expect.objectContaining({ id: "calc-1", embedded_emissions_tco2e: "12.5" }),
             },

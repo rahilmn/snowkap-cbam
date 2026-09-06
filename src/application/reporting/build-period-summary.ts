@@ -27,6 +27,10 @@ import type {
 } from "../../domain/shared/ids";
 
 import type {
+  ShipmentStatus,
+} from "../../domain/shipments/types";
+
+import type {
   ReportingPeriod,
 } from "../../domain/shared/reporting-period";
 
@@ -105,6 +109,16 @@ export interface IncompletePeriodLine {
 export interface DatasetSupersededPeriodLine {
   shipment_id: ShipmentId;
   shipment_reference: string;
+  // 2026-09-07 (S5 review round 6, finding S5R6-A-GUID2). Lets the
+  // Reports page tell a LOCKED shipment's line apart from an editable
+  // one -- "redetermine this line/them before filing" is categorically
+  // impossible for a LOCKED shipment (shipments_update_own_org_not_terminal
+  // excludes LOCKED; transition-actions.tsx renders no control at all
+  // for one), and a LOCKED member shipment is the routine shape of an
+  // amendment (already fixed on the declaration detail/completeness-
+  // report screens, S5R3-VOCAB-B1/S5R6-A-B2) -- the period report had no
+  // way to make the same distinction at all.
+  shipment_status: ShipmentStatus;
   line_id: ShipmentLineId;
   line_number: number;
   cn_code: string;
@@ -387,6 +401,7 @@ export async function buildPeriodSummary(
           {
             shipment_id: entry.shipment_id,
             shipment_reference: entry.shipment_reference,
+            shipment_status: entry.shipment_status,
             line_id: entry.line.id,
             line_number: entry.line.line_number,
             cn_code: entry.line.cn_code,

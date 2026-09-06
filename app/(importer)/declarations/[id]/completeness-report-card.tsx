@@ -194,6 +194,38 @@ export function CompletenessReportCard(
                       <StatusBadge
                         statusKey={blockerReasonKey(blocker.reason)}
                       />
+
+                      {
+                        // 2026-09-07 (S5 review round 6, findings
+                        // S5R6-A-B2/S5R6-A-GUID2). The bare badge above
+                        // reads "redetermine this line" unconditionally
+                        // -- impossible for a LOCKED shipment's line
+                        // (shipments_update_own_org_not_terminal excludes
+                        // LOCKED; transition-actions.tsx renders no
+                        // control at all for one), and a LOCKED member
+                        // shipment is the ROUTINE shape of an amendment,
+                        // not an edge case (buildCompletenessReport
+                        // accepts LOCKED as lockable, same as
+                        // record_declaration_filed's own predicate). This
+                        // card's sibling `stale` branch already hedges
+                        // the identical fact via anyMemberShipmentLocked
+                        // -- the same coarse-grained ("at least one
+                        // member shipment is LOCKED," not which specific
+                        // one) signal, for the identical reason:
+                        // buildCompletenessReport's dataset-currency
+                        // check has no per-blocker shipment status to
+                        // report. Wording matches declarations/
+                        // actions.ts's own DATASET_SUPERSEDED message
+                        // (finding A2) rather than inventing new prose.
+                        blocker.reason === "LINE_DATASET_SUPERSEDED" && anyMemberShipmentLocked ? (
+                          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                            If this shipment has already been LOCKED (the
+                            routine case for an amendment), it cannot be
+                            redetermined through the normal declaration
+                            flow -- contact support.
+                          </p>
+                        ) : null
+                      }
                     </td>
                   </tr>
                 ),

@@ -522,9 +522,10 @@ function DatasetSupersededLinesCard(
         <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
           These lines are calculated and included in the totals above, but
           their default value was resolved against a regulatory dataset
-          that has since been corrected. Redetermine them before filing --
-          the filing gate will refuse a declaration that includes them
-          unchanged.
+          that has since been corrected -- the filing gate will refuse a
+          declaration that includes them unchanged. If a listed
+          shipment is still editable, redetermine that line before
+          filing; see each row below for whether that applies.
         </p>
       </div>
 
@@ -570,6 +571,30 @@ function DatasetSupersededLinesCard(
                     <StatusBadge
                       statusKey="blocker.LINE_DATASET_SUPERSEDED"
                     />
+
+                    {
+                      // 2026-09-07 (S5 review round 6, finding
+                      // S5R6-A-GUID2). "Redetermine this line" is
+                      // categorically impossible once the owning
+                      // shipment is LOCKED
+                      // (shipments_update_own_org_not_terminal excludes
+                      // LOCKED; transition-actions.tsx renders no
+                      // control at all for one) -- and a LOCKED member
+                      // shipment is the routine shape of an amendment,
+                      // not an edge case. Unlike the declaration
+                      // completeness card's own coarse-grained hedge
+                      // (S5R6-A-B2, which cannot name a specific
+                      // shipment), this table already names the exact
+                      // shipment per row, so the caveat is precise here.
+                      line.shipment_status === "LOCKED" ? (
+                        <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                          This shipment has already been LOCKED (the
+                          routine case for an amendment) -- it cannot be
+                          redetermined through the normal declaration
+                          flow. Contact support.
+                        </p>
+                      ) : null
+                    }
                   </td>
                 </tr>
               ),

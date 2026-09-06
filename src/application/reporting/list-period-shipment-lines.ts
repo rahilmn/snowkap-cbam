@@ -5,6 +5,7 @@ import type {
 import type {
   Shipment,
   ShipmentLine,
+  ShipmentStatus,
 } from "../../domain/shipments/types";
 
 import type {
@@ -95,6 +96,15 @@ interface CalculationResultRow {
 export interface PeriodShipmentLine {
   shipment_id: Shipment["id"];
   shipment_reference: string;
+  // 2026-09-07 (S5 review round 6, findings S5R6-A-B2/S5R6-A-GUID2).
+  // Lets a LINE_DATASET_SUPERSEDED consumer (build-period-summary.ts's
+  // own dataset_superseded_lines) tell a LOCKED shipment's line apart
+  // from an editable one -- "redetermine this line" is categorically
+  // impossible for the former (shipments_update_own_org_not_terminal
+  // excludes LOCKED; transition-actions.tsx renders no control at all
+  // for one), and a LOCKED member shipment is the routine shape of an
+  // amendment, not an edge case.
+  shipment_status: ShipmentStatus;
   line: ShipmentLine;
   calculation: PeriodLineCalculation | null;
 }
@@ -500,6 +510,7 @@ export async function listPeriodShipmentLines(
       {
         shipment_id: line.shipment_id,
         shipment_reference: shipment.reference,
+        shipment_status: shipment.status,
         line,
         calculation: calculationByLineId.get(line.id) ?? null,
       },
