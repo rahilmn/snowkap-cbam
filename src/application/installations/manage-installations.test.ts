@@ -200,18 +200,17 @@ describe(
     );
 
     it(
-      "returns an empty array on a fetch error",
+      "2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2): throws on a fetch error rather than degrading to [] -- a false 'no installations' would silently break every dependent dropdown",
       async () => {
-        const result =
-          await listInstallations(
+        await expect(
+          listInstallations(
             mockSupabase(
               { listResult: { data: null, error: { message: "denied" } } },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
@@ -239,6 +238,23 @@ describe(
               { id: "installation-1" },
             ),
           ],
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2's own sweep): throws on a fetch error rather than degrading to [], for consistency with listInstallations above",
+      async () => {
+        await expect(
+          listInstallationsByOperator(
+            mockSupabase(
+              { listResult: { data: null, error: { message: "denied" } } },
+            ),
+            orgId,
+            "operator-1" as never,
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );

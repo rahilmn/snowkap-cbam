@@ -849,6 +849,24 @@ describe(
         );
       },
     );
+
+    it(
+      "2026-09-07 (S5 review round 3, finding S5R3-SES-02): throws on a fetch error rather than degrading to [] -- app/accept-invitation/page.tsx, app/onboarding/page.tsx and app/page.tsx are the only ways a signed-in invitee with no org yet can discover a pending invitation, and none of them wrap this in try/catch",
+      async () => {
+        await expect(
+          listMyPendingInvitations(
+            mockUserScopedSupabase(
+              {
+                selectResult: { data: null, error: { message: "denied" } },
+              },
+            ),
+            "me@example.com",
+          ),
+        ).rejects.toThrow(
+          "denied",
+        );
+      },
+    );
   },
 );
 

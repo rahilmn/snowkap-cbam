@@ -101,21 +101,20 @@ describe(
     );
 
     it(
-      "degrades to an empty array on error, matching the prior inline behaviour in team/page.tsx",
+      "2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2): throws on a fetch error rather than degrading to [] -- app/team/page.tsx has no try/catch of its own, so this now reaches app/error.tsx instead of a false 'no team members'",
       async () => {
         const { client } =
           mockSupabase(
             { error: { message: "denied" } },
           );
 
-        const result =
-          await listOrgMembers(
+        await expect(
+          listOrgMembers(
             client,
             "org-1" as never,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );

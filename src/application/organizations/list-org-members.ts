@@ -51,11 +51,19 @@ export async function listOrgMembers(
       { p_org_id: orgId },
     );
 
-  if (error || !data) {
-    return [];
+  // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2). THROWS on a
+  // genuine query error rather than degrading to [] -- the one caller
+  // (app/team/page.tsx) is a plain server component with no try/catch
+  // of its own, and this is one of the page's two main sections, so a
+  // transport failure previously rendered as the affirmative "no team
+  // members" instead of failing loud.
+  if (error) {
+    throw new Error(
+      `list-org-members: org members fetch failed (${error.message}).`,
+    );
   }
 
-  return (data as ListOrgMembersRpcRow[]).map(
+  return ((data ?? []) as ListOrgMembersRpcRow[]).map(
     (row) => (
       {
         membership_id: row.membership_id,

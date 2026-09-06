@@ -1336,20 +1336,19 @@ describe(
     );
 
     it(
-      "returns an empty array on a fetch error",
+      "2026-09-07 (S5 review round 3, finding S5R3-SES-02): throws on a fetch error rather than degrading to [] -- app/accept-invitation/page.tsx has no try/catch of its own, so this now reaches app/error.tsx instead of a false 'No pending invitations'",
       async () => {
-        const result =
-          await listMyPendingSharingGrantInvitations(
+        await expect(
+          listMyPendingSharingGrantInvitations(
             makeMockSupabase(
               {
                 sharing_grants: { data: null, error: { message: "denied" } },
               },
             ),
             "buyer@example.com",
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );
@@ -1391,7 +1390,7 @@ describe(
     );
 
     it(
-      "returns an empty array (never a silent 'Unknown' placeholder) when either follow-up name lookup errors -- distinguishes a genuine lookup failure from a legitimately-empty result (2026-08-29 mandatory review fix)",
+      "2026-09-07 (S5 review round 3, finding S5R3-SES-02): throws (never a silent [] / 'Unknown' placeholder) when either follow-up name lookup errors -- a genuinely-fetched, non-empty grants list must not be blanked away, reproducing the same false 'No pending invitations' one step later",
       async () => {
         const bootstrapRow =
           {
@@ -1400,8 +1399,8 @@ describe(
             invited_email: "buyer@example.com",
           };
 
-        const result =
-          await listMyPendingSharingGrantInvitations(
+        await expect(
+          listMyPendingSharingGrantInvitations(
             makeMockSupabase(
               {
                 sharing_grants: { data: [bootstrapRow], error: null },
@@ -1410,10 +1409,9 @@ describe(
               },
             ),
             "buyer@example.com",
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "statement timeout",
         );
       },
     );

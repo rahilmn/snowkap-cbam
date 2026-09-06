@@ -860,12 +860,24 @@ export async function listMyPendingSharingGrantInvitations(
       .eq("invited_email", callerEmail.trim().toLowerCase())
       .order("created_at", { ascending: false });
 
-  if (error || !data) {
-    return [];
+  // 2026-09-07 (S5 review round 3, finding S5R3-SES-02). THROWS on a
+  // genuine query error rather than degrading to [] -- this function's
+  // one caller (app/accept-invitation/page.tsx) folds an empty result
+  // here together with an empty listMyPendingInvitations result into
+  // "No pending invitations for {email}," a message that specifically
+  // tells a real invitee their invitation does not exist and offers
+  // recovery steps (wrong address, expired, never set a password) --
+  // none of which apply when the actual cause is a failed fetch. A
+  // real invited user spending a support cycle on a false negative here
+  // is the exact failure this same fix pattern closes everywhere else.
+  if (error) {
+    throw new Error(
+      `manage-sharing-grants: pending sharing-grant invitations fetch failed (${error.message}).`,
+    );
   }
 
   const grants =
-    (data as SharingGrantRow[]).map(
+    ((data ?? []) as SharingGrantRow[]).map(
       toSharingGrant,
     );
 
@@ -905,8 +917,15 @@ export async function listMyPendingSharingGrantInvitations(
       ],
     );
 
+  // 2026-09-07 (S5 review round 3, finding S5R3-SES-02). Same posture
+  // as the sharing_grants fetch above: a genuinely-fetched, non-empty
+  // grants list must not be blanked to [] just because the name lookup
+  // failed -- that reproduces the identical false "no pending
+  // invitations" outcome one step later.
   if (orgError || installationError) {
-    return [];
+    throw new Error(
+      `manage-sharing-grants: grantor/installation name lookup failed (${(orgError ?? installationError)?.message ?? "unknown"}).`,
+    );
   }
 
   const orgNameById =

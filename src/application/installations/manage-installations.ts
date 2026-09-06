@@ -76,11 +76,24 @@ export async function listInstallations(
       .eq("org_id", orgId)
       .order("name", { ascending: true });
 
-  if (error || !data) {
-    return [];
+  // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2). THROWS on a
+  // genuine query error rather than degrading to [] -- every caller
+  // (app/(importer)/external-emissions/page.tsx, app/(importer)/
+  // external-operators/page.tsx, app/(producer)/emission-data/page.tsx,
+  // app/(producer)/installations/page.tsx, app/(producer)/sharing/
+  // page.tsx) is a plain server component with no try/catch of its own,
+  // so this reaches app/error.tsx the same way every other sibling
+  // fixed this same S5 phase does. A transport failure previously
+  // rendered as "no installations" -- breaking, among other things, the
+  // installation dropdown every emission-data/sharing form depends on,
+  // with no signal that anything had failed.
+  if (error) {
+    throw new Error(
+      `manage-installations: installations fetch failed (${error.message}).`,
+    );
   }
 
-  return (data as InstallationRow[]).map(
+  return ((data ?? []) as InstallationRow[]).map(
     toInstallation,
   );
 }
@@ -100,11 +113,16 @@ export async function listInstallationsByOperator(
       .eq("operator_id", operatorId)
       .order("name", { ascending: true });
 
-  if (error || !data) {
-    return [];
+  // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2's own sweep --
+  // consistency with listInstallations above; this function currently
+  // has no live caller outside its own test).
+  if (error) {
+    throw new Error(
+      `manage-installations: installations-by-operator fetch failed (${error.message}).`,
+    );
   }
 
-  return (data as InstallationRow[]).map(
+  return ((data ?? []) as InstallationRow[]).map(
     toInstallation,
   );
 }

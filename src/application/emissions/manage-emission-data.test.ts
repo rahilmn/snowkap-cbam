@@ -242,18 +242,17 @@ describe(
     );
 
     it(
-      "returns an empty array on a fetch error",
+      "2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2): throws on a fetch error rather than degrading to [] -- a false 'no emission data recorded yet' on the producer's own register",
       async () => {
-        const result =
-          await listEmissionData(
+        await expect(
+          listEmissionData(
             makeMockSupabase(
               { emission_data: { data: null, error: { message: "denied" } } },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );

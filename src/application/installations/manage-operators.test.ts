@@ -156,18 +156,17 @@ describe(
     );
 
     it(
-      "returns an empty array on a fetch error",
+      "2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2): throws on a fetch error rather than degrading to [] -- this is the primary content of every page that calls it",
       async () => {
-        const result =
-          await listOperators(
+        await expect(
+          listOperators(
             mockSupabase(
               { listResult: { data: null, error: { message: "denied" } } },
             ),
             orgId,
-          );
-
-        expect(result).toEqual(
-          [],
+          ),
+        ).rejects.toThrow(
+          "denied",
         );
       },
     );

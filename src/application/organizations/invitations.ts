@@ -537,11 +537,26 @@ export async function listMyPendingInvitations(
         { ascending: false },
       );
 
-  if (error || !data) {
-    return [];
+  // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2, part of the
+  // same S5R3-SES-02 finding as manage-sharing-grants.ts's sibling
+  // fix). THROWS on a genuine query error rather than degrading to [].
+  // This function's callers (app/accept-invitation/page.tsx,
+  // app/onboarding/page.tsx, app/page.tsx) are the ONLY way a signed-in
+  // invitee with no org membership yet can discover a pending
+  // invitation waiting for them -- app/page.tsx's own doc comment
+  // records the real incident this screen exists to prevent (a real
+  // invitee landing on a dead end with no mention of their invitation).
+  // A transport failure here previously rendered as the affirmative "No
+  // pending invitations for {email}," complete with recovery steps that
+  // do not apply (wrong address, expired, never set a password) -- a
+  // false negative on exactly the fact this screen exists to surface.
+  if (error) {
+    throw new Error(
+      `invitations: pending organization invitations fetch failed (${error.message}).`,
+    );
   }
 
-  return (data as MyInvitationRow[]).map(
+  return ((data ?? []) as MyInvitationRow[]).map(
     (row) => {
       const orgRelation =
         Array.isArray(row.organizations)

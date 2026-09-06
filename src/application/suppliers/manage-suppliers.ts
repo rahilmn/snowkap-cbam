@@ -69,11 +69,19 @@ export async function listSuppliers(
       .eq("org_id", orgId)
       .order("name", { ascending: true });
 
-  if (error || !data) {
-    return [];
+  // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2). THROWS on a
+  // genuine query error rather than degrading to [] -- the one caller
+  // (app/(importer)/suppliers/page.tsx) is a plain server component
+  // with no try/catch of its own, and this IS the page's sole content
+  // section, so a transport failure previously rendered as the
+  // affirmative "no suppliers" instead of failing loud.
+  if (error) {
+    throw new Error(
+      `manage-suppliers: suppliers fetch failed (${error.message}).`,
+    );
   }
 
-  return (data as SupplierRow[]).map(
+  return ((data ?? []) as SupplierRow[]).map(
     toSupplier,
   );
 }

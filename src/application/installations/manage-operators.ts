@@ -69,11 +69,20 @@ export async function listOperators(
       .eq("org_id", orgId)
       .order("name", { ascending: true });
 
-  if (error || !data) {
-    return [];
+  // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2). THROWS on a
+  // genuine query error rather than degrading to [] -- both callers
+  // (app/(producer)/installations/page.tsx, app/(importer)/external-
+  // operators/page.tsx) are plain server components with no try/catch
+  // of their own, and this IS the primary content of each page, so a
+  // transport failure previously rendered as the affirmative "no
+  // operators" instead of failing loud.
+  if (error) {
+    throw new Error(
+      `manage-operators: operators fetch failed (${error.message}).`,
+    );
   }
 
-  return (data as OperatorRow[]).map(
+  return ((data ?? []) as OperatorRow[]).map(
     toOperator,
   );
 }

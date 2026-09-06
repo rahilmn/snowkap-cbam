@@ -742,11 +742,21 @@ export async function listEvidenceFiles(
       .eq("org_id", orgId)
       .order("created_at", { ascending: false });
 
-  if (error || !data) {
-    return [];
+  // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2). THROWS on a
+  // genuine query error rather than degrading to [] -- both callers
+  // (app/(producer)/emission-data/page.tsx, app/(importer)/external-
+  // emissions/page.tsx) are plain server components with no try/catch
+  // of their own, so this reaches app/error.tsx the same way every
+  // other sibling fixed this same S5 phase does. A transport failure
+  // previously rendered as "no evidence files" -- a false all-clear on
+  // the exact records a producer/importer relies on for verification.
+  if (error) {
+    throw new Error(
+      `upload-evidence: evidence_files fetch failed (${error.message}).`,
+    );
   }
 
-  return (data as EvidenceFileRow[]).map(
+  return ((data ?? []) as EvidenceFileRow[]).map(
     toEvidenceFile,
   );
 }

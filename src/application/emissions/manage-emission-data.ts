@@ -65,11 +65,23 @@ export async function listEmissionData(
       .eq("entered_by_org_id", orgId)
       .order("created_at", { ascending: false });
 
-  if (error || !data) {
-    return [];
+  // 2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2). THROWS on a
+  // genuine query error rather than degrading to [] -- matching the
+  // throw-is-for-infrastructure-failures fix already applied to the
+  // sibling read services this same S5 phase. Both callers
+  // (app/(producer)/emission-data/page.tsx, app/(importer)/external-
+  // emissions/page.tsx) are plain server components with no try/catch
+  // of their own, so this reaches app/error.tsx the same way
+  // listShipments/listDeclarations already do. A transport failure here
+  // previously rendered as "no emission data recorded yet" -- a false
+  // all-clear on the producer's own emissions register.
+  if (error) {
+    throw new Error(
+      `manage-emission-data: emission_data fetch failed (${error.message}).`,
+    );
   }
 
-  return (data as EmissionDataRow[]).map(
+  return ((data ?? []) as EmissionDataRow[]).map(
     toEmissionData,
   );
 }

@@ -158,6 +158,22 @@ describe(
         );
       },
     );
+
+    it(
+      "2026-09-07 (S5 review round 3, finding S5R3-EMPTY-B2): throws on a fetch error rather than degrading to [] -- this is the page's sole content section",
+      async () => {
+        await expect(
+          listSuppliers(
+            mockSupabase(
+              { listResult: { data: null, error: { message: "denied" } } },
+            ),
+            orgId,
+          ),
+        ).rejects.toThrow(
+          "denied",
+        );
+      },
+    );
   },
 );
 
