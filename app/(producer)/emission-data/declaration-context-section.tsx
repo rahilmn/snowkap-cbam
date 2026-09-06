@@ -234,7 +234,7 @@ function DeclarationContextForm(
         />
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+      <label className="flex min-h-11 items-center gap-2 text-sm text-[var(--text-primary)]">
         <input
           type="checkbox"
           name="usesPurchasedPrecursors"
@@ -245,7 +245,7 @@ function DeclarationContextForm(
         Uses CBAM-covered material purchased from another producer
       </label>
 
-      <label className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+      <label className="flex min-h-11 items-center gap-2 text-sm text-[var(--text-primary)]">
         <input
           type="checkbox"
           name="verifierReportDeclared"
