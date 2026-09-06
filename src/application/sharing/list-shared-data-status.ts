@@ -185,6 +185,79 @@ function toConsumptionEvent(
   };
 }
 
+// 2026-09-06/2026-09-07 (supabase/config.toml `max_rows = 1000`; S5
+// review round 3, findings S5R3-SES-01/S5R3-VOCAB-B2/S5R3-SHARE-B1 --
+// the identical bug found independently by three reviewers across two
+// dimension-scopes). An un-paged PostgREST query returns HTTP 200 with
+// `error: null` and silently caps at 1000 rows -- indistinguishable
+// from a genuinely small result set. A grantor org with many issued
+// grants and/or a long consumption history can exceed 1000
+// 'sharing_grant.data_consumed' events combined across all of them; the
+// un-paged query below previously kept only the 1000 most-recent-
+// overall events (occurred_at DESC), silently dropping the older tail
+// -- disproportionately emptying a low-activity grant's own history
+// when a handful of high-volume grants dominate the top 1000, with no
+// signal anywhere that anything was dropped. This is the same defect
+// class already fixed in list-period-shipment-lines.ts,
+// compute-declaration-draft-facts.ts's shipments loop, and
+// fetchMemberShipments's batching -- paged here the same way.
+const AUDIT_EVENTS_PAGE_SIZE = 1000;
+
+async function fetchAllConsumptionAuditEvents(
+  supabase: SupabaseClient,
+  orgId: string,
+  grantIds: string[],
+): Promise<{ data: AuditEventRow[] | null; error: { message: string } | null }> {
+  if (grantIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  const allRows: AuditEventRow[] =
+    [];
+
+  let offset =
+    0;
+
+  for (;;) {
+    const { data, error } =
+      await supabase
+        .from("audit_events")
+        .select("id, occurred_at, actor_user_id, aggregate_id, payload")
+        .eq("org_id", orgId)
+        .eq("event_type", "sharing_grant.data_consumed")
+        .eq("aggregate_type", "SHARING_GRANT")
+        .in("aggregate_id", grantIds)
+        // `id` is a second, deterministic sort key purely to make
+        // `.range()` pagination stable across pages when two events
+        // share an occurred_at -- audit_events.id is a random UUID
+        // (20260828070000), not sequential, so its own ordering carries
+        // no meaning beyond breaking ties consistently.
+        .order("occurred_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(offset, offset + AUDIT_EVENTS_PAGE_SIZE - 1);
+
+    if (error) {
+      return { data: null, error };
+    }
+
+    const page =
+      (data as AuditEventRow[] | null) ?? [];
+
+    allRows.push(
+      ...page,
+    );
+
+    if (page.length < AUDIT_EVENTS_PAGE_SIZE) {
+      break;
+    }
+
+    offset +=
+      AUDIT_EVENTS_PAGE_SIZE;
+  }
+
+  return { data: allRows, error: null };
+}
+
 /**
  * Read model for master plan §27 screen 32 ("Shared-data status" --
  * "who sees what, consumption events"). Per grant issued BY orgId
@@ -323,14 +396,11 @@ export async function listSharedDataStatus(
           ? supabase.rpc("sharing_counterparty_org_names")
           : Promise.resolve({ data: [] as OrgNameRow[], error: null }),
 
-        supabase
-          .from("audit_events")
-          .select("id, occurred_at, actor_user_id, aggregate_id, payload")
-          .eq("org_id", orgId)
-          .eq("event_type", "sharing_grant.data_consumed")
-          .eq("aggregate_type", "SHARING_GRANT")
-          .in("aggregate_id", grantIds)
-          .order("occurred_at", { ascending: false }),
+        fetchAllConsumptionAuditEvents(
+          supabase,
+          orgId,
+          grantIds,
+        ),
       ],
     );
 

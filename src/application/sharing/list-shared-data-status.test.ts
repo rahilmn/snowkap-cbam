@@ -97,6 +97,13 @@ function makeMockSupabase(
       eq: () => chain,
       in: () => chain,
       order: () => chain,
+      // 2026-09-07 (S5 review round 3, findings S5R3-SES-01/S5R3-VOCAB-B2/
+      // S5R3-SHARE-B1): fetchAllConsumptionAuditEvents now pages the
+      // audit_events query with .range(). Every existing fixture here
+      // returns well under AUDIT_EVENTS_PAGE_SIZE rows, so the paging
+      // loop always terminates after its first page -- this mock stays a
+      // one-shot resolver, .range() is a pure pass-through.
+      range: () => chain,
       then: (
         resolve: (value: { data: unknown; error: unknown }) => unknown,
         reject: (reason: unknown) => unknown,
@@ -561,6 +568,125 @@ describe(
 
         expect(result[0]!.consumptionEvents).toEqual(
           [],
+        );
+
+        expect(result[0]!.consumptionEventsUnavailable).toBe(
+          false,
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 3, findings S5R3-SES-01/S5R3-VOCAB-B2/S5R3-SHARE-B1): pages past PostgREST's max_rows cap instead of silently truncating -- a combined consumption history over 1000 events is not cut off at the 1000th",
+      async () => {
+        const firstPage =
+          Array.from(
+            { length: 1000 },
+            (_, index) => (
+              {
+                id: `event-page1-${index}`,
+                occurred_at: "2026-02-01T00:00:00Z",
+                actor_user_id: null,
+                aggregate_id: "grant-1",
+                payload: {},
+              }
+            ),
+          );
+
+        const secondPage =
+          [
+            {
+              id: "event-page2-0",
+              occurred_at: "2026-01-01T00:00:00Z",
+              actor_user_id: null,
+              aggregate_id: "grant-1",
+              payload: {},
+            },
+          ];
+
+        let auditEventsCallCount =
+          0;
+
+        const rangesRequested: [number, number][] =
+          [];
+
+        const supabase =
+          {
+            from: (table: string) => {
+              if (table !== "audit_events") {
+                return {
+                  select: () => ({
+                    eq: () => ({
+                      order: () =>
+                        Promise.resolve(
+                          table === "sharing_grants"
+                            ? { data: [directGrantRow], error: null }
+                            : { data: [{ id: "installation-1", name: "Duisburg Plant" }], error: null },
+                        ),
+                    }),
+                    in: () =>
+                      Promise.resolve(
+                        { data: [{ id: "installation-1", name: "Duisburg Plant" }], error: null },
+                      ),
+                  }),
+                } as never;
+              }
+
+              const chain: Record<string, unknown> = {
+                select: () => chain,
+                eq: () => chain,
+                in: () => chain,
+                order: () => chain,
+                range: (from: number, to: number) => {
+                  rangesRequested.push(
+                    [from, to],
+                  );
+
+                  return chain;
+                },
+                then: (
+                  resolve: (value: { data: unknown; error: unknown }) => unknown,
+                ) => {
+                  auditEventsCallCount +=
+                    1;
+
+                  return Promise.resolve(
+                    auditEventsCallCount === 1
+                      ? { data: firstPage, error: null }
+                      : { data: secondPage, error: null },
+                  ).then(
+                    resolve,
+                  );
+                },
+              };
+
+              return chain;
+            },
+            rpc: () =>
+              Promise.resolve(
+                { data: [{ id: "org-2", name: "Acme Steel GmbH" }], error: null },
+              ),
+          } as never;
+
+        const result =
+          await listSharedDataStatus(
+            supabase,
+            orgId,
+          );
+
+        expect(auditEventsCallCount).toBe(
+          2,
+        );
+
+        expect(rangesRequested).toEqual(
+          [
+            [0, 999],
+            [1000, 1999],
+          ],
+        );
+
+        expect(result[0]!.consumptionEvents).toHaveLength(
+          1001,
         );
 
         expect(result[0]!.consumptionEventsUnavailable).toBe(
