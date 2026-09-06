@@ -309,37 +309,75 @@ async function fetchAllConsumptionAuditEvents(
  * an empty array, so the caller can render "couldn't check" rather than
  * the affirmative "not yet used".
  */
+// 2026-09-07 (supabase/config.toml `max_rows = 1000`; S5 review round
+// 4, finding S5R4-SHARE-02). sharing_grants rows are NEVER deleted
+// anywhere in this codebase -- revoking only flips `status` to
+// REVOKED, by explicit design (history survives revocation, master
+// plan SS31) -- so a long-lived grantor's row count only ever grows
+// with every issue/revoke/re-issue cycle, and will eventually cross
+// 1000 for any sufficiently active producer. See fetchAllConsumptionAuditEvents
+// just below for the same paging convention already applied to this
+// function's own audit_events sub-query (round 3, commit 7e579a2) --
+// this is the PRIMARY query three lines above the one that fix left
+// unpaged.
+const SHARING_GRANTS_PAGE_SIZE =
+  1000;
+
 export async function listSharedDataStatus(
   supabase: SupabaseClient,
   orgId: OrganizationId,
 ): Promise<SharedDataStatusRow[]> {
-  const { data: grantData, error: grantError } =
-    await supabase
-      .from("sharing_grants")
-      .select(
-        SHARING_GRANT_COLUMNS,
-      )
-      .eq("grantor_org_id", orgId)
-      .order("created_at", { ascending: false });
+  const grantRows: SharingGrantRow[] =
+    [];
 
-  // 2026-09-06 (S5 review remediation round 2, finding S5R2-B-01).
-  // THROWS on a genuine query error, matching the throw-is-for-
-  // infrastructure-failures fix already applied to eight sibling read
-  // services this same S5 phase (b23e500, 662d843, a062226).
-  // Previously degraded to [], which the caller (app/(producer)/
-  // sharing/status/page.tsx, no try/catch of its own) rendered as the
-  // affirmative "No data-sharing grants issued yet -- issue one from
-  // the Sharing screen to see who holds access here" -- a false
-  // all-clear on the exact privacy/access-transparency boundary this
-  // screen exists to make visible.
-  if (grantError || !grantData) {
-    throw new Error(
-      `sharing: sharing_grants fetch failed (${grantError?.message ?? "no rows"}).`,
+  let grantOffset =
+    0;
+
+  for (;;) {
+    const { data, error: grantError } =
+      await supabase
+        .from("sharing_grants")
+        .select(
+          SHARING_GRANT_COLUMNS,
+        )
+        .eq("grantor_org_id", orgId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(grantOffset, grantOffset + SHARING_GRANTS_PAGE_SIZE - 1);
+
+    // 2026-09-06 (S5 review remediation round 2, finding S5R2-B-01).
+    // THROWS on a genuine query error, matching the throw-is-for-
+    // infrastructure-failures fix already applied to eight sibling read
+    // services this same S5 phase (b23e500, 662d843, a062226).
+    // Previously degraded to [], which the caller (app/(producer)/
+    // sharing/status/page.tsx, no try/catch of its own) rendered as the
+    // affirmative "No data-sharing grants issued yet -- issue one from
+    // the Sharing screen to see who holds access here" -- a false
+    // all-clear on the exact privacy/access-transparency boundary this
+    // screen exists to make visible.
+    if (grantError || !data) {
+      throw new Error(
+        `sharing: sharing_grants fetch failed (${grantError?.message ?? "no rows"}).`,
+      );
+    }
+
+    const page =
+      data as SharingGrantRow[];
+
+    grantRows.push(
+      ...page,
     );
+
+    if (page.length < SHARING_GRANTS_PAGE_SIZE) {
+      break;
+    }
+
+    grantOffset +=
+      SHARING_GRANTS_PAGE_SIZE;
   }
 
   const grants =
-    (grantData as SharingGrantRow[]).map(
+    grantRows.map(
       toSharingGrant,
     );
 

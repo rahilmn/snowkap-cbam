@@ -152,6 +152,13 @@ function makeMockSupabase(
         return chain;
       },
       order: () => chain,
+      // 2026-09-07 (S5 review round 4, finding S5R4-SHARE-02): several
+      // list queries now page with .range(). Every fixture here
+      // returns well under SHARING_GRANTS_PAGE_SIZE rows, so the
+      // paging loop always terminates after its first page -- this
+      // mock stays a one-shot resolver, .range() is a pure
+      // pass-through.
+      range: () => chain,
       insert: (payload: unknown) => {
         recorder.ops.push({ table, op: "insert", payload, filters });
         return chain;

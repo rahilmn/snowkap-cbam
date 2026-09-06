@@ -46,26 +46,65 @@ import {
 // own) rendered as the affirmative "No data-sharing grants issued yet"
 // -- a false all-clear on the exact privacy/access-transparency
 // boundary this screen exists for.
+//
+// 2026-09-07 (supabase/config.toml `max_rows = 1000`; S5 review round
+// 4, finding S5R4-SHARE-02). Both also now page with .range(). Unlike
+// most tables this defect class has been found on, sharing_grants rows
+// are NEVER deleted anywhere in this codebase -- revoking only flips
+// `status` to REVOKED, by explicit design (history survives
+// revocation, master plan SS31). So a long-lived producer/importer
+// relationship's row count only ever grows with every issue/revoke/
+// re-issue cycle, making truncation here not merely plausible but
+// eventually inevitable for any sufficiently long-lived, active org --
+// at which point the oldest grants (created_at DESC) silently vanish
+// from the grant-management screen with no error or signal.
+const SHARING_GRANTS_PAGE_SIZE =
+  1000;
+
 export async function listSharingGrantsIssued(
   supabase: SupabaseClient,
   orgId: OrganizationId,
 ): Promise<SharingGrant[]> {
-  const { data, error } =
-    await supabase
-      .from("sharing_grants")
-      .select(
-        SHARING_GRANT_COLUMNS,
-      )
-      .eq("grantor_org_id", orgId)
-      .order("created_at", { ascending: false });
+  const rows: SharingGrantRow[] =
+    [];
 
-  if (error || !data) {
-    throw new Error(
-      `sharing: issued grants fetch failed (${error?.message ?? "no rows"}).`,
+  let offset =
+    0;
+
+  for (;;) {
+    const { data, error } =
+      await supabase
+        .from("sharing_grants")
+        .select(
+          SHARING_GRANT_COLUMNS,
+        )
+        .eq("grantor_org_id", orgId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(offset, offset + SHARING_GRANTS_PAGE_SIZE - 1);
+
+    if (error || !data) {
+      throw new Error(
+        `sharing: issued grants fetch failed (${error?.message ?? "no rows"}).`,
+      );
+    }
+
+    const page =
+      data as SharingGrantRow[];
+
+    rows.push(
+      ...page,
     );
+
+    if (page.length < SHARING_GRANTS_PAGE_SIZE) {
+      break;
+    }
+
+    offset +=
+      SHARING_GRANTS_PAGE_SIZE;
   }
 
-  return (data as SharingGrantRow[]).map(
+  return rows.map(
     toSharingGrant,
   );
 }
@@ -74,22 +113,46 @@ export async function listSharingGrantsReceived(
   supabase: SupabaseClient,
   orgId: OrganizationId,
 ): Promise<SharingGrant[]> {
-  const { data, error } =
-    await supabase
-      .from("sharing_grants")
-      .select(
-        SHARING_GRANT_COLUMNS,
-      )
-      .eq("grantee_org_id", orgId)
-      .order("created_at", { ascending: false });
+  const rows: SharingGrantRow[] =
+    [];
 
-  if (error || !data) {
-    throw new Error(
-      `sharing: received grants fetch failed (${error?.message ?? "no rows"}).`,
+  let offset =
+    0;
+
+  for (;;) {
+    const { data, error } =
+      await supabase
+        .from("sharing_grants")
+        .select(
+          SHARING_GRANT_COLUMNS,
+        )
+        .eq("grantee_org_id", orgId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(offset, offset + SHARING_GRANTS_PAGE_SIZE - 1);
+
+    if (error || !data) {
+      throw new Error(
+        `sharing: received grants fetch failed (${error?.message ?? "no rows"}).`,
+      );
+    }
+
+    const page =
+      data as SharingGrantRow[];
+
+    rows.push(
+      ...page,
     );
+
+    if (page.length < SHARING_GRANTS_PAGE_SIZE) {
+      break;
+    }
+
+    offset +=
+      SHARING_GRANTS_PAGE_SIZE;
   }
 
-  return (data as SharingGrantRow[]).map(
+  return rows.map(
     toSharingGrant,
   );
 }

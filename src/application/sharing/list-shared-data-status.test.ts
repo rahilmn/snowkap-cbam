@@ -614,15 +614,25 @@ describe(
           {
             from: (table: string) => {
               if (table !== "audit_events") {
+                // 2026-09-07 (S5 review round 4, finding S5R4-SHARE-02):
+                // the sharing_grants query now pages with .range() too
+                // (two .order() calls then .range()). This fixture
+                // returns a single row, well under
+                // SHARING_GRANTS_PAGE_SIZE, so the paging loop always
+                // terminates after its first page.
                 return {
                   select: () => ({
                     eq: () => ({
-                      order: () =>
-                        Promise.resolve(
-                          table === "sharing_grants"
-                            ? { data: [directGrantRow], error: null }
-                            : { data: [{ id: "installation-1", name: "Duisburg Plant" }], error: null },
-                        ),
+                      order: () => ({
+                        order: () => ({
+                          range: () =>
+                            Promise.resolve(
+                              table === "sharing_grants"
+                                ? { data: [directGrantRow], error: null }
+                                : { data: [{ id: "installation-1", name: "Duisburg Plant" }], error: null },
+                            ),
+                        }),
+                      }),
                     }),
                     in: () =>
                       Promise.resolve(
