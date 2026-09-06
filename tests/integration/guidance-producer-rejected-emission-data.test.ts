@@ -267,9 +267,50 @@ describe.skipIf(!localSupabaseReachable)(
           `S5 Guidance Rejected Test Installation ${runId}`,
         );
 
+        expect(result[0]?.installation_provenance).toBe(
+          "OPERATOR_PROVIDED",
+        );
+
         expect(result[0]?.rejection_reason).toBe(
           "Live integration test: missing supporting evidence",
         );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding EF-B2/S5R-B2): a DISCARDED-after-rejection record is never returned -- it can never be resubmitted, so surfacing it as REQUIRED would be permanent and unclearable",
+      async () => {
+        await serviceClient
+          .from("emission_data")
+          .update(
+            { status: "DISCARDED" },
+          )
+          .eq(
+            "id",
+            rejectedEmissionDataId,
+          );
+
+        try {
+          const result =
+            await listRejectedEmissionDataForGuidance(
+              memberClient,
+              orgId as never,
+            );
+
+          expect(result).toHaveLength(
+            0,
+          );
+        } finally {
+          await serviceClient
+            .from("emission_data")
+            .update(
+              { status: "DRAFT" },
+            )
+            .eq(
+              "id",
+              rejectedEmissionDataId,
+            );
+        }
       },
     );
   },

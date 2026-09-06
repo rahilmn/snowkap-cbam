@@ -293,7 +293,7 @@ describe(
                   { id: "ed-1", installation_id: "inst-1", rejection_reason: "Missing evidence" },
                 ],
                 installationRows: [
-                  { id: "inst-1", name: "Steel Works A" },
+                  { id: "inst-1", name: "Steel Works A", provenance: "OPERATOR_PROVIDED" },
                 ],
               },
             ),
@@ -348,7 +348,7 @@ describe(
     );
 
     it(
-      "2026-09-06 (S5): never queries emission_data for an org that holds only IMPORTER_DECLARANT -- cheap, correct skip, not merely an empty result",
+      "2026-09-06 (S5 review remediation, finding D2/EF-B1): DOES query emission_data for an org that holds only IMPORTER_DECLARANT -- owner decision D2 lets such an org record IMPORTER_ENTERED emission_data, submit it, and have it rejected too, so skipping the fetch previously hid a real REQUIRED item behind a false 'nothing needs your attention'",
       async () => {
         const result =
           await deriveGuidanceItems(
@@ -358,15 +358,33 @@ describe(
                   { id: "ed-1", installation_id: "inst-1", rejection_reason: null },
                 ],
                 installationRows: [
-                  { id: "inst-1", name: "Steel Works A" },
+                  { id: "inst-1", name: "External Supplier B", provenance: "IMPORTER_ENTERED" },
                 ],
               },
             ),
             context,
           );
 
-        expect(result).toEqual(
-          { status: "OK", items: [] },
+        expect(result.status).toBe(
+          "OK",
+        );
+
+        if (result.status !== "OK") {
+          throw new Error(
+            "expected OK",
+          );
+        }
+
+        expect(result.items).toHaveLength(
+          1,
+        );
+
+        expect(result.items[0]?.rule).toBe(
+          "PRODUCER_REJECTED",
+        );
+
+        expect(result.items[0]?.href).toBe(
+          "/external-emissions",
         );
       },
     );

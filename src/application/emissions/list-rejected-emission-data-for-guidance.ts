@@ -19,6 +19,7 @@ interface RejectedEmissionDataRow {
 interface InstallationNameRow {
   id: string;
   name: string;
+  provenance: string;
 }
 
 /**
@@ -47,7 +48,18 @@ export async function listRejectedEmissionDataForGuidance(
         "id, installation_id, rejection_reason",
       )
       .eq("entered_by_org_id", orgId)
-      .eq("verification_status", "REJECTED");
+      .eq("verification_status", "REJECTED")
+      // 2026-09-06 (S5 review remediation, finding EF-B2/S5R-B2). DISCARD
+      // is allowed from DRAFT regardless of verification_status and
+      // deliberately leaves verification_status untouched (see
+      // src/domain/emissions/emission-data-lifecycle.ts), so a
+      // discarded-after-rejection record still matches
+      // verification_status='REJECTED' -- but DISCARDED is terminal (no
+      // transition returns it to DRAFT), so SUBMIT_FOR_VERIFICATION can
+      // never succeed on it again. Without this filter the guidance item
+      // is permanent and, being REQUIRED, undismissable. Only a DRAFT
+      // record is actually resubmittable.
+      .eq("status", "DRAFT");
 
   if (recordError) {
     throw new Error(
@@ -73,7 +85,7 @@ export async function listRejectedEmissionDataForGuidance(
     await supabase
       .from("installations")
       .select(
-        "id, name",
+        "id, name, provenance",
       )
       .in("id", installationIds);
 
@@ -83,10 +95,10 @@ export async function listRejectedEmissionDataForGuidance(
     );
   }
 
-  const installationNameById =
-    new Map<string, string>(
+  const installationById =
+    new Map<string, InstallationNameRow>(
       ((installationRows ?? []) as InstallationNameRow[]).map(
-        (row) => [row.id, row.name],
+        (row) => [row.id, row],
       ),
     );
 
@@ -95,7 +107,14 @@ export async function listRejectedEmissionDataForGuidance(
       {
         id: row.id as never,
         installation_id: row.installation_id as never,
-        installation_name: installationNameById.get(row.installation_id) ?? "Unknown installation",
+        installation_name: installationById.get(row.installation_id)?.name ?? "Unknown installation",
+        // 2026-09-06 (S5 review remediation, finding D2/EF-B1). Defaults
+        // to OPERATOR_PROVIDED (the pre-existing, narrower route) only
+        // if the installation itself could not be resolved -- should
+        // not happen given the FK, but never claim the wider
+        // IMPORTER_ENTERED route on missing data.
+        installation_provenance:
+          (installationById.get(row.installation_id)?.provenance as never) ?? "OPERATOR_PROVIDED",
         rejection_reason: row.rejection_reason,
       }
     ),

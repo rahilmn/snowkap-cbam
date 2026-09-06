@@ -103,7 +103,7 @@ describe(
                 },
                 installationsResult: {
                   data: [
-                    { id: "inst-1", name: "Steel Works A" },
+                    { id: "inst-1", name: "Steel Works A", provenance: "OPERATOR_PROVIDED" },
                   ],
                   error: null,
                 },
@@ -118,9 +118,59 @@ describe(
               id: "ed-1",
               installation_id: "inst-1",
               installation_name: "Steel Works A",
+              installation_provenance: "OPERATOR_PROVIDED",
               rejection_reason: "Missing evidence",
             },
           ],
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding D2/EF-B1): carries the installation's own IMPORTER_ENTERED provenance through, not a fixed assumption",
+      async () => {
+        const result =
+          await listRejectedEmissionDataForGuidance(
+            mockSupabase(
+              {
+                emissionDataResult: {
+                  data: [
+                    { id: "ed-1", installation_id: "inst-2", rejection_reason: null },
+                  ],
+                  error: null,
+                },
+                installationsResult: {
+                  data: [
+                    { id: "inst-2", name: "External Supplier B", provenance: "IMPORTER_ENTERED" },
+                  ],
+                  error: null,
+                },
+              },
+            ),
+            orgId,
+          );
+
+        expect(result[0]?.installation_provenance).toBe(
+          "IMPORTER_ENTERED",
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding EF-B2/S5R-B2): filters on status='DRAFT' so a DISCARDED-after-rejection record (unrecoverable, per emission-data-lifecycle.ts) is never returned",
+      async () => {
+        const supabase =
+          mockSupabase();
+
+        await listRejectedEmissionDataForGuidance(
+          supabase,
+          orgId,
+        );
+
+        expect(
+          (supabase as unknown as { __filters: Record<string, [string, unknown][]> }).__filters.emission_data,
+        ).toContainEqual(
+          ["status", "DRAFT"],
         );
       },
     );
@@ -149,6 +199,10 @@ describe(
 
         expect(result[0]?.installation_name).toBe(
           "Unknown installation",
+        );
+
+        expect(result[0]?.installation_provenance).toBe(
+          "OPERATOR_PROVIDED",
         );
       },
     );

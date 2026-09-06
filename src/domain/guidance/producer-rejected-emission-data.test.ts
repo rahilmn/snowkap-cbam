@@ -21,6 +21,7 @@ describe(
                 id: "ed-1" as never,
                 installation_id: "inst-1" as never,
                 installation_name: "Steel Works A",
+                installation_provenance: "OPERATOR_PROVIDED",
                 rejection_reason: "Missing evidence",
               },
             ],
@@ -65,6 +66,7 @@ describe(
                 id: "ed-1" as never,
                 installation_id: "inst-1" as never,
                 installation_name: "Steel Works A",
+                installation_provenance: "OPERATOR_PROVIDED",
                 rejection_reason: null,
               },
             ],
@@ -90,13 +92,82 @@ describe(
                 id: "ed-1" as never,
                 installation_id: "inst-1" as never,
                 installation_name: "Steel Works A",
+                installation_provenance: "OPERATOR_PROVIDED",
                 rejection_reason: null,
               },
             ],
           );
 
         expect(items[0]?.reason).toBe(
-          "An admin rejected this record. Fix it and resubmit for verification.",
+          "An admin rejected this record. Fix it and resubmit for internal review.",
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding D1/S5R-B3): never says 'verification' -- this is internal review, not external verification",
+      async () => {
+        const items =
+          deriveProducerRejectedEmissionDataItems(
+            [
+              {
+                id: "ed-1" as never,
+                installation_id: "inst-1" as never,
+                installation_name: "Steel Works A",
+                installation_provenance: "OPERATOR_PROVIDED",
+                rejection_reason: "Missing evidence",
+              },
+              {
+                id: "ed-2" as never,
+                installation_id: "inst-1" as never,
+                installation_name: "Steel Works A",
+                installation_provenance: "OPERATOR_PROVIDED",
+                rejection_reason: null,
+              },
+            ],
+          );
+
+        for (const item of items) {
+          expect(item.reason).not.toMatch(
+            /\bverif(y|ies|ied|ication|ications)\b/i,
+          );
+
+          expect(item.reason).toContain(
+            "internal review",
+          );
+        }
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 review remediation, finding D2/EF-B1): routes to /external-emissions for an IMPORTER_ENTERED record, /emission-data for an OPERATOR_PROVIDED one -- the RECORD's own provenance, not a fixed route",
+      async () => {
+        const items =
+          deriveProducerRejectedEmissionDataItems(
+            [
+              {
+                id: "ed-1" as never,
+                installation_id: "inst-1" as never,
+                installation_name: "Steel Works A",
+                installation_provenance: "OPERATOR_PROVIDED",
+                rejection_reason: null,
+              },
+              {
+                id: "ed-2" as never,
+                installation_id: "inst-2" as never,
+                installation_name: "External Supplier B",
+                installation_provenance: "IMPORTER_ENTERED",
+                rejection_reason: null,
+              },
+            ],
+          );
+
+        expect(items[0]?.href).toBe(
+          "/emission-data",
+        );
+
+        expect(items[1]?.href).toBe(
+          "/external-emissions",
         );
       },
     );
@@ -107,8 +178,8 @@ describe(
         const items =
           deriveProducerRejectedEmissionDataItems(
             [
-              { id: "ed-1" as never, installation_id: "inst-1" as never, installation_name: "Steel Works A", rejection_reason: null },
-              { id: "ed-2" as never, installation_id: "inst-1" as never, installation_name: "Steel Works A", rejection_reason: null },
+              { id: "ed-1" as never, installation_id: "inst-1" as never, installation_name: "Steel Works A", installation_provenance: "OPERATOR_PROVIDED", rejection_reason: null },
+              { id: "ed-2" as never, installation_id: "inst-1" as never, installation_name: "Steel Works A", installation_provenance: "OPERATOR_PROVIDED", rejection_reason: null },
             ],
           );
 

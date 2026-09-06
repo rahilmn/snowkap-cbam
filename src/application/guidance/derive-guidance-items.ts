@@ -2,10 +2,13 @@ import type {
   SupabaseClient,
 } from "@supabase/supabase-js";
 
-import {
-  hasCapability,
-  type OrgContext,
+import type {
+  OrgContext,
 } from "../organizations/org-context";
+
+import {
+  mayManageOwnInstallationRecords,
+} from "../installations/provenance-capability";
 
 import {
   listDraftShipmentsWithLines,
@@ -94,12 +97,18 @@ export async function deriveGuidanceItems(
             supabase,
             context.org_id,
           ),
-          // 2026-09-06 (S5 cross-phase hardening). Only queried for an
-          // org that actually holds PRODUCER_OPERATOR -- an importer-
-          // only org can have no emission_data rows at all, so this
-          // fetch would always return [] for one; skipping it is a
-          // cheap, correct optimization, not a behavior change.
-          hasCapability(context, "PRODUCER_OPERATOR")
+          // 2026-09-06 (S5 review remediation, finding D2/EF-B1). The
+          // original PRODUCER_OPERATOR-only gate rested on a false
+          // premise: owner decision D2 (20260903120000) lets an
+          // IMPORTER_DECLARANT-only org record, submit, and have
+          // rejected IMPORTER_ENTERED emission_data too (the
+          // /external-emissions route -- src/application/installations/
+          // provenance-capability.ts's own mayManageOwnInstallationRecords
+          // is the authoritative "does this org have emission_data rows
+          // at all" question, not PRODUCER_OPERATOR alone). Skipping the
+          // fetch for an importer-only org left its rejected records
+          // permanently invisible to guidance.
+          mayManageOwnInstallationRecords(context)
             ? listRejectedEmissionDataForGuidance(
                 supabase,
                 context.org_id,

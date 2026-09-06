@@ -7,10 +7,15 @@ import type {
   InstallationId,
 } from "../shared/ids";
 
+import type {
+  InstallationRecordProvenance,
+} from "../installations/types";
+
 export interface RejectedEmissionDataForGuidance {
   id: EmissionDataId;
   installation_id: InstallationId;
   installation_name: string;
+  installation_provenance: InstallationRecordProvenance;
   rejection_reason: string | null;
 }
 
@@ -62,11 +67,28 @@ export function deriveProducerRejectedEmissionDataItems(
         impact: "DATA_ENTRY" as const,
         actionability: "NAVIGATE" as const,
         title: `Resubmit rejected emission data for ${record.installation_name}`,
+        // 2026-09-06 (S5 review remediation, finding D1/S5R-B3). Must
+        // never say "verification" for INTERNAL REVIEW -- this
+        // codebase's own owner-sentences.ts records that exact wording
+        // being deliberately revised away for this reason, and
+        // tests/architecture/verification-prose-scan.test.ts's own
+        // header calls the conflation "the plan's #1 release-blocking
+        // risk". The product's own control for this action reads
+        // "Submit for internal review" (emission-data-list.tsx).
         reason:
           record.rejection_reason
-            ? `An admin rejected this record: ${record.rejection_reason}. Fix it and resubmit for verification.`
-            : "An admin rejected this record. Fix it and resubmit for verification.",
-        href: "/emission-data",
+            ? `An admin rejected this record: ${record.rejection_reason}. Fix it and resubmit for internal review.`
+            : "An admin rejected this record. Fix it and resubmit for internal review.",
+        // 2026-09-06 (S5 review remediation, finding D2/EF-B1). The
+        // record's own installation provenance decides which route it
+        // actually lives on -- an org holding both PRODUCER_OPERATOR and
+        // IMPORTER_DECLARANT can have rejected records of both kinds at
+        // once, so this must follow the RECORD, not the org's capability
+        // set.
+        href:
+          record.installation_provenance === "OPERATOR_PROVIDED"
+            ? "/emission-data"
+            : "/external-emissions",
         sortKey: record.installation_name,
       };
     },
