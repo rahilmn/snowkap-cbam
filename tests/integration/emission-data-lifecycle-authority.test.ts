@@ -723,6 +723,41 @@ describe.skipIf(!localSupabaseReachable)(
 
           expect(submit.error).toBeNull();
 
+          // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y1): a
+          // transition INTO VERIFIED now requires non-empty evidence at
+          // the DB layer too, matching the real application's own
+          // pre-existing requirement (applyTransition's VERIFY branch,
+          // manage-emission-data.ts) -- attached here so this test
+          // keeps exercising ITS OWN concern (verifier independence),
+          // not this unrelated gate.
+          const { data: evidence, error: evidenceError } =
+            await clientProducerAdmin
+              .from("evidence_files")
+              .insert(
+                {
+                  org_id: producerOrgId,
+                  emission_data_id: created!.id,
+                  storage_path: `${producerOrgId}/${created!.id}/${crypto.randomUUID()}.pdf`,
+                  original_filename: "self-verify-fixture.pdf",
+                  mime_type: "application/pdf",
+                  size_bytes: 1024,
+                  sha256: "e".repeat(64),
+                  uploaded_by_user_id: producerAdminId,
+                },
+              )
+              .select("id")
+              .single();
+
+          expect(evidenceError).toBeNull();
+
+          const link =
+            await clientProducerAdmin
+              .from("emission_data")
+              .update({ evidence_file_ids: [evidence!.id] })
+              .eq("id", created!.id);
+
+          expect(link.error).toBeNull();
+
           const { error } =
             await clientProducerAdmin
               .from("emission_data")

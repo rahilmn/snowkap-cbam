@@ -400,6 +400,52 @@ describe.skipIf(!localSupabaseReachable)(
         );
       }
 
+      // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y1): a
+      // transition INTO VERIFIED now requires non-empty evidence at
+      // the DB layer too, matching the real application's own
+      // pre-existing requirement (applyTransition's VERIFY branch,
+      // manage-emission-data.ts).
+      const { data: evidenceRow, error: evidenceError } =
+        await serviceClient
+          .from("evidence_files")
+          .insert(
+            {
+              org_id: producerOrgId,
+              emission_data_id: activeVerifiedEmissionDataId,
+              storage_path: `${producerOrgId}/${activeVerifiedEmissionDataId}/dossier-fixture.pdf`,
+              original_filename: "dossier-fixture.pdf",
+              mime_type: "application/pdf",
+              size_bytes: 1024,
+              sha256: "b".repeat(64),
+              uploaded_by_user_id: producerUserId,
+            },
+          )
+          .select("id")
+          .single();
+
+      if (evidenceError || !evidenceRow) {
+        throw new Error(
+          `Failed to seed evidence for activeVerifiedEmissionDataId: ${evidenceError?.message}`,
+        );
+      }
+
+      const { error: linkError } =
+        await serviceClient
+          .from("emission_data")
+          .update(
+            { evidence_file_ids: [evidenceRow.id] },
+          )
+          .eq(
+            "id",
+            activeVerifiedEmissionDataId,
+          );
+
+      if (linkError) {
+        throw new Error(
+          `Failed to link evidence for activeVerifiedEmissionDataId: ${linkError.message}`,
+        );
+      }
+
       const { error: verifiedError } =
         await producerClient
           .from("emission_data")
@@ -417,11 +463,18 @@ describe.skipIf(!localSupabaseReachable)(
         );
       }
 
+      // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y1): no
+      // longer overrides evidence_file_ids with a dummy, non-existent
+      // id here -- real evidence was already attached above before
+      // VERIFY, and app.enforce_emission_data_verification_gate's own
+      // "evidence cannot shrink from a VERIFIED record" rule (S5R3-
+      // AUTHZ-B1) would refuse replacing it with a different array
+      // anyway.
       const { error: activateError } =
         await serviceClient
           .from("emission_data")
           .update(
-            { evidence_file_ids: ["s5review-fixture-evidence-1"], status: "ACTIVE" },
+            { status: "ACTIVE" },
           )
           .eq(
             "id",

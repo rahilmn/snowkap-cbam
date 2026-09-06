@@ -951,6 +951,52 @@ describe.skipIf(!localSupabaseReachable)(
           );
         }
 
+        // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y1): a
+        // transition INTO VERIFIED now requires non-empty evidence at
+        // the DB layer too, matching the real application's own
+        // pre-existing requirement (applyTransition's VERIFY branch,
+        // manage-emission-data.ts).
+        const { data: lockedEvidence, error: lockedEvidenceError } =
+          await serviceClient
+            .from("evidence_files")
+            .insert(
+              {
+                org_id: orgAId,
+                emission_data_id: lockedEmissionDataId,
+                storage_path: `${orgAId}/${lockedEmissionDataId}/lock-fixture.pdf`,
+                original_filename: "lock-fixture.pdf",
+                mime_type: "application/pdf",
+                size_bytes: 1024,
+                sha256: "c".repeat(64),
+                uploaded_by_user_id: ownerAId,
+              },
+            )
+            .select("id")
+            .single();
+
+        if (lockedEvidenceError || !lockedEvidence) {
+          throw new Error(
+            `Failed to seed evidence for the fixture: ${lockedEvidenceError?.message}`,
+          );
+        }
+
+        const { error: lockedLinkError } =
+          await serviceClient
+            .from("emission_data")
+            .update(
+              { evidence_file_ids: [lockedEvidence.id] },
+            )
+            .eq(
+              "id",
+              lockedEmissionDataId,
+            );
+
+        if (lockedLinkError) {
+          throw new Error(
+            `Failed to link evidence for the fixture: ${lockedLinkError.message}`,
+          );
+        }
+
         const { error: verifiedError } =
           await ownerAClient
             .from("emission_data")
@@ -968,11 +1014,17 @@ describe.skipIf(!localSupabaseReachable)(
           );
         }
 
+        // No longer overrides evidence_file_ids with a dummy,
+        // non-existent id here -- real evidence was already attached
+        // above before VERIFY, and the verification gate's own
+        // "evidence cannot shrink from a VERIFIED record" rule
+        // (S5R3-AUTHZ-B1) would refuse replacing it with a different
+        // array anyway.
         const { error: activateError } =
           await serviceClient
             .from("emission_data")
             .update(
-              { evidence_file_ids: ["s5review-fixture-evidence-1"], status: "ACTIVE" },
+              { status: "ACTIVE" },
             )
             .eq(
               "id",
@@ -1233,6 +1285,52 @@ describe.skipIf(!localSupabaseReachable)(
         if (pendingError) {
           throw new Error(
             `Failed to move the DRAFT+VERIFIED fixture to VERIFICATION_PENDING: ${pendingError.message}`,
+          );
+        }
+
+        // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y1): a
+        // transition INTO VERIFIED now requires non-empty evidence at
+        // the DB layer too, matching the real application's own
+        // pre-existing requirement (applyTransition's VERIFY branch,
+        // manage-emission-data.ts).
+        const { data: draftVerifiedEvidence, error: draftVerifiedEvidenceError } =
+          await serviceClient
+            .from("evidence_files")
+            .insert(
+              {
+                org_id: orgAId,
+                emission_data_id: draftVerifiedEmissionDataId,
+                storage_path: `${orgAId}/${draftVerifiedEmissionDataId}/draft-verified-fixture.pdf`,
+                original_filename: "draft-verified-fixture.pdf",
+                mime_type: "application/pdf",
+                size_bytes: 1024,
+                sha256: "d".repeat(64),
+                uploaded_by_user_id: ownerAId,
+              },
+            )
+            .select("id")
+            .single();
+
+        if (draftVerifiedEvidenceError || !draftVerifiedEvidence) {
+          throw new Error(
+            `Failed to seed evidence for the DRAFT+VERIFIED fixture: ${draftVerifiedEvidenceError?.message}`,
+          );
+        }
+
+        const { error: draftVerifiedLinkError } =
+          await serviceClient
+            .from("emission_data")
+            .update(
+              { evidence_file_ids: [draftVerifiedEvidence.id] },
+            )
+            .eq(
+              "id",
+              draftVerifiedEmissionDataId,
+            );
+
+        if (draftVerifiedLinkError) {
+          throw new Error(
+            `Failed to link evidence for the DRAFT+VERIFIED fixture: ${draftVerifiedLinkError.message}`,
           );
         }
 

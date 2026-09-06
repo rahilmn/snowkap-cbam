@@ -995,6 +995,30 @@ describe.skipIf(!localSupabaseReachable)(
             { verification_status: "VERIFICATION_PENDING" },
           );
 
+        // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y1): a
+        // transition INTO VERIFIED now requires non-empty evidence at
+        // the DB layer too, matching the real application's own
+        // pre-existing requirement (applyTransition's VERIFY branch,
+        // manage-emission-data.ts) -- attached here so this test keeps
+        // exercising ITS OWN concern (verifier_user_id force-pinning),
+        // not this unrelated gate.
+        const evidenceFileId =
+          await insertRealEvidenceFile(
+            emissionDataId,
+            clientProducerMember,
+            producerMemberId,
+          );
+
+        await clientProducerMember
+          .from("emission_data")
+          .update(
+            { evidence_file_ids: [evidenceFileId] },
+          )
+          .eq(
+            "id",
+            emissionDataId,
+          );
+
         const { error } =
           await clientProducerAdmin
             .from("emission_data")
@@ -1044,6 +1068,26 @@ describe.skipIf(!localSupabaseReachable)(
         const emissionDataId =
           await insertDraftEmissionData(
             { verification_status: "VERIFICATION_PENDING" },
+          );
+
+        // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y1): see
+        // Finding 2's own comment above -- unrelated to this test's own
+        // concern (forging verifier_user_id/rejection_reason post-hoc).
+        const evidenceFileId =
+          await insertRealEvidenceFile(
+            emissionDataId,
+            clientProducerMember,
+            producerMemberId,
+          );
+
+        await clientProducerMember
+          .from("emission_data")
+          .update(
+            { evidence_file_ids: [evidenceFileId] },
+          )
+          .eq(
+            "id",
+            emissionDataId,
           );
 
         const { error: verifyError } =
@@ -1137,7 +1181,7 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
-      "legitimate flow: SUBMIT_FOR_VERIFICATION -> VERIFY -> real evidence upload -> ACTIVATE all still succeed for a plain MEMBER/ADMIN pair",
+      "legitimate flow: SUBMIT_FOR_VERIFICATION -> real evidence upload -> VERIFY -> ACTIVATE all still succeed for a plain MEMBER/ADMIN pair",
       async () => {
         const emissionDataId =
           await insertDraftEmissionData();
@@ -1158,27 +1202,16 @@ describe.skipIf(!localSupabaseReachable)(
 
         expect(submitError).toBeNull();
 
-        const { error: verifyError } =
-          await clientProducerAdmin
-            .from("emission_data")
-            .update(
-              {
-                verification_status: "VERIFIED",
-                verifier_user_id: producerAdminId,
-              },
-            )
-            .eq(
-              "id",
-              emissionDataId,
-            );
-
-        expect(verifyError).toBeNull();
-
-        // Real evidence, uploaded the same way
-        // src/application/evidence/upload-evidence.ts's uploadEvidenceFile
-        // does: insert the metadata row via the caller's own
-        // RLS-enforced client, then append its id onto
-        // emission_data.evidence_file_ids.
+        // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y1). Real
+        // evidence, uploaded the same way src/application/evidence/
+        // upload-evidence.ts's uploadEvidenceFile does: insert the
+        // metadata row via the caller's own RLS-enforced client, then
+        // append its id onto emission_data.evidence_file_ids -- now
+        // moved BEFORE VERIFY, matching both the real application's
+        // own pre-existing requirement (applyTransition's VERIFY
+        // branch already rejects EVIDENCE_INCOMPLETE at the app layer,
+        // manage-emission-data.ts) and this DB-layer trigger's own new
+        // twin of it.
         const evidenceFileId =
           await insertRealEvidenceFile(
             emissionDataId,
@@ -1198,6 +1231,22 @@ describe.skipIf(!localSupabaseReachable)(
             );
 
         expect(linkError).toBeNull();
+
+        const { error: verifyError } =
+          await clientProducerAdmin
+            .from("emission_data")
+            .update(
+              {
+                verification_status: "VERIFIED",
+                verifier_user_id: producerAdminId,
+              },
+            )
+            .eq(
+              "id",
+              emissionDataId,
+            );
+
+        expect(verifyError).toBeNull();
 
         const { error: activateError } =
           await clientProducerMember
