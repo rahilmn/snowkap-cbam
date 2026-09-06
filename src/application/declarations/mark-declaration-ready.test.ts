@@ -78,6 +78,9 @@ function shipmentRow(
   };
 }
 
+const ACTIVE_DATASET_ID =
+  "dataset-active-1";
+
 const lineRow =
   {
     id: "line-1",
@@ -92,7 +95,10 @@ const lineRow =
     quantity_mwh: null,
     production_route_name: null,
     production_route_indicator: null,
-    emission_determination: { method: "DEFAULT" },
+    // resolution.dataset_id matches ACTIVE_DATASET_ID by default -- see
+    // compute-declaration-draft-facts.test.ts's own identical fixture
+    // comment (S5 cross-phase hardening).
+    emission_determination: { method: "DEFAULT", resolution: { dataset_id: ACTIVE_DATASET_ID } },
   };
 
 const calculationRow =
@@ -106,7 +112,7 @@ const calculationRow =
     // Matches lineRow's own emission_determination -- keeps this
     // fixture pair "current" (see compute-declaration-draft-facts.ts's
     // P13 calculation_is_current check) by default.
-    determination: { method: "DEFAULT" },
+    determination: { method: "DEFAULT", resolution: { dataset_id: ACTIVE_DATASET_ID } },
   };
 
 interface Recorder {
@@ -190,6 +196,7 @@ const completePeriodTables = {
   shipments: { data: [shipmentRow()], error: null },
   shipment_lines: { data: [lineRow], error: null },
   latest_calculation_results: { data: [calculationRow], error: null },
+  regulatory_datasets: { data: [{ id: ACTIVE_DATASET_ID }], error: null },
   audit_events: { data: null, error: null },
 };
 
@@ -197,6 +204,7 @@ const incompletePeriodTables = {
   shipments: { data: [shipmentRow()], error: null },
   shipment_lines: { data: [], error: null },
   latest_calculation_results: { data: [], error: null },
+  regulatory_datasets: { data: [{ id: ACTIVE_DATASET_ID }], error: null },
   audit_events: { data: null, error: null },
 };
 

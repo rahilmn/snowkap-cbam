@@ -92,6 +92,7 @@ export const STATUS_LABEL: Record<StatusKey, string> =
     "blocker.LINE_NOT_DETERMINED": "Line not determined",
     "blocker.LINE_NOT_CALCULATED": "Line not calculated",
     "blocker.LINE_CALCULATION_STALE": "Calculation is stale -- recalculate after re-determination",
+    "blocker.LINE_DATASET_SUPERSEDED": "Regulatory dataset since corrected -- redetermine this line",
 
     // -- incomplete_line (importer reports summary) --
     "incomplete_line.NO_DETERMINATION": "Not determined",
@@ -195,6 +196,7 @@ export const STATUS_TONE: Record<StatusKey, StatusTone> =
     "blocker.LINE_NOT_DETERMINED": "warning",
     "blocker.LINE_NOT_CALCULATED": "warning",
     "blocker.LINE_CALCULATION_STALE": "warning",
+    "blocker.LINE_DATASET_SUPERSEDED": "warning",
 
     // -- incomplete_line --
     "incomplete_line.NO_DETERMINATION": "warning",

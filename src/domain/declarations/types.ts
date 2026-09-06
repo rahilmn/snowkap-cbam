@@ -111,7 +111,30 @@ export type CompletenessBlockerReason =
   // this reason exists for the case that blocker cannot see: a
   // determination that is still present, but no longer the one the
   // line's latest calculation was computed against.
-  | "LINE_CALCULATION_STALE";
+  | "LINE_CALCULATION_STALE"
+  // 2026-09-06 (S5 cross-phase hardening, live-reproduced): a
+  // DEFAULT-determined line freezes resolution.dataset_id/dataset_
+  // version at resolve/redetermine time (owner decision, RULE-EE-xxx
+  // provenance) and is never automatically re-touched afterward --
+  // redetermination is an explicit, manual, audited action. If the
+  // regulatory_datasets row that determination was resolved against is
+  // later SUPERSEDED (the sanctioned way a regulatory correction is
+  // published -- a new dataset version activated, CLAUDE.md's own
+  // "facts-as-datasets" rule), neither checkCalculationCurrency
+  // (compares the determination against itself, never against live
+  // regulatory state) nor LINE_CALCULATION_STALE (a different fact --
+  // whether the calculation matches the CURRENT determination, not
+  // whether the determination matches the CURRENT dataset) ever
+  // notices. Live-reproduced: a declaration filed clean through
+  // record_declaration_filed() while its own frozen determination
+  // named an already-superseded dataset version, with zero signal
+  // anywhere in the product. Distinct from LINE_CALCULATION_STALE for
+  // the same reason that reason is distinct from LINE_NOT_CALCULATED:
+  // different fix (redetermine against the corrected dataset, not
+  // merely recalculate). Never applies to an ACTUAL determination (no
+  // regulatory dataset is resolved for one) or to a line with no
+  // determination yet (LINE_NOT_DETERMINED already covers that).
+  | "LINE_DATASET_SUPERSEDED";
 
 /**
  * One named blocker. `shipment_id`/`shipment_reference` are null only

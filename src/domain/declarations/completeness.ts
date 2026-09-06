@@ -31,6 +31,16 @@ export interface CompletenessCheckLine {
   // pure boolean-in, blocker-out function exactly as before, never
   // performing the structural comparison itself.
   calculation_is_current: boolean;
+  // 2026-09-06 (S5 cross-phase hardening). Whether this line's own
+  // DEFAULT determination still names a regulatory_datasets row that is
+  // currently ACTIVE -- computed by the caller (compute-declaration-
+  // draft-facts.ts, the layer that has both the frozen determination
+  // and live regulatory state in hand), the same "caller computes,
+  // this module only decides" split calculation_is_current already
+  // uses. Always `true` for an ACTUAL determination or a line with no
+  // determination at all -- this check has no meaning for either, and
+  // LINE_NOT_DETERMINED already covers the latter.
+  dataset_is_current: boolean;
 }
 
 export interface CompletenessCheckShipment {
@@ -151,6 +161,23 @@ export function buildCompletenessReport(
         blockers.push(
           {
             reason: "LINE_CALCULATION_STALE",
+            shipment_id: shipment.shipment_id,
+            shipment_reference: shipment.shipment_reference,
+            line_id: line.line_id,
+            line_number: line.line_number,
+          },
+        );
+      } else if (!line.dataset_is_current) {
+        // Determined, calculated, AND the calculation matches the
+        // current determination -- but the determination itself now
+        // names a superseded regulatory dataset. A third, independent
+        // `else if`, not layered onto the two above: a line is flagged
+        // with exactly one of LINE_NOT_CALCULATED / LINE_CALCULATION_
+        // STALE / LINE_DATASET_SUPERSEDED for the same underlying fact,
+        // never more than one at once.
+        blockers.push(
+          {
+            reason: "LINE_DATASET_SUPERSEDED",
             shipment_id: shipment.shipment_id,
             shipment_reference: shipment.shipment_reference,
             line_id: line.line_id,

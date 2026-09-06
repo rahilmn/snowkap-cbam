@@ -42,6 +42,9 @@ function fullShipmentRow(
   };
 }
 
+const ACTIVE_DATASET_ID =
+  "dataset-active-1";
+
 function lineRow(
   overrides: Record<string, unknown> = {},
 ) {
@@ -58,7 +61,11 @@ function lineRow(
     quantity_mwh: null,
     production_route_name: null,
     production_route_indicator: null,
-    emission_determination: { method: "DEFAULT" },
+    // resolution.dataset_id matches ACTIVE_DATASET_ID below by default
+    // -- keeps every pre-existing test's "complete: true" expectation
+    // intact now that dataset_is_current (S5) is also checked. A test
+    // that wants a SUPERSEDED dataset overrides this to a different id.
+    emission_determination: { method: "DEFAULT", resolution: { dataset_id: ACTIVE_DATASET_ID } },
     ...overrides,
   };
 }
@@ -77,7 +84,7 @@ const calculationRow =
     // test that wants a STALE pairing overrides `determination` on the
     // calculation row (or `emission_determination` on the line row) to
     // deliberately diverge.
-    determination: { method: "DEFAULT" },
+    determination: { method: "DEFAULT", resolution: { dataset_id: ACTIVE_DATASET_ID } },
   };
 
 interface ShipmentsOp {
@@ -143,7 +150,17 @@ function makeMockSupabase(
         reject: (reason: unknown) => unknown,
       ) =>
         Promise.resolve(
-          tables[table] ?? { data: null, error: null },
+          tables[table] ??
+            // 2026-09-06 (S5 cross-phase hardening). Defaults
+            // regulatory_datasets to "the one dataset every DEFAULT
+            // fixture's own resolution.dataset_id names, currently
+            // ACTIVE" -- keeps every pre-existing test's own "complete:
+            // true" expectation intact without each having to know
+            // about this new query. A test that wants a SUPERSEDED
+            // dataset passes its own `regulatory_datasets` entry.
+            (table === "regulatory_datasets"
+              ? { data: [{ id: ACTIVE_DATASET_ID }], error: null }
+              : { data: null, error: null }),
         ).then(resolve, reject),
     };
 
@@ -401,7 +418,7 @@ describe(
                       {
                         emission_determination: {
                           method: "DEFAULT",
-                          resolution: { reason: "EXACT_TRADE_CODE_MATCH", dataset_version: "2026.1" },
+                          resolution: { reason: "EXACT_TRADE_CODE_MATCH", dataset_version: "2026.1", dataset_id: ACTIVE_DATASET_ID },
                         },
                       },
                     ),
@@ -413,7 +430,7 @@ describe(
                     {
                       ...calculationRow,
                       determination: {
-                        resolution: { dataset_version: "2026.1", reason: "EXACT_TRADE_CODE_MATCH" },
+                        resolution: { dataset_version: "2026.1", reason: "EXACT_TRADE_CODE_MATCH", dataset_id: ACTIVE_DATASET_ID },
                         method: "DEFAULT",
                       },
                     },
@@ -456,6 +473,141 @@ describe(
 
         expect(facts.completeness_report.complete).toBe(
           false,
+        );
+      },
+    );
+
+    it(
+      "2026-09-06 (S5 cross-phase hardening, live-reproduced): reports LINE_DATASET_SUPERSEDED for a DEFAULT-determined, calculated, current line whose resolution.dataset_id is no longer the ACTIVE regulatory_datasets row",
+      async () => {
+        const facts =
+          await computeDeclarationDraftFacts(
+            makeMockSupabase(
+              {
+                shipments: { data: [fullShipmentRow()], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow(
+                      {
+                        emission_determination: {
+                          method: "DEFAULT",
+                          resolution: { dataset_id: "dataset-superseded-1" },
+                        },
+                      },
+                    ),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    {
+                      ...calculationRow,
+                      determination: {
+                        method: "DEFAULT",
+                        resolution: { dataset_id: "dataset-superseded-1" },
+                      },
+                    },
+                  ],
+                  error: null,
+                },
+                // ACTIVE_DATASET_ID is deliberately NOT this line's own
+                // dataset_id -- a different, currently-active dataset
+                // now exists for the same dataset_type.
+                regulatory_datasets: { data: [{ id: ACTIVE_DATASET_ID }], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(facts.completeness_report.complete).toBe(
+          false,
+        );
+
+        expect(facts.completeness_report.blockers).toEqual(
+          [
+            {
+              reason: "LINE_DATASET_SUPERSEDED",
+              shipment_id: "ship-1",
+              shipment_reference: "REF-001",
+              line_id: "line-1",
+              line_number: 1,
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "never flags LINE_DATASET_SUPERSEDED for an ACTUAL determination -- no regulatory dataset is resolved for one",
+      async () => {
+        const facts =
+          await computeDeclarationDraftFacts(
+            makeMockSupabase(
+              {
+                shipments: { data: [fullShipmentRow()], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow(
+                      {
+                        emission_determination: {
+                          method: "ACTUAL",
+                          snapshot: { emission_data_id: "ed-1" },
+                        },
+                      },
+                    ),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    {
+                      ...calculationRow,
+                      determination: {
+                        method: "ACTUAL",
+                        snapshot: { emission_data_id: "ed-1" },
+                      },
+                    },
+                  ],
+                  error: null,
+                },
+                // No ACTIVE regulatory_datasets rows at all -- would
+                // flag every DEFAULT line if this were one, but it must
+                // never affect an ACTUAL determination.
+                regulatory_datasets: { data: [], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(facts.completeness_report.complete).toBe(
+          true,
+        );
+
+        expect(facts.completeness_report.blockers).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "throws on a genuine regulatory_datasets fetch error -- never silently treats every DEFAULT line as current (or as superseded) without a real answer",
+      async () => {
+        await expect(
+          computeDeclarationDraftFacts(
+            makeMockSupabase(
+              {
+                shipments: { data: [fullShipmentRow()], error: null },
+                shipment_lines: { data: [lineRow()], error: null },
+                regulatory_datasets: { data: null, error: { message: "boom" } },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          ),
+        ).rejects.toThrow(
+          "boom",
         );
       },
     );

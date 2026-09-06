@@ -29,6 +29,10 @@ import {
   checkCalculationCurrency,
 } from "../../domain/emissions/check-calculation-currency";
 
+import type {
+  EmissionDetermination,
+} from "../../domain/emissions/types";
+
 import {
   listPeriodShipmentLines,
   type PeriodShipmentLine,
@@ -213,6 +217,72 @@ export async function computeDeclarationDraftFacts(
       period,
     );
 
+  // 2026-09-06 (S5 cross-phase hardening, live-reproduced end to end
+  // through the real record_declaration_filed() RPC, real org OWNER
+  // credentials, no attacker needed). A DEFAULT determination freezes
+  // resolution.dataset_id/dataset_version at resolve/redetermine time
+  // and is never automatically re-touched afterward -- redetermination
+  // is an explicit, manual, audited action. If the regulatory_datasets
+  // row it names has since been SUPERSEDED (the sanctioned way a
+  // regulatory correction is published -- CLAUDE.md's own "facts-as-
+  // datasets" rule), neither checkCalculationCurrency (compares a
+  // determination only against itself, never against live regulatory
+  // state) nor anything else in this codebase previously noticed --
+  // this declaration could file clean on a figure the regulator has
+  // since corrected, with zero signal anywhere. Fetched once per call,
+  // not per line: regulatory_datasets carries no org scoping (shared,
+  // protected reference data), so one small query serves every line.
+  //
+  // Deliberately does NOT alter any already-frozen determination or
+  // its stored values -- RegulatoryResolutionSnapshot's own doc
+  // comment (src/domain/emissions/types.ts) states a later dataset
+  // supersession must never change a historical result, and this
+  // check doesn't: it only decides whether THIS NOT-YET-FILED
+  // declaration may proceed, surfaced as a new, named, actionable
+  // completeness blocker (LINE_DATASET_SUPERSEDED) -- the exact same
+  // "surface a readiness fact, never rewrite history" posture
+  // calculation_is_current already has for a different staleness
+  // concern.
+  const { data: activeDatasetRows, error: activeDatasetError } =
+    await supabase
+      .from("regulatory_datasets")
+      .select(
+        "id",
+      )
+      .eq("status", "ACTIVE");
+
+  if (activeDatasetError) {
+    throw new Error(
+      `declarations: active regulatory datasets fetch failed (${activeDatasetError.message}).`,
+    );
+  }
+
+  const activeDatasetIds =
+    new Set(
+      ((activeDatasetRows ?? []) as { id: string }[]).map(
+        (row) => row.id,
+      ),
+    );
+
+  function datasetIsCurrent(
+    determination: EmissionDetermination | null,
+  ): boolean {
+    // Meaningless for an ACTUAL determination (no regulatory dataset is
+    // resolved for one) or a line with no determination yet
+    // (LINE_NOT_DETERMINED already covers that case, and
+    // buildCompletenessReport never consults dataset_is_current on that
+    // path -- see its own `continue` before this check) -- `true`
+    // either way, matching calculation_is_current's own "meaningless
+    // case defaults true, never itself the reason for a blocker" shape.
+    if (determination === null || determination.method !== "DEFAULT") {
+      return true;
+    }
+
+    return activeDatasetIds.has(
+      determination.resolution.dataset_id,
+    );
+  }
+
   const linesByShipmentId =
     new Map<string, PeriodShipmentLine[]>();
 
@@ -266,6 +336,10 @@ export async function computeDeclarationDraftFacts(
                     entry.calculation.determination,
                     entry.line.emission_determination,
                   ) === "CURRENT",
+                dataset_is_current:
+                  datasetIsCurrent(
+                    entry.line.emission_determination,
+                  ),
               }
             ),
           ),
