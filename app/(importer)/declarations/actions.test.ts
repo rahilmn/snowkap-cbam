@@ -398,7 +398,7 @@ describe(
           {
             status: "error",
             message:
-              "A declaration for this period is already approved for filing. Reopen it, or wait for it to be filed, before starting a new one.",
+              "A declaration for this period is already approved for filing. To make changes to it, reopen one of its member shipments from that shipment's own detail page -- this automatically returns the declaration to draft -- or wait for it to be filed before starting a new one.",
           },
         );
       },

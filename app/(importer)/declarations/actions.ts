@@ -161,8 +161,21 @@ function draftMessageFor(
     case "CAPABILITY_NOT_HELD":
       return "Your organization is not set up as a CBAM importer/declarant.";
 
+    // 2026-09-07 (S5 review round 6, finding S5R6-A-GUID3). "Reopen it"
+    // used to name the declaration itself -- no control anywhere in
+    // this product does that (DeclarationActions renders exactly
+    // RecordFiledForm for a READY declaration and nothing else; its own
+    // inline comment states outright there is no route back to draft
+    // from that screen). The only real, live-reproduced mechanism is
+    // app.invalidate_declaration_approval_on_reopen (20260905140000)
+    // firing as a side effect of a MEMBER SHIPMENT's own status leaving
+    // READY -- reopening any one of its member shipments, from that
+    // shipment's own detail page, flips the whole declaration back to
+    // DRAFT automatically. Genuinely reachable: any admin who clicks
+    // "Start declaration" for a period that already has a READY
+    // declaration hits this exact message.
     case "PERIOD_HAS_READY_DECLARATION":
-      return "A declaration for this period is already approved for filing. Reopen it, or wait for it to be filed, before starting a new one.";
+      return "A declaration for this period is already approved for filing. To make changes to it, reopen one of its member shipments from that shipment's own detail page -- this automatically returns the declaration to draft -- or wait for it to be filed before starting a new one.";
 
     case "PERIOD_ALREADY_FILED":
       return "This period already has a filed declaration. Create an amendment from that declaration instead of starting a new one.";
@@ -273,11 +286,23 @@ function filedMessageFor(
     // 2026-09-04 (P14). The lines are not the ones this declaration was
     // approved over. Recoverable, and the message says how: re-approving
     // the declaration is what records the new population as approved.
+    // 2026-09-07 (S5 review round 6, finding S5R6-A-GUID3). Same
+    // "Reopen the declaration"/"Reopen it" gap as PERIOD_HAS_READY_
+    // DECLARATION above -- see that case's own comment for why no such
+    // control exists and what the real mechanism is. This specific
+    // state is effectively unreachable through the shipped product's
+    // own UI/RLS-bound writes today (shipment_lines_update_parent_
+    // draft_only + app.enforce_shipment_lines_parent_editable,
+    // 20260904090000, block editing a READY shipment's lines outright,
+    // so an ordinary reopen-then-edit already retires the approval
+    // before this state could arise) -- corrected anyway, since the
+    // wording is still wrong on the rare/internal path that does reach
+    // it (an out-of-band write bypassing those triggers).
     case "POPULATION_CHANGED_SINCE_READY":
-      return "The lines in this declaration's shipments have changed since it was approved for filing, so filing it now would record a different population than the one approved. Reopen the declaration, check the lines, and approve it for filing again.";
+      return "The lines in this declaration's shipments have changed since it was approved for filing, so filing it now would record a different population than the one approved. Reopening any of its member shipments (from that shipment's own detail page) returns this declaration to draft so you can check the lines and approve it for filing again.";
 
     case "APPROVED_POPULATION_UNKNOWN":
-      return "This declaration has no record of the line population it was approved over, so filing cannot confirm the two match. Reopen it and approve it for filing again.";
+      return "This declaration has no record of the line population it was approved over, so filing cannot confirm the two match. Reopening any of its member shipments (from that shipment's own detail page) returns this declaration to draft so you can approve it for filing again.";
 
     default:
       return "Something went wrong recording this filing. Please try again.";

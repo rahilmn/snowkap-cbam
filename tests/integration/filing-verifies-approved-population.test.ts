@@ -832,8 +832,13 @@ describe.skipIf(!ready)(
           await file(seeded.declarationId, `REF-BEFORE-${seeded.year}`),
         ).toBe("POPULATION_CHANGED_SINCE_READY");
 
-        // Reopen the declaration and approve it again -- which is what
-        // the message tells the user to do.
+        // Return the declaration to DRAFT and approve it again --
+        // matching what the real recovery mechanism does (reopening a
+        // member shipment flips the declaration back to DRAFT via
+        // app.invalidate_declaration_approval_on_reopen), done directly
+        // here since this exact state is itself only reachable via an
+        // out-of-band write (see shrinkPopulationBehindTheApproval's own
+        // doc comment above).
         await adminClient
           .from("declarations")
           .update({ status: "DRAFT" })
