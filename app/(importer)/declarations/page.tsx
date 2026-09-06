@@ -177,6 +177,30 @@ export default async function DeclarationsPage() {
                       </td>
 
                       <td className="px-4 py-2.5">
+                        {
+                          // 2026-09-07 (S5 review round 5, finding
+                          // S5R5-VOCAB-1). This list renders the raw
+                          // declaration.status alone, the same gap the
+                          // detail page's own header badge had -- fixed
+                          // there (app/(importer)/declarations/[id]/
+                          // page.tsx) by adding a "Needs refresh" badge
+                          // driven by completenessReportStale.
+                          // listDeclarations (this page's own data
+                          // source) does not compute that signal, and
+                          // this list is deliberately scoped to a
+                          // lightweight, single-query overview (also
+                          // shared by deriveGuidanceItems) -- adding it
+                          // here would mean re-deriving per-declaration
+                          // member-shipment-status and dataset-currency
+                          // checks for every row in the list, a
+                          // meaningfully larger batched-query feature,
+                          // not a hardening fix. Disclosed rather than
+                          // silently left: a reader who needs to know
+                          // whether a specific READY declaration is
+                          // still genuinely ready to file should open
+                          // its detail page, which now states this
+                          // correctly.
+                        }
                         <StatusBadge
                           statusKey={declarationStatusKey(declaration.status)}
                         />

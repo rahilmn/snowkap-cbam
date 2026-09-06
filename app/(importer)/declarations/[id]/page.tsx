@@ -157,6 +157,27 @@ export default async function DeclarationDetailPage(
             statusKey={declarationStatusKey(declaration.status)}
           />
 
+          {
+            // 2026-09-07 (S5 review round 5, finding S5R5-VOCAB-1). The
+            // status badge above names declaration.status alone
+            // ("Approved for filing" for READY) -- it says nothing
+            // about whether the cached completeness_report that status
+            // was approved over still reflects the current state.
+            // record_declaration_filed() refuses to file exactly this
+            // state (DATASET_SUPERSEDED), so a reader trusting the
+            // status badge alone would believe filing is ready to go
+            // when it will, in fact, be refused. CompletenessReportCard
+            // (below) already renders the full "Needs refresh"
+            // explanation from this same completenessReportStale value
+            // -- this is the identical signal, surfaced where a reader
+            // sees the status first.
+            completenessReportStale ? (
+              <Badge tone="warning">
+                Needs refresh
+              </Badge>
+            ) : null
+          }
+
           {declaration.supersedes_declaration_id ? (
             <Badge tone="neutral">
               Amendment
