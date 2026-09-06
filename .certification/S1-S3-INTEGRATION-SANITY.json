@@ -1,0 +1,88 @@
+{
+  "check": "accumulated S1-S3 integration sanity check",
+  "purpose": "A lightweight cross-phase composition gate performed before pushing the accumulated S1+S2+S3 branch and beginning S4 -- not a fourth full adversarial review of any single phase (each of S1/S2/S3 was already independently reviewed and certified on its own terms; see S1.json, S2.json, S3.json).",
+  "performed_at": "2026-09-06T12:20:00Z",
+  "range_checked": "fdf3c15211ce30c45c60abe3da2258dc6eff140f (P14 implementation freeze) .. be1c752cc471bea14fc349620ab81fc51b683171",
+  "pre_check_head": "aa1bf6194dc178037ba0eff519751c5818d04c1f",
+  "post_check_head": "be1c752cc471bea14fc349620ab81fc51b683171",
+  "sections": {
+    "A_git_state": {
+      "verdict": "PASS",
+      "checks": [
+        "branch == feature/sme-experience",
+        "working tree clean",
+        "HEAD == aa1bf61 (the exact S3-certified implementation) at the start of this check",
+        "no stray worktrees (git worktree list showed only the main working tree)",
+        "no listening dev/test servers on port 3000",
+        "no lingering node/vitest/playwright processes"
+      ]
+    },
+    "B_certification_chain": {
+      "verdict": "PASS",
+      "checks": [
+        "S1.json reviewed_commit (8d95738) is the commit immediately preceding its own certification-record commit (b061ae5) -- consistent pattern",
+        "S2.json commit (e666878, the remediation) was independently reviewed and recorded TWICE (805befc and 7185576) -- diffed the two S2.json versions and confirmed they are byte-identical, not a discrepancy; 7185576 is the final S2 HEAD and the base_commit S3.json diffs from",
+        "S3.json base_commit (7185576) == S2's final closed-out HEAD; S3.json commit (25c778f) is the commit immediately preceding its own certification-record commit (aa1bf61) -- consistent pattern",
+        "no certification artifact claims a later commit was reviewed by an earlier reviewer; no false or inconsistent SHA references found",
+        "supersession relationships (S1's 862edd8/030897d -> 8d95738; S2's 7b0d54b FAIL -> e666878 remediation -> PASS) are coherent and documented in-place"
+      ]
+    },
+    "C_p14_protected_range": {
+      "verdict": "PASS",
+      "checks": [
+        "git diff --name-only fdf3c15..be1c752 against the 5 named regulatory migrations, src/domain/regulatory/, src/infrastructure/regulatory/, src/infrastructure/supabase/client.ts, scripts/regulatory/ -> EMPTY across the entire accumulated S1-S3 range",
+        "broader protected-surface sweep (installations, operators, evidence, calculations, declarations domains, all supabase/migrations/) found exactly one calculation-engine file touched (src/domain/calculations/calculate-line-emissions.ts) -- inspected the actual diff, not just the filename: it is a single export-keyword addition plus a doc comment, zero functional change, explicitly reasoned about at the time (S3, so a new default-reference-display feature could reuse the ONE ANNEX_II_SECTORS set rather than redefining it)",
+        "three new migrations exist in the range (20260905150000_sme_organization_profiles, 20260905160000_sme_guidance_dismissals, 20260905170000_sme_product_feedback) -- all new SME-scoped tables explicitly authorized by S1/S2's own specs, none altering or referencing a protected table's schema (content-checked, not just filename-checked)"
+      ]
+    },
+    "D_regression_sanity": {
+      "verdict": "PASS",
+      "typecheck": "clean (exit 0), run twice (before and after the E-driven fix)",
+      "full_unit_integration_suite": "1980 passed, 14 skipped, 2 failed -- both failures in tests/integration/password-change-current-password-proof.test.ts (otherSessionsSignedOut assertion), the same pre-existing, environment-rooted failure already documented in every prior S3 commit this session, unchanged before and after the E-driven fix in this check",
+      "production_build": "clean (next build + copy-standalone-assets + assert-clean-production-artifact all exit 0), run twice",
+      "full_e2e_suite": "73 passed, 15 skipped (the pre-existing Storage-disabled live probe in actual-data-determination.spec.ts, and mobile-chromium project duplicates of desktop-only specs), 0 failures, run twice",
+      "note": "No failure was converted into a skip. No pre-existing failure's honest accounting was altered."
+    },
+    "E_cross_phase_composition": {
+      "verdict": "PASS_WITH_ONE_FIX",
+      "method": "A dedicated, independently-run investigation (fresh context, no reuse of any prior phase review) into 6 specific named interaction points between S1 (status vocabulary, navigation), S2 (guidance engine, dismissals), and S3 (importer flow, stale-calculation handling, tenant authorization).",
+      "findings": [
+        {
+          "area": "S1 status vocabulary <-> S3 declaration transitions",
+          "verdict": "GENUINE DEFECT, FIXED (this check's own commit be1c752)",
+          "detail": "S3's terminology-split commit (116b7c8) renamed the declaration approval transition's button/dialog to 'Approved for filing' but never touched its sibling error-message-mapping functions in app/(importer)/declarations/actions.ts, which still spoke the retired 'mark ready'/'marked READY' vocabulary for the identical transition in 4 reachable error strings (PERIOD_HAS_READY_DECLARATION, NOT_READY, POPULATION_CHANGED_SINCE_READY, APPROVED_POPULATION_UNKNOWN). Fixed in be1c752, verified via typecheck/full-suite/build/E2E, all green."
+        },
+        {
+          "area": "S2 guidance <-> S3 transition copy",
+          "verdict": "MINOR ISSUE, NOT FIXED -- already disclosed and deliberate",
+          "detail": "src/domain/guidance/i19.ts's guidance-card title still reads 'Mark {shipment} ready' rather than the S3-renamed 'Ready for declaration'. This is real and user-observable, but was an explicit, disclosed, deliberate scope decision recorded verbatim in commit 116b7c8's own message ('Deliberately NOT touched: the S2 guidance engine's own title... reopening S2 for a cosmetic label match isn't warranted'). Not reopened here -- a known, accepted trade-off, not a defect this check discovered."
+        },
+        {
+          "area": "S3 stale-calculation handling <-> S2 guidance",
+          "verdict": "CLEAN",
+          "detail": "I19's guidance copy is carefully scoped to never claim filing-readiness or calculation currency -- only 'a resolved determination on every line' and, separately, 'eligible to be included when filed.' The real gate (LINE_NOT_CALCULATED/LINE_CALCULATION_STALE) lives correctly downstream in src/domain/declarations/completeness.ts and surfaces as named blockers at the actual filing-approval attempt. No false confidence is introduced by the guidance layer."
+        },
+        {
+          "area": "S1 navigation <-> S3 new UI surfaces",
+          "verdict": "CLEAN",
+          "detail": "S3 added no new routes -- all new components live inside the pre-existing /shipments and /shipments/[id] routes already covered by S1's nav-deriving logic."
+        },
+        {
+          "area": "Tenant authorization composition",
+          "verdict": "CLEAN",
+          "detail": "Every S3 read path in app/(importer)/shipments/[id]/page.tsx (getShipmentDetail, getLatestCalculationsByShipment, listAvailableActualEmissionData, checkActualDeterminationStalenessByShipment, getDefaultReferenceForLine) receives org_id from the same single getCurrentOrgSummary call S1/S2 established. getShipmentEmissionsTotal takes no org_id because it performs no I/O of its own -- confirmed it is a pure aggregation over already org-scoped data."
+        },
+        {
+          "area": "Guidance dismissals <-> S3 surfaces",
+          "verdict": "CLEAN",
+          "detail": "Dismissal is a dashboard-only, per-guidance-item-id mechanism; S3's shipment-page readiness banner and emissions total are static page content with no guidance-item identity to dismiss. Different mechanisms by design, not an inconsistency."
+        }
+      ]
+    }
+  },
+  "overall_verdict": "PASS",
+  "blocker_found": false,
+  "action_taken": "One confirmed, narrowly-scoped integration defect (4 stray strings in one file) was fixed in-place per this check's own explicit allowance ('do NOT modify implementation during this check unless a confirmed integration defect is found'), verified with a full regression pass, and committed separately (be1c752) rather than folded silently into the S3 certification record.",
+  "push_authorization": "Per the explicit instruction accompanying this check, push of feature/sme-experience is authorized once this check passes. No merge, no deploy, no PR -- push only.",
+  "s4_authorization": "Per the same explicit instruction, S4 begins automatically once push succeeds and the remote HEAD is verified to match be1c752."
+}
