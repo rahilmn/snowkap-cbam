@@ -122,7 +122,32 @@ export function CompletenessReportCard(
       ) : report.complete ? (
         <div className="p-4">
           <Badge tone="success">
-            Complete -- ready to approve for filing
+            {
+              // 2026-09-07 (S5 review round 4, finding S5R4-GUID-B1).
+              // `report.complete` alone answers "were there any
+              // blockers at the last refresh," never "what can the
+              // reader still do about it" -- completeness_report is
+              // frozen the instant a declaration leaves DRAFT
+              // (app.prevent_declaration_fact_change, 20260905110000)
+              // and is never cleared on READY -> FILED_RECORDED, so
+              // every one of this codebase's real FILED_RECORDED
+              // declarations (confirmed live: 22/22, all complete:true)
+              // rendered the DRAFT-only "ready to approve for filing"
+              // wording on an already-approved, already-filed,
+              // permanent compliance record -- right beside the
+              // FiledSnapshotCard showing it was, in fact, already
+              // filed. declarationStatus is already a prop this
+              // component receives and uses one branch up (the
+              // DATASET_SUPERSEDED stale message); this success branch
+              // had never used it at all.
+              declarationStatus === "FILED_RECORDED"
+                ? "Complete -- filed"
+                : declarationStatus === "READY"
+                  ? "Complete -- approved for filing"
+                  : declarationStatus === "VOID"
+                    ? "Complete"
+                    : "Complete -- ready to approve for filing"
+            }
           </Badge>
         </div>
       ) : (
