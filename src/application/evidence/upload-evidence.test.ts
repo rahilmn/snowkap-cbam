@@ -815,7 +815,7 @@ describe(
     );
 
     it(
-      "2026-09-07 (S5 review round 4, finding S5R4-AUTHZ-B1): still deletes storage then the metadata row, in order, once the array update succeeds",
+      "2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y2): deletes the metadata row then storage, in order, once the array update succeeds -- reversed from round 4's order, see removeEvidenceFile's own doc comment for why",
       async () => {
         const recorder =
           makeRecorder();
@@ -924,7 +924,7 @@ describe(
     );
 
     it(
-      "does not report OK when RLS silently filters the metadata DELETE to zero rows",
+      "does not report OK when RLS silently filters the metadata DELETE to zero rows -- and never touches storage, closing the S5R5-AUTHZ-Y2 race by construction",
       async () => {
         // 2026-08-31 (P13 final round). PostgREST returns NO error for a
         // DELETE that RLS filters to zero rows, so `deleteError` was
@@ -939,6 +939,15 @@ describe(
         //
         // manage-membership.ts:236-243 already carries the fix pattern
         // (.select("id") + zero-rows guard) for exactly this hazard.
+        //
+        // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y2). Now
+        // that the metadata delete runs BEFORE storage, this exact
+        // zero-rows outcome is reported as EMISSION_DATA_VERIFIED
+        // (the array update just above already ruled out every other
+        // realistic cause) rather than the generic PERSIST_FAILED it
+        // used to fall through to -- and storage is never even reached,
+        // so there is no longer a way for this scenario to strand a
+        // deleted object behind a surviving row, or vice versa.
         const recorder =
           makeRecorder();
 
@@ -963,7 +972,11 @@ describe(
           );
 
         expect(result).toEqual(
-          { status: "REJECTED", reason: "PERSIST_FAILED" },
+          { status: "REJECTED", reason: "EMISSION_DATA_VERIFIED" },
+        );
+
+        expect(recorder.storageOps).toEqual(
+          [],
         );
       },
     );
@@ -998,8 +1011,19 @@ describe(
     );
 
     it(
-      "reports STORAGE_DELETE_FAILED and leaves the metadata row intact when the storage delete fails",
+      "2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y2): still reports OK when the storage delete fails, having already deleted the metadata row -- a failure to reclaim the bytes only leaks storage, it can no longer strand a citation now that the citing row is gone first",
       async () => {
+        // Before this fix, storage ran first: a storage failure stopped
+        // the function before the metadata row was ever touched, and
+        // the caller saw STORAGE_DELETE_FAILED ("Try again") because
+        // retrying was genuinely still possible -- both rows were still
+        // intact. Now that the metadata row is deleted FIRST (see
+        // removeEvidenceFile's own doc comment), a storage failure at
+        // this point happens strictly AFTER the record has already
+        // stopped citing this file at all, so it is treated as a
+        // best-effort compensating cleanup, matching uploadEvidenceFile's
+        // own documented posture for compensating actions elsewhere in
+        // this file: its own failure is not itself surfaced.
         const recorder =
           makeRecorder();
 
@@ -1008,16 +1032,10 @@ describe(
             makeMockSupabase(
               {
                 evidence_files: { data: evidenceFileRow, error: null },
-                // Fixture completed 2026-08-31: this case never modelled
-                // the owning-record read, and so was reaching the storage
-                // step only because removeEvidenceFile used to fail OPEN
-                // on that read. Now that it fails closed, the fixture has
-                // to describe what actually happens in this scenario -- a
-                // successful, non-VERIFIED ownership read, followed by a
-                // storage failure. The assertions below are unchanged.
                 emission_data: [
                   { data: { entered_by_org_id: "org-1", evidence_file_ids: ["evidence-file-1"] }, error: null },
                 ],
+                audit_events: { data: null, error: null },
               },
               { removeError: { message: "storage denied" } },
               recorder,
@@ -1027,13 +1045,19 @@ describe(
           );
 
         expect(result).toEqual(
-          { status: "REJECTED", reason: "STORAGE_DELETE_FAILED" },
+          { status: "OK" },
         );
 
         expect(
           recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
         ).toBe(
-          false,
+          true,
+        );
+
+        expect(
+          recorder.storageOps.some((op) => op.op === "remove" && op.paths?.includes(evidenceFileRow.storage_path)),
+        ).toBe(
+          true,
         );
       },
     );

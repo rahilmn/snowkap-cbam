@@ -461,7 +461,6 @@ export type RemoveEvidenceFileResult =
       reason:
         | "NOT_FOUND"
         | "FETCH_FAILED"
-        | "STORAGE_DELETE_FAILED"
         | "PERSIST_FAILED"
         | "CAPABILITY_NOT_HELD"
         | "EMISSION_DATA_VERIFIED";
@@ -527,12 +526,51 @@ export type RemoveEvidenceFileResult =
  * storage/metadata cleanup that follows is just carrying out an
  * already-safely-decided removal, never racing to decide one.
  *
- * Storage delete still runs BEFORE the metadata delete, and a
- * storage-delete failure still stops here (nothing else is touched):
- * the safer failure mode remains "both still exist, retryable" rather
- * than "metadata gone but a storage object now orphaned with no owning
- * row." Concurrent removal/upload races against the array update
- * itself remain closed by construction (a single atomic `array_remove`
+ * 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y2). The metadata
+ * delete now runs BEFORE the storage delete -- reversing the order the
+ * S5R4-AUTHZ-B1 fix above left in place, which still had one residual
+ * race: a concurrent, fully legitimate VERIFY landing strictly BETWEEN
+ * the OLD storage delete and the OLD metadata delete committed while
+ * the evidence_files row still existed, so evidence_storage_delete_
+ * own_org's own live check (there must be no evidence_files row citing
+ * this object under a VERIFIED parent) still permitted the storage
+ * delete that had already run moments earlier -- and then evidence_
+ * files_delete_own_org correctly refused the metadata delete (the
+ * parent was now VERIFIED), stranding a metadata row that cites a
+ * storage object no longer there: a "zombie" evidence file, live and
+ * visible in the producer's own evidence list, silently
+ * un-downloadable. Live-reproduced end to end (real psql BEGIN...
+ * ROLLBACK, impersonating a real MEMBER and a real ADMIN of the same
+ * org): the ordering race reproduced exactly as described.
+ *
+ * Deleting the metadata row first closes it by construction rather
+ * than by timing: evidence_storage_delete_own_org's own guard is keyed
+ * on an evidence_files row citing this exact storage_path still
+ * existing, so once that row is gone a VERIFY committing at any point
+ * afterward has nothing left to strand -- there is no citing row left
+ * for the storage delete that follows to leave dangling. A zero-rows
+ * metadata delete (the same PostgREST-reports-no-error-on-an-RLS-
+ * filtered-DELETE hazard manage-membership.ts:236-243 already guards
+ * against) is now reported as EMISSION_DATA_VERIFIED rather than the
+ * generic PERSIST_FAILED it used to fall through to: given the array
+ * update above just succeeded, the only realistic way evidence_files_
+ * delete_own_org's own `verification_status <> 'VERIFIED'` clause
+ * filters this DELETE to zero rows moments later is a concurrent
+ * VERIFY committing in that narrow window -- the same treatment the
+ * array update's own error already gets, for the identical reason.
+ *
+ * The storage delete that follows a successful metadata delete is
+ * best-effort: by that point the record no longer cites this file at
+ * all (both the array update and the metadata row are already gone),
+ * so removal has already fully succeeded from the record's own point
+ * of view, and a failure to reclaim the underlying bytes only leaks
+ * storage -- it can never again strand a citation, because the row
+ * that would have cited it is already deleted. Matches
+ * uploadEvidenceFile's own documented "best-effort by design" posture
+ * for compensating actions elsewhere in this file.
+ *
+ * Concurrent removal/upload races against the array update itself
+ * remain closed by construction (a single atomic `array_remove`
  * UPDATE, so two concurrent writers serialize at the row level instead
  * of overwriting each other -- the class of bug a P13 audit round
  * partially closed with a retry, and an S5 audit round closed fully
@@ -639,29 +677,14 @@ export async function removeEvidenceFile(
     };
   }
 
-  const { error: storageError } =
-    await supabase.storage
-      .from(EVIDENCE_STORAGE_BUCKET)
-      .remove(
-        [fetched.file.storage_path],
-      );
-
-  if (storageError) {
-    return {
-      status: "REJECTED",
-      reason: "STORAGE_DELETE_FAILED",
-    };
-  }
-
-  // Same .select("id") + zero-rows guard manage-membership.ts:236-243
+  // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y2). Runs BEFORE
+  // the storage delete now -- see this function's own doc comment for
+  // the full ordering rationale and the exact race this closes. Same
+  // .select("id") + zero-rows guard manage-membership.ts:236-243
   // already applies to its own DELETE, for the identical reason:
   // PostgREST reports NO error for a DELETE that RLS filters to zero
   // rows, so `deleteError` alone cannot distinguish "deleted" from
-  // "silently refused." evidence_files_delete_own_org (20260829560000)
-  // filters exactly that way when the parent is VERIFIED -- though by
-  // this point the array update above has already succeeded, so this
-  // specific refusal reason should not recur; PERSIST_FAILED remains
-  // the honest label for whatever it is if it somehow does.
+  // "silently refused."
   const { data: deleted, error: deleteError } =
     await supabase
       .from("evidence_files")
@@ -669,12 +692,29 @@ export async function removeEvidenceFile(
       .eq("id", evidenceFileId)
       .select("id");
 
-  if (deleteError || !deleted || deleted.length === 0) {
+  if (deleteError) {
     return {
       status: "REJECTED",
       reason: "PERSIST_FAILED",
     };
   }
+
+  if (!deleted || deleted.length === 0) {
+    return {
+      status: "REJECTED",
+      reason: "EMISSION_DATA_VERIFIED",
+    };
+  }
+
+  // Best-effort from here on: see this function's own doc comment for
+  // why a failure to reclaim the storage bytes is never surfaced as a
+  // rejection once the metadata row (and its citation, via the array
+  // update above) are already gone.
+  await supabase.storage
+    .from(EVIDENCE_STORAGE_BUCKET)
+    .remove(
+      [fetched.file.storage_path],
+    );
 
   await recordAuditEvent(
     supabase,

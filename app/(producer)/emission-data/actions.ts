@@ -520,9 +520,6 @@ function removeEvidenceFileMessageFor(
     case "NOT_FOUND":
       return "That evidence file could not be found.";
 
-    case "STORAGE_DELETE_FAILED":
-      return "Could not remove the file from storage. Try again.";
-
     case "CAPABILITY_NOT_HELD":
       return "Your organization is not set up as a CBAM producer/operator.";
 
