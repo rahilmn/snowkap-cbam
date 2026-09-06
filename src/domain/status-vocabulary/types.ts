@@ -61,6 +61,25 @@ export type ReviewStatusKey =
   | "review.IMPORTER_TRANSCRIPTION"
   | "review.REJECTED";
 
+/**
+ * S4 (producer/trust/sharing), v2.1.1 sections 10/13: the THIRD
+ * independent fact, alongside SOURCE (InstallationRecordProvenance)
+ * and REVIEW (ReviewStatusKey above) -- never collapsed into either.
+ * A verifier report is the OPERATOR's own declaration that one exists;
+ * this axis carries no claim that Snowkap validated, checked, or
+ * independently confirmed it (see verifier-report-badges.ts and
+ * verification-phrases.ts for the exact allowed wording). Hand-written
+ * literals, matching ReviewStatusKey's own precedent immediately
+ * above -- like "review", "verifier report declared" is not backed by
+ * its own rich domain type elsewhere; it is a plain boolean fact
+ * (EmissionDataDeclarationContext.verifier_report_declared) presented
+ * through this vocabulary the same way review's own boolean-shaped
+ * VerificationStatus is.
+ */
+export type VerifierReportStatusKey =
+  | "verifier_report.NOT_DECLARED"
+  | "verifier_report.DECLARED";
+
 export type ShipmentStatusKey =
   `shipment.${ShipmentStatus}`;
 
@@ -124,6 +143,7 @@ export type IncompleteLineReasonKey =
 
 export type StatusKey =
   | ReviewStatusKey
+  | VerifierReportStatusKey
   | ShipmentStatusKey
   | DeclarationStatusKey
   | EmissionRecordStatusKey

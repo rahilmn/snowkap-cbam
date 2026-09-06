@@ -25,9 +25,9 @@ function escapeRegExp(
   );
 }
 
-function usesOnlyAllowedVerificationPhrases(
+function stripAllowedVerificationPhrases(
   text: string,
-): boolean {
+): string {
   let sanitized =
     text;
 
@@ -44,8 +44,16 @@ function usesOnlyAllowedVerificationPhrases(
       );
   }
 
+  return sanitized;
+}
+
+function usesOnlyAllowedVerificationPhrases(
+  text: string,
+): boolean {
   return !VERIFICATION_WORD.test(
-    sanitized,
+    stripAllowedVerificationPhrases(
+      text,
+    ),
   );
 }
 
@@ -84,10 +92,23 @@ describe(
           expect(key.toLowerCase()).not.toContain("validated");
         }
 
+        // Stripped of the allowed phrases first (S4, v2.1.1 sections
+        // 10/13 added "verifier_report.DECLARED": "...(not validated
+        // by Snowkap)" -- the NEGATION of the exact claim this test
+        // bans, already pre-approved in ALLOWED_VERIFICATION_PHRASES
+        // as "not validated by snowkap". A bare substring check cannot
+        // tell "X is validated by Snowkap" from "X is NOT validated by
+        // Snowkap" apart; stripping the allowed (negated) phrase first
+        // is what makes this test check what its own title says,
+        // rather than banning the one sentence v2.1.1 requires.
         for (
           const label of Object.values(STATUS_LABEL)
         ) {
-          expect(label.toLowerCase()).not.toContain("validated by snowkap");
+          expect(
+            stripAllowedVerificationPhrases(
+              label.toLowerCase(),
+            ),
+          ).not.toContain("validated by snowkap");
         }
       },
     );

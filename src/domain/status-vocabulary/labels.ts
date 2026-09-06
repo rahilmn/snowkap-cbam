@@ -28,6 +28,11 @@ export const STATUS_LABEL: Record<StatusKey, string> =
     "review.IMPORTER_TRANSCRIPTION": "Transcription reviewed internally by the recording organization",
     "review.REJECTED": "Rejected in internal review",
 
+    // -- verifier_report (v2.1.1 sections 10/13 -- the operator's OWN
+    // declaration that a verifier report exists, never a Snowkap claim) --
+    "verifier_report.NOT_DECLARED": "No verifier report declared",
+    "verifier_report.DECLARED": "Verifier report declared by operator (not validated by Snowkap)",
+
     // -- shipment --
     "shipment.DRAFT": "Draft",
     "shipment.READY": "Ready for declaration",
@@ -128,6 +133,10 @@ export const STATUS_TONE: Record<StatusKey, StatusTone> =
     "review.OPERATOR_INTERNAL": "success",
     "review.IMPORTER_TRANSCRIPTION": "success",
     "review.REJECTED": "danger",
+
+    // -- verifier_report --
+    "verifier_report.NOT_DECLARED": "neutral",
+    "verifier_report.DECLARED": "success",
 
     // -- shipment --
     "shipment.DRAFT": "neutral",

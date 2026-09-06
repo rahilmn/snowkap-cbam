@@ -1,6 +1,7 @@
 export type {
   StatusKey,
   ReviewStatusKey,
+  VerifierReportStatusKey,
   ShipmentStatusKey,
   DeclarationStatusKey,
   EmissionRecordStatusKey,
@@ -17,6 +18,10 @@ export type {
 export {
   reviewBadgeFor,
 } from "./review-badges";
+
+export {
+  verifierReportBadgeFor,
+} from "./verifier-report-badges";
 
 export {
   shipmentStatusKey,
