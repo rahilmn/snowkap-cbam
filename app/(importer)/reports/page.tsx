@@ -248,12 +248,39 @@ function ReportBody(
     );
   }
 
+  // 2026-09-07 (S5 review round 6, finding S5R6-NUM-A). "None are
+  // calculated yet" collapses NOT_CALCULATED/NO_DETERMINATION (a line
+  // genuinely never touched) together with CALCULATION_STALE (a line
+  // that already has a real, frozen calculation, excluded here only
+  // because it was redetermined without being recalculated) -- the
+  // exact "every contributing item is simultaneously excluded" shape
+  // round 5's own S5R5-A-1 fix already corrected at the shipment-level
+  // headline (sum-shipment-emissions.ts's staleLineCount). The
+  // application layer already carries the distinction per line
+  // (incomplete_lines[].reason, and IncompleteLinesCard's own "Why"
+  // column below already renders it correctly) -- only this banner/KPI
+  // never threaded it up.
+  const staleLineCount =
+    summary.incomplete_lines.filter(
+      (line) => line.reason === "CALCULATION_STALE",
+    ).length;
+
   return (
     <div className="flex flex-col gap-4">
       {summary.calculated_line_count === 0 ? (
         <div className="rounded-[var(--radius-md)] bg-[var(--color-warning-100)] px-4 py-3 text-sm text-[var(--color-warning-700)]">
           {summary.line_count} line(s) exist in {periodLabel}, but none are
           calculated yet -- see the list below.
+          {staleLineCount > 0 ? (
+            <>
+              {" "}
+              {staleLineCount} of them already {staleLineCount === 1 ? "has" : "have"} a
+              calculation, excluded here only because it's stale
+              (redetermined without being recalculated since) -- see the
+              &quot;Why&quot; column below, not because it was never
+              calculated.
+            </>
+          ) : null}
         </div>
       ) : null}
 
@@ -278,7 +305,15 @@ function ReportBody(
           value={
             summary.total_embedded_emissions_tco2e !== null
               ? `${summary.total_embedded_emissions_tco2e} tCO2e`
-              : "Not yet available"
+              // 2026-09-07 (S5 review round 6, finding S5R6-NUM-A). A
+              // total excluded because every contributing line is
+              // stale (already calculated, just against a superseded
+              // determination) is a different fact from one where
+              // nothing has ever been calculated -- see this
+              // function's own staleLineCount comment above.
+              : staleLineCount === summary.line_count && staleLineCount > 0
+                ? "Excluded (stale)"
+                : "Not yet available"
           }
         />
       </div>
