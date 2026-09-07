@@ -138,10 +138,24 @@ export function CompletenessReportCard(
                 // wording in actions.ts). Still hedges on
                 // anyMemberShipmentLocked: a LOCKED member has no
                 // recalculate path either (canRecalculate is READY-only).
+                //
+                // 2026-09-07 (S5 review round 9, finding S5R9-VOCAB-B1).
+                // The two messages below originally ended with "...then
+                // approve this declaration for filing again" -- a
+                // DRAFT->READY action (MarkReadyForm) that DOES NOT
+                // EXIST as a control while this declaration is already
+                // READY (declaration-actions.tsx renders only
+                // RecordFiledForm then), and is never needed here anyway
+                // -- recalculating a READY line never reopens the
+                // shipment, so the declaration stays READY throughout
+                // and there is nothing to re-approve. Contradicted this
+                // very branch's own comment above it. Reworded to match
+                // filedMessageFor's own correct CALCULATION_ENGINE_
+                // OUTDATED wording ("...then record the filing").
                 declarationStatus === "READY"
                 ? anyMemberShipmentLocked
-                  ? "One or more lines were calculated by an earlier version of the calculation engine, so this report no longer reflects the current state. If the affected member shipment is still READY (not LOCKED), recalculate those lines directly on the shipment's own detail page (no need to reopen it), then approve this declaration for filing again. If it has already been LOCKED (for example by an earlier filing -- the routine case for an amendment), this cannot be corrected through the normal declaration flow -- contact support."
-                  : "One or more lines were calculated by an earlier version of the calculation engine, so this report no longer reflects the current state. Recalculate those lines directly on the shipment's own detail page (no need to reopen it), then approve this declaration for filing again."
+                  ? "One or more lines were calculated by an earlier version of the calculation engine, so this report no longer reflects the current state. If the affected member shipment is still READY (not LOCKED), recalculate those lines directly on the shipment's own detail page (no need to reopen it), then record the filing -- the earlier results are kept for provenance. If it has already been LOCKED (for example by an earlier filing -- the routine case for an amendment), this cannot be corrected through the normal declaration flow -- contact support."
+                  : "One or more lines were calculated by an earlier version of the calculation engine, so this report no longer reflects the current state. Recalculate those lines directly on the shipment's own detail page (no need to reopen it), then record the filing -- the earlier results are kept for provenance."
                 : "One or more lines were calculated by an earlier version of the calculation engine, so this report no longer reflects the current state. Click Generate / refresh draft to recheck completeness against the current calculation engine version."
               : staleReason === "PERIOD_MEMBERSHIP_CHANGED"
               ? // 2026-09-07 (S5 review round 7, finding S5R7-A-B1,
@@ -270,12 +284,31 @@ export function CompletenessReportCard(
                         // report. Wording matches declarations/
                         // actions.ts's own DATASET_SUPERSEDED message
                         // (finding A2) rather than inventing new prose.
-                        blocker.reason === "LINE_DATASET_SUPERSEDED" && anyMemberShipmentLocked ? (
+                        //
+                        // 2026-09-07 (S5 review round 9, finding
+                        // S5R9-VOCAB-B2). LINE_CALCULATION_ENGINE_
+                        // OUTDATED (added round 8, S5R8-A-B2) is the
+                        // identical shape -- a LOCKED shipment's line can
+                        // never be recalculated either (record_
+                        // calculation_result refuses LOCKED
+                        // unconditionally, regardless of engine version)
+                        // -- but this hint was never extended to it,
+                        // even though the sibling `stale` banner above
+                        // DOES hedge CALCULATION_ENGINE_OUTDATED on the
+                        // same anyMemberShipmentLocked signal. Verb
+                        // varies with the blocker's own recovery action
+                        // (redetermine vs. recalculate); everything else
+                        // matches.
+                        (blocker.reason === "LINE_DATASET_SUPERSEDED" || blocker.reason === "LINE_CALCULATION_ENGINE_OUTDATED") &&
+                        anyMemberShipmentLocked ? (
                           <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                             If this shipment has already been LOCKED (the
                             routine case for an amendment), it cannot be
-                            redetermined through the normal declaration
-                            flow -- contact support.
+                            {" "}
+                            {blocker.reason === "LINE_DATASET_SUPERSEDED" ? "redetermined" : "recalculated"}
+                            {" "}
+                            through the normal declaration flow -- contact
+                            support.
                           </p>
                         ) : null
                       }
