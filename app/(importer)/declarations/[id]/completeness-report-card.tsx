@@ -87,6 +87,47 @@ function noReportSubtitle(
   return "Not yet generated -- click Generate / refresh draft to compute this.";
 }
 
+/**
+ * 2026-09-07 (S5 review round 12, finding S5R12-VOCAB-B1, live-
+ * reproduced). The blockers table below (rendered whenever `report` is
+ * non-null and `report.complete === false`) was the ONE branch in this
+ * file that never referenced declarationStatus at all -- every other
+ * branch (the null-report copy, the `stale` messages, the success
+ * badge) had already been made status-aware across rounds 3-11. This
+ * branch was assumed reachable only for DRAFT, but a READY declaration
+ * can genuinely reach it too: completeness_report is frozen the instant
+ * a declaration leaves DRAFT, and computeCompletenessReportStaleness's
+ * own staleness detection only ever supplements a cached complete:true
+ * report -- a cached complete:false report is never flagged stale by
+ * anything, so a READY declaration whose completeness_report was left
+ * stale by an out-of-band member_shipment_ids write (the same class of
+ * RLS-sanctioned bare-client bypass rounds 10 and 11 already
+ * established as live-reachable on this identical file) shows this
+ * exact itemized blocker table -- with no caveat that the list might be
+ * disconnected from the member set actually approved -- directly beside
+ * DeclarationActions' live, unconditional "Record filed" control.
+ * Returns null (no caveat needed) for DRAFT, where "Generate / refresh
+ * draft" is the real, current, self-service fix this table already
+ * implies.
+ */
+function blockerTableCaveat(
+  declarationStatus: DeclarationStatusForCard,
+): string | null {
+  if (declarationStatus === "READY") {
+    return "This declaration is READY, but this list reflects an earlier check and may not match the shipments actually approved for filing -- there is no \"Generate / refresh draft\" control available once a declaration is READY. Contact support before relying on it.";
+  }
+
+  if (declarationStatus === "FILED_RECORDED") {
+    return "This declaration has already been filed. Every fact this report would show was independently re-checked at filing time -- see the filed snapshot below rather than this list, which reflects an earlier, uncleared check.";
+  }
+
+  if (declarationStatus === "VOID") {
+    return "This declaration was voided. This list reflects its state before that and is no longer current.";
+  }
+
+  return null;
+}
+
 /** See noReportSubtitle's own doc comment -- the matching body copy. */
 function noReportBody(
   declarationStatus: DeclarationStatusForCard,
@@ -304,7 +345,22 @@ export function CompletenessReportCard(
           </Badge>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div>
+          {
+            blockerTableCaveat(declarationStatus) ? (
+              <div className="border-b border-[var(--border-default)] p-4">
+                <Badge tone="warning">
+                  Needs refresh
+                </Badge>
+
+                <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                  {blockerTableCaveat(declarationStatus)}
+                </p>
+              </div>
+            ) : null
+          }
+
+          <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-[var(--border-default)] text-[var(--text-tertiary)]">
@@ -404,6 +460,7 @@ export function CompletenessReportCard(
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </Card>
