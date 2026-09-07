@@ -194,9 +194,55 @@ export function createOpaqueSessionCookieAdapter(
       // sign-out, or a refresh that failed irrecoverably. End the
       // application session too, rather than leaving a live row whose
       // browser has been told to forget it.
+      //
+      // 2026-09-07 (S5 review round 11, finding S5R11-SF-B1, live-
+      // reproduced). revokeAppSession/persistAppSession both THROW on a
+      // genuine database error (revokeAppSession since round 10's
+      // S10-A-2; persistAppSession has always thrown on its own insert
+      // error) -- correct for their OTHER, directly-awaited callers
+      // (signOutAction's own fallback, changePasswordForSession), where
+      // a caller can catch the throw and decide what to do. This
+      // `setAll` function is different: @supabase/ssr's createServerClient
+      // wires it in as an internal `onAuthStateChange` listener callback
+      // (applyServerStorage -> setAll), invoked from inside GoTrueClient's
+      // own `_notifyAllSubscribers`, which every session-mutating public
+      // method (setSession, the token-refresh path behind getUser(),
+      // signInWithPassword, ...) awaits from inside its OWN try/catch --
+      // and every one of those catches ONLY converts an `AuthError` to a
+      // returned `{error}`; anything else is re-thrown. So a throw from
+      // in here propagates as an UNCAUGHT exception out of the public
+      // Supabase Auth method that triggered it -- and proxy.ts calls
+      // `supabase.auth.getUser()` with no try/catch on nearly every
+      // route, specifically to refresh the session on each request. A
+      // transient DB blip during an ordinary refresh would otherwise
+      // crash the middleware for that one request. Live-reproduced: a
+      // forced persistAppSession DB error, reached via a real
+      // supabase.auth.setSession() call (the same _notifyAllSubscribers
+      // path getUser()'s own refresh takes), propagated as an uncaught
+      // rejection with a stack trace through this exact file.
+      //
+      // `setAll` itself must therefore never throw. Both calls below are
+      // caught and degraded instead: a revoke failure is logged and the
+      // browser cookie is still cleared (best effort -- the row may stay
+      // live server-side for its TTL, the same residual exposure that
+      // existed before round 10 ever touched this file, but the request
+      // completes normally rather than crashing); a persist failure is
+      // logged and no new cookie is set (this one request's refresh is
+      // silently skipped -- the existing cookie, if any, is left alone
+      // for the next request to retry, rather than taking down an
+      // unrelated page load over a transient write failure).
       if (meaningful.length === 0) {
         if (token) {
-          await revokeAppSession(token);
+          try {
+            await revokeAppSession(
+              token,
+            );
+          } catch (error) {
+            console.error(
+              "opaque-session-cookies: revokeAppSession failed during sign-out; clearing the browser cookie anyway.",
+              error,
+            );
+          }
         }
 
         bridge.set(
@@ -211,22 +257,29 @@ export function createOpaqueSessionCookieAdapter(
         return;
       }
 
-      const nextToken =
-        await persistAppSession(
-          {
-            token,
-            cookies:
-              meaningful.map(
-                ({ name, value }) => ({ name, value }),
-              ),
-          },
-        );
+      try {
+        const nextToken =
+          await persistAppSession(
+            {
+              token,
+              cookies:
+                meaningful.map(
+                  ({ name, value }) => ({ name, value }),
+                ),
+            },
+          );
 
-      if (nextToken !== token) {
-        bridge.set(
-          APP_SESSION_COOKIE,
-          nextToken,
-          appSessionCookieOptions(),
+        if (nextToken !== token) {
+          bridge.set(
+            APP_SESSION_COOKIE,
+            nextToken,
+            appSessionCookieOptions(),
+          );
+        }
+      } catch (error) {
+        console.error(
+          "opaque-session-cookies: persistAppSession failed while refreshing the session; leaving the existing cookie untouched for this request.",
+          error,
         );
       }
     },

@@ -345,9 +345,27 @@ export async function signOutAction(): Promise<void> {
       )?.value;
 
     if (appSessionToken) {
-      await revokeAppSession(
-        appSessionToken,
-      );
+      // 2026-09-07 (S5 review round 11, finding S5R11-SF-B2, live-
+      // reproduced). revokeAppSession now throws on a genuine database
+      // error (round 10, S10-A-2) -- correct for this call, but this
+      // function's own doc comment above guarantees "the redirect is
+      // unconditional either way," and an uncaught throw here would
+      // execute NEITHER the cookie-clear NOR the redirect on a "double
+      // failure" (signOut() itself already errored, and this best-effort
+      // revoke also hits a genuine DB error), stranding the user on a
+      // raw error page -- precisely the outcome this function exists to
+      // prevent. Best effort: attempt the revoke, but proceed to clear
+      // the cookie and redirect regardless of whether it succeeded.
+      try {
+        await revokeAppSession(
+          appSessionToken,
+        );
+      } catch (revokeError) {
+        console.error(
+          "signOutAction: revokeAppSession failed on the error-recovery path; clearing the cookie and redirecting anyway.",
+          revokeError,
+        );
+      }
     }
 
     cookieStore.set(

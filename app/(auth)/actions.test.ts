@@ -719,5 +719,37 @@ describe(
         );
       },
     );
+
+    it(
+      "2026-09-07 (S5 review round 11, finding S5R11-SF-B2): still clears the cookie and redirects on a DOUBLE failure -- signOut() errors AND the fallback revokeAppSession also throws -- never strands the caller on an uncaught exception",
+      async () => {
+        redirectMock.mockClear();
+        cookieSetMock.mockClear();
+
+        signOutMock.mockResolvedValueOnce(
+          { error: { message: "session missing" } },
+        );
+
+        revokeAppSessionMock.mockImplementationOnce(
+          async () => {
+            throw new Error(
+              "app session: could not revoke the session (57014).",
+            );
+          },
+        );
+
+        await expect(
+          signOutAction(),
+        ).rejects.toBe(
+          REDIRECT_SENTINEL,
+        );
+
+        expect(cookieSetMock).toHaveBeenCalled();
+
+        expect(redirectMock).toHaveBeenCalledWith(
+          "/sign-in?signed_out=unconfirmed",
+        );
+      },
+    );
   },
 );
