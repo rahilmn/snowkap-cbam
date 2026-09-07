@@ -20,6 +20,18 @@ export const ALLOWED_VERIFICATION_PHRASES: readonly string[] =
     "article 8 verification",
     "verifier report",
     "verification body",
+    // 2026-09-07 (S5 review round 6, finding S5R6-A-Y1). This entry
+    // contains no verif-word substring, so it never itself rescues
+    // anything from THIS file's own VERIFICATION_WORD check -- every
+    // real occurrence sits directly adjacent to "verifier report",
+    // which already strips the only verif-word present. Genuinely
+    // dead for that purpose, but NOT dead weight overall: labels.test.ts
+    // reuses this exact same array for its own, different "no label
+    // means validated by Snowkap" check, and strips this exact phrase
+    // first specifically so the pre-approved NEGATION ("not validated
+    // by Snowkap," the actual v2.1.1-mandated disclaimer) doesn't
+    // trip that unrelated ban. Kept for that reason -- verified by
+    // reading labels.test.ts before removing it.
     "not validated by snowkap",
     "snowkap is not an accredited verifier and does not provide verification",
     "request verification support",

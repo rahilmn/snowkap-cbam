@@ -78,6 +78,15 @@ const SCAN_ROOTS: string[] =
     "app/team",
     "components/shell",
     "components/guidance",
+    // 2026-09-07 (S5 review round 6, finding S5R6-A-Y1). components/
+    // guidance renders `item.title`/`item.reason` verbatim as JSX
+    // expression containers -- the literal prose lives entirely in the
+    // GuidanceItem-building domain modules under here (i19.ts,
+    // producer-rejected-emission-data.ts, pipeline.ts, etc.), not in
+    // the UI file itself, so listing components/guidance alone left
+    // the actual source of that prose unscanned. Confirmed live on
+    // /attention and the dashboard's guidance tile.
+    "src/domain/guidance",
   ];
 
 // A handful of single files outside the directory roots above.
