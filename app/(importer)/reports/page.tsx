@@ -628,6 +628,20 @@ function DatasetSupersededLinesCard(
                           redetermined through the normal declaration
                           flow. Contact support.
                         </p>
+                      ) : line.shipment_status === "READY" ? (
+                        // 2026-09-07 (S5 review round 7, finding
+                        // S5R7-A-B1). The LOCKED hedge above was the
+                        // only one this table had -- a READY (not yet
+                        // LOCKED) shipment's line rendered no hedge at
+                        // all, indistinguishable from a genuinely
+                        // editable DRAFT line, even though redetermining
+                        // it still requires reopening the shipment first
+                        // (shipment_lines stays DRAFT-only writable).
+                        <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                          This shipment is READY -- reopen it first, then
+                          redetermine the line against the current
+                          dataset.
+                        </p>
                       ) : null
                     }
                   </td>
