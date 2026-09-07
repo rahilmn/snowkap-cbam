@@ -728,5 +728,77 @@ describe(
         );
       },
     );
+
+    it(
+      "2026-09-07 (S5 review round 7, finding S5R7-A-2): chunks the installations lookup rather than issuing one oversized .in() call, when the org's issued grants span more than SHARING_GRANT_ID_CHUNK_SIZE distinct installations",
+      async () => {
+        const GRANT_COUNT =
+          150;
+
+        const grantRows =
+          Array.from(
+            { length: GRANT_COUNT },
+            (_, index) => (
+              {
+                ...directGrantRow,
+                id: `grant-chunk-${index}`,
+                installation_id: `installation-chunk-${index}`,
+              }
+            ),
+          );
+
+        const installationRows =
+          Array.from(
+            { length: GRANT_COUNT },
+            (_, index) => (
+              {
+                id: `installation-chunk-${index}`,
+                name: `Installation ${index}`,
+              }
+            ),
+          );
+
+        const recorder =
+          { fromCalls: [] as string[] };
+
+        const result =
+          await listSharedDataStatus(
+            makeMockSupabase(
+              {
+                sharing_grants: { data: grantRows, error: null },
+                installations: { data: installationRows, error: null },
+                organizations: { data: [{ id: "org-2", name: "Acme Steel GmbH" }], error: null },
+                audit_events: { data: [], error: null },
+              },
+              recorder,
+            ),
+            orgId,
+          );
+
+        expect(result).toHaveLength(
+          GRANT_COUNT,
+        );
+
+        // 150 ids at SHARING_GRANT_ID_CHUNK_SIZE=100 -- exactly 2
+        // chunks, so exactly 2 separate `installations` queries AND 2
+        // separate `audit_events` queries, never 1 (the old,
+        // oversized-.in() shape for either).
+        expect(
+          recorder.fromCalls.filter(
+            (name) => name === "installations",
+          ),
+        ).toHaveLength(
+          2,
+        );
+
+        expect(
+          recorder.fromCalls.filter(
+            (name) => name === "audit_events",
+          ),
+        ).toHaveLength(
+          2,
+        );
+      },
+    );
   },
 );

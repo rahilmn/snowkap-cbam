@@ -203,6 +203,41 @@ function toConsumptionEvent(
 // fetchMemberShipments's batching -- paged here the same way.
 const AUDIT_EVENTS_PAGE_SIZE = 1000;
 
+// 2026-09-07 (S5 review round 7, finding S5R7-SHARE-Y1). grantIds below
+// is every grant this org has EVER issued (sharing_grants rows are
+// never deleted, only revoked) -- unlike AUDIT_EVENTS_PAGE_SIZE's own
+// row-count truncation, an oversized `.in("aggregate_id", grantIds)`
+// list overflows the REQUEST URL itself (PostgREST/the API gateway
+// rejects it with HTTP 414), well before 1000 total issued grants.
+// Matches the identical, already live-verified fix shape used for this
+// exact hazard elsewhere in this codebase (list-draft-shipments-with-
+// lines.ts's own SHIPMENT_ID_CHUNK_SIZE/chunk()).
+const SHARING_GRANT_ID_CHUNK_SIZE =
+  100;
+
+function chunk<T>(
+  items: T[],
+  size: number,
+): T[][] {
+  const chunks: T[][] =
+    [];
+
+  for (
+    let index = 0;
+    index < items.length;
+    index += size
+  ) {
+    chunks.push(
+      items.slice(
+        index,
+        index + size,
+      ),
+    );
+  }
+
+  return chunks;
+}
+
 async function fetchAllConsumptionAuditEvents(
   supabase: SupabaseClient,
   orgId: string,
@@ -212,50 +247,80 @@ async function fetchAllConsumptionAuditEvents(
     return { data: [], error: null };
   }
 
-  const allRows: AuditEventRow[] =
-    [];
-
-  let offset =
-    0;
-
-  for (;;) {
-    const { data, error } =
-      await supabase
-        .from("audit_events")
-        .select("id, occurred_at, actor_user_id, aggregate_id, payload")
-        .eq("org_id", orgId)
-        .eq("event_type", "sharing_grant.data_consumed")
-        .eq("aggregate_type", "SHARING_GRANT")
-        .in("aggregate_id", grantIds)
-        // `id` is a second, deterministic sort key purely to make
-        // `.range()` pagination stable across pages when two events
-        // share an occurred_at -- audit_events.id is a random UUID
-        // (20260828070000), not sequential, so its own ordering carries
-        // no meaning beyond breaking ties consistently.
-        .order("occurred_at", { ascending: false })
-        .order("id", { ascending: false })
-        .range(offset, offset + AUDIT_EVENTS_PAGE_SIZE - 1);
-
-    if (error) {
-      return { data: null, error };
-    }
-
-    const page =
-      (data as AuditEventRow[] | null) ?? [];
-
-    allRows.push(
-      ...page,
+  const grantIdChunks =
+    chunk(
+      grantIds,
+      SHARING_GRANT_ID_CHUNK_SIZE,
     );
 
-    if (page.length < AUDIT_EVENTS_PAGE_SIZE) {
-      break;
-    }
+  const chunkResults =
+    await Promise.all(
+      grantIdChunks.map(
+        async (grantIdsChunk) => {
+          const allRows: AuditEventRow[] =
+            [];
 
-    offset +=
-      AUDIT_EVENTS_PAGE_SIZE;
+          let offset =
+            0;
+
+          for (;;) {
+            const { data, error } =
+              await supabase
+                .from("audit_events")
+                .select("id, occurred_at, actor_user_id, aggregate_id, payload")
+                .eq("org_id", orgId)
+                .eq("event_type", "sharing_grant.data_consumed")
+                .eq("aggregate_type", "SHARING_GRANT")
+                .in("aggregate_id", grantIdsChunk)
+                // `id` is a second, deterministic sort key purely to
+                // make `.range()` pagination stable across pages when
+                // two events share an occurred_at -- audit_events.id
+                // is a random UUID (20260828070000), not sequential,
+                // so its own ordering carries no meaning beyond
+                // breaking ties consistently.
+                .order("occurred_at", { ascending: false })
+                .order("id", { ascending: false })
+                .range(offset, offset + AUDIT_EVENTS_PAGE_SIZE - 1);
+
+            if (error) {
+              return { data: null, error };
+            }
+
+            const page =
+              (data as AuditEventRow[] | null) ?? [];
+
+            allRows.push(
+              ...page,
+            );
+
+            if (page.length < AUDIT_EVENTS_PAGE_SIZE) {
+              break;
+            }
+
+            offset +=
+              AUDIT_EVENTS_PAGE_SIZE;
+          }
+
+          return { data: allRows, error: null as { message: string } | null };
+        },
+      ),
+    );
+
+  const firstError =
+    chunkResults.find(
+      (result) => result.error !== null,
+    )?.error ?? null;
+
+  if (firstError) {
+    return { data: null, error: firstError };
   }
 
-  return { data: allRows, error: null };
+  return {
+    data: chunkResults.flatMap(
+      (result) => result.data ?? [],
+    ),
+    error: null,
+  };
 }
 
 /**
@@ -413,10 +478,46 @@ export async function listSharedDataStatus(
   ] =
     await Promise.all(
       [
-        supabase
-          .from("installations")
-          .select("id, name")
-          .in("id", installationIds),
+        // 2026-09-07 (S5 review round 7, finding S5R7-A-2). installationIds
+        // is every distinct installation among ALL sharing_grants EVER
+        // issued by this org (grants are never deleted, only revoked --
+        // this file's own comment above already states this exact
+        // growth argument for the audit_events lookup) -- unlike
+        // max_rows=1000 row-count truncation, an oversized `.in()` list
+        // overflows the REQUEST URL itself (HTTP 414), well before 1000
+        // distinct installations. Chunked with the same
+        // SHARING_GRANT_ID_CHUNK_SIZE-style convention used just above.
+        (async () => {
+          const chunkResults =
+            await Promise.all(
+              chunk(
+                installationIds,
+                SHARING_GRANT_ID_CHUNK_SIZE,
+              ).map(
+                (ids) =>
+                  supabase
+                    .from("installations")
+                    .select("id, name")
+                    .in("id", ids),
+              ),
+            );
+
+          const firstError =
+            chunkResults.find(
+              (result) => result.error !== null,
+            )?.error ?? null;
+
+          if (firstError) {
+            return { data: null, error: firstError };
+          }
+
+          return {
+            data: chunkResults.flatMap(
+              (result) => (result.data ?? []) as InstallationNameRow[],
+            ),
+            error: null,
+          };
+        })(),
 
         // 2026-09-03 (P14): resolved through the counterparty RPC rather
         // than a direct `organizations` read. A grantor has no
