@@ -447,29 +447,53 @@ export default async function ShipmentDetailPage(
               ) : null
             }
 
-            {emissionsTotal.datasetSupersededLineCount > 0 ? (
-              <p className="mt-1 text-xs text-[var(--color-warning-700)]">
-                {emissionsTotal.datasetSupersededLineCount} of{" "}
-                {shipment.lines.length} line(s) used a regulatory dataset
-                that has since been corrected -- redetermine before filing.
-              </p>
-            ) : null}
+            {
+              // 2026-09-07 (S5 review round 11, finding S5R11-A-1, live-
+              // reproduced). This caption used to say "redetermine before
+              // filing" unconditionally -- impossible for a LOCKED
+              // shipment (the `editable` flag above excludes LOCKED, and
+              // shipment_lines writes are DRAFT-only at both RLS and
+              // trigger layer), and a LOCKED shipment is not an edge case
+              // here -- it is "the routine case for an amendment," the
+              // same characterization this codebase already uses for the
+              // identical hedge on the Reports page's own
+              // DatasetSupersededLinesCard/EngineOutdatedLinesCard, the
+              // declaration completeness card, and filedMessageFor. Round
+              // 6 (commit 7d40a5c) already fixed this exact gap in every
+              // other place these facts are surfaced except this one page
+              // -- and round 10 (S5R10-NUM-B1) then copied the same
+              // unconditional pattern into a second caption below.
+              emissionsTotal.datasetSupersededLineCount > 0 ? (
+                <p className="mt-1 text-xs text-[var(--color-warning-700)]">
+                  {emissionsTotal.datasetSupersededLineCount} of{" "}
+                  {shipment.lines.length} line(s) used a regulatory dataset
+                  that has since been corrected
+                  {shipment.status === "LOCKED"
+                    ? " -- this shipment has already been LOCKED (the routine case for an amendment), so it cannot be redetermined through the normal declaration flow. Contact support."
+                    : " -- redetermine before filing."}
+                </p>
+              ) : null
+            }
 
             {
-              // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1).
-              // The identical caption shape as datasetSupersededLineCount
-              // just above, one axis over -- round 8 (S5R8-A-B2) added
-              // this fact to the DECLARATION-level completeness gate but
-              // never here, even though a reader could see a confident
-              // total on this exact page and only discover the filing
-              // gate would refuse it once they reached the declaration
-              // screen.
+              // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1;
+              // hedged round 11, finding S5R11-A-1). The identical
+              // caption shape as datasetSupersededLineCount just above,
+              // one axis over -- round 8 (S5R8-A-B2) added this fact to
+              // the DECLARATION-level completeness gate but never here,
+              // even though a reader could see a confident total on this
+              // exact page and only discover the filing gate would
+              // refuse it once they reached the declaration screen. Now
+              // hedged on LOCKED the same way its sibling caption above
+              // is, for the identical reason.
               emissionsTotal.engineOutdatedLineCount > 0 ? (
                 <p className="mt-1 text-xs text-[var(--color-warning-700)]">
                   {emissionsTotal.engineOutdatedLineCount} of{" "}
                   {shipment.lines.length} line(s) were calculated by an
-                  earlier version of the calculation engine -- recalculate
-                  before filing.
+                  earlier version of the calculation engine
+                  {shipment.status === "LOCKED"
+                    ? " -- this shipment has already been LOCKED (the routine case for an amendment), so it cannot be recalculated through the normal declaration flow. Contact support."
+                    : " -- recalculate before filing."}
                 </p>
               ) : null
             }

@@ -41,11 +41,42 @@ type DeclarationStatusForCard =
  * A VOID declaration pointed at a button that does not exist anywhere
  * on the page; a READY one claimed "Not yet generated" beside
  * DeclarationActions' real, irreversible "Record filed" control.
+ *
+ * 2026-09-07 (S5 review round 11, finding S5R11-VOCAB-B1, live-
+ * reproduced). Round 10's own fix grouped FILED_RECORDED into the SAME
+ * branch as READY -- reasoning only about the round-10 bypass (an empty
+ * member set), a path that can never reach FILED_RECORDED at all
+ * (record_declaration_filed()'s own NO_MEMBER_SHIPMENTS check refuses an
+ * empty member set outright). But FILED_RECORDED has its OWN, distinct,
+ * genuinely reachable path to a null completeness_report: an admin who
+ * sets member_shipment_ids and status='READY' directly (skipping
+ * markDeclarationReady/"Generate or refresh draft") leaves
+ * completeness_report permanently null, and record_declaration_filed()
+ * never reads that column at all -- it independently, exhaustively
+ * re-verifies every fact the column would have captured (lockable
+ * members, period membership, population match, calculation currency,
+ * engine version, dataset currency) at filing time. A declaration that
+ * reached FILED_RECORDED has, by construction, passed every one of
+ * those checks -- filing IS the readiness check, regardless of what the
+ * UI-cached completeness_report column holds. Telling the reader
+ * "readiness was never actually checked... contact support" here is
+ * FALSE, and actively harmful: it sits beside the real FiledSnapshotCard
+ * showing a genuine, DB-computed filed total, and tells an admin to
+ * distrust an already-filed, immutable, correctly-verified compliance
+ * record. (READY keeps the original wording -- for READY,
+ * app.enforce_declaration_members_are_approved only checks member
+ * shipments are individually READY/LOCKED, never per-line calculation
+ * currency/engine version/dataset currency/population match, so
+ * "readiness was never actually checked" is genuinely true there.)
  */
 function noReportSubtitle(
   declarationStatus: DeclarationStatusForCard,
 ): string {
-  if (declarationStatus === "READY" || declarationStatus === "FILED_RECORDED") {
+  if (declarationStatus === "FILED_RECORDED") {
+    return "This declaration was filed without a completeness report ever being generated through the normal draft flow.";
+  }
+
+  if (declarationStatus === "READY") {
     return "No completeness report was ever generated for this declaration -- this should not normally occur.";
   }
 
@@ -60,7 +91,11 @@ function noReportSubtitle(
 function noReportBody(
   declarationStatus: DeclarationStatusForCard,
 ): string {
-  if (declarationStatus === "READY" || declarationStatus === "FILED_RECORDED") {
+  if (declarationStatus === "FILED_RECORDED") {
+    return "But every fact that report would have captured -- member readiness, calculation currency, engine version, and dataset currency -- was independently re-checked at filing time; filing itself is the readiness check. See the filed snapshot below for the recorded figures.";
+  }
+
+  if (declarationStatus === "READY") {
     return "No completeness report exists for this declaration, so its readiness was never actually checked -- contact support before relying on it.";
   }
 
