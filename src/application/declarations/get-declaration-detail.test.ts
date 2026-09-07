@@ -230,6 +230,58 @@ describe(
     );
 
     it(
+      "2026-09-07 (S5 review round 9, finding S5R9-A-1): throws on a genuine predecessor-lineage query error, distinct from a null row with no error",
+      async () => {
+        await expect(
+          getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      { supersedes_declaration_id: "decl-0" },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: { message: "connection terminated unexpectedly" } },
+                  { data: null, error: null },
+                ],
+                shipments: { data: [shipmentSummaryRow], error: null },
+              },
+            ),
+            orgId as never,
+            "decl-1" as never,
+          ),
+        ).rejects.toThrow(
+          "connection terminated unexpectedly",
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 9, finding S5R9-A-1, live-reproduced): throws on a genuine successor-lineage query error -- a transient failure here previously rendered indistinguishable from 'no active amendment supersedes this declaration', wrongly offering Create Amendment on an already-amended FILED_RECORDED declaration",
+      async () => {
+        await expect(
+          getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  { data: declarationRow(), error: null },
+                  { data: null, error: { message: "57014 canceling statement due to statement timeout" } },
+                ],
+                shipments: { data: [shipmentSummaryRow], error: null },
+              },
+            ),
+            orgId as never,
+            "decl-1" as never,
+          ),
+        ).rejects.toThrow(
+          "57014 canceling statement due to statement timeout",
+        );
+      },
+    );
+
+    it(
       "returns null (not the row) when the declaration belongs to a different org -- audit-attribution guard",
       async () => {
         const result =
@@ -738,6 +790,60 @@ describe(
         );
 
         expect(result?.completeness_report_stale_reason).toBeNull();
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 9, finding S5R9-GUID-B1, live-reproduced): when a period-membership drift AND an engine-version drift are BOTH true at once, reports PERIOD_MEMBERSHIP_CHANGED (the higher-SQL-priority reason, matching record_declaration_filed()'s own check order) -- not CALCULATION_ENGINE_OUTDATED, which record_declaration_filed() would never even reach for this exact declaration",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "READY",
+                        member_shipment_ids: ["ship-1"],
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: [
+                  // fetchMemberShipments: the one frozen member, LOCKED.
+                  { data: [shipmentSummaryRow], error: null },
+                  // currentPeriodShipmentIds: the period now ALSO
+                  // contains ship-2, which was never a member -- this
+                  // alone makes periodMembershipStale true.
+                  { data: [{ id: "ship-1" }, { id: "ship-2" }], error: null },
+                ],
+                // Also seeded with an outdated engine version -- if the
+                // pre-round-9 (backwards) priority order were still in
+                // effect, this would have been reached and reported
+                // instead, masking the period-membership drift. Left
+                // here specifically so a regression back to that order
+                // would flip this test's expected reason.
+                latest_calculation_results: {
+                  data: [{ line_id: "line-1", engine_version: "0.9.0" }],
+                  error: null,
+                },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          true,
+        );
+
+        expect(result?.completeness_report_stale_reason).toBe(
+          "PERIOD_MEMBERSHIP_CHANGED",
+        );
       },
     );
 

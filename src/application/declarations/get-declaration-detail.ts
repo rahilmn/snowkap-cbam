@@ -499,8 +499,8 @@ export async function getDeclarationDetail(
 
   const [
     memberShipmentRows,
-    { data: predecessorRow },
-    { data: successorRow },
+    { data: predecessorRow, error: predecessorError },
+    { data: successorRow, error: successorError },
   ] =
     await Promise.all(
       [
@@ -516,7 +516,7 @@ export async function getDeclarationDetail(
               .eq("id", declaration.supersedes_declaration_id)
               .maybeSingle()
           : Promise.resolve(
-              { data: null as LineageRow | null },
+              { data: null as LineageRow | null, error: null },
             ),
 
         supabase
@@ -527,6 +527,32 @@ export async function getDeclarationDetail(
           .maybeSingle(),
       ],
     );
+
+  // 2026-09-07 (S5 review round 9, finding S5R9-A-1, live-reproduced).
+  // These two lineage lookups sat in the SAME Promise.all as
+  // fetchMemberShipments (immediately above) but were never given its
+  // own S5R5-A fix -- `error` was destructured from neither, so a
+  // genuine transport error on either query collapsed into the exact
+  // same `data: null` a real "no predecessor/successor" produces.
+  // superseded_by feeds directly into hasActiveSuccessor
+  // (app/(importer)/declarations/[id]/page.tsx), which decides whether
+  // "Create amendment" is offered on a FILED_RECORDED declaration -- a
+  // transient failure here made a declaration that DOES have an active
+  // amendment look exactly like one that doesn't, with zero error
+  // signal on the highest-stakes declaration status. Throws, matching
+  // fetchMemberShipments' own established posture for this exact
+  // Promise.all.
+  if (predecessorError) {
+    throw new Error(
+      `declarations: predecessor lineage fetch failed (${predecessorError.message}).`,
+    );
+  }
+
+  if (successorError) {
+    throw new Error(
+      `declarations: successor lineage fetch failed (${successorError.message}).`,
+    );
+  }
 
   // 2026-09-07 (S5 review round 5, finding S5R5-A). fetchMemberShipments
   // now throws on its own fetch error rather than returning null for
@@ -735,56 +761,15 @@ export async function computeCompletenessReportStaleness(
       (shipment) => shipment.status !== "READY" && shipment.status !== "LOCKED",
     );
 
-  // 2026-09-06 (S5 review remediation round 2, finding EF2-B1). Scoped
-  // to declarations that can still be PREPARED or FILED (DRAFT/READY)
-  // -- a FILED_RECORDED declaration IS the historical result
-  // (RegulatoryResolutionSnapshot's own doc comment: "a later dataset
-  // supersession can never change a historical result"; its
-  // filed_snapshot is the archived truth and its completeness report
-  // was correct as of filing), and a VOID declaration is retired.
-  // Without this guard, a regulatory correction landing AFTER filing
-  // made an already-filed, immutable compliance record falsely report
-  // "Needs refresh" -- the exact "no historical version may silently
-  // change meaning" invariant this whole review was run against.
-  const datasetStale =
-    reportClaimsComplete &&
-    !memberStatusStale &&
-    (declaration.status === "DRAFT" || declaration.status === "READY") &&
-    (await anyMemberLineDatasetSuperseded(
-      supabase,
-      memberIds,
-    ));
-
-  // 2026-09-07 (S5 review round 8, finding S5R8-A-B2). The fourth,
-  // independent axis: at least one member line's latest calculation was
-  // produced by an engine version the app no longer runs -- the exact
-  // fact record_declaration_filed()'s own CALCULATION_ENGINE_OUTDATED
-  // gate enforces, and the identical "an already-graded artifact
-  // drifted after grading" shape datasetStale (immediately above)
-  // already covers for regulatory dataset supersession. Scoped and
-  // gated the same way datasetStale is, for the identical reasons.
-  const engineVersionStale =
-    reportClaimsComplete &&
-    !memberStatusStale &&
-    !datasetStale &&
-    (declaration.status === "DRAFT" || declaration.status === "READY") &&
-    (await anyMemberLineCalculationEngineOutdated(
-      supabase,
-      memberIds,
-    ));
-
   // 2026-09-07 (S5 review round 7, finding S5R7-A-B1, guidance
-  // dimension). memberStatusStale, datasetStale and engineVersionStale
-  // all re-verify facts about the FROZEN member set itself (its
-  // shipments' current status, its lines' current dataset/engine
-  // currency) -- none re-verifies that the frozen set still EQUALS the
-  // period's live non-VOID shipment set, the exact invariant
-  // record_declaration_filed()'s own MEMBERS_NOT_PERIOD_COMPLETE gate
-  // enforces. Once a declaration reaches READY, computeDeclarationDraftFacts
-  // (the only function that recomputes "every non-VOID shipment in this
-  // org+period") is never called again for it --
-  // generateOrRefreshDeclarationDraft refuses a READY period outright
-  // (PERIOD_HAS_READY_DECLARATION), and
+  // dimension; REORDERED round 9, finding S5R9-GUID-B1). Re-verifies
+  // that the frozen member set still EQUALS the period's live non-VOID
+  // shipment set, the exact invariant record_declaration_filed()'s own
+  // MEMBERS_NOT_PERIOD_COMPLETE gate enforces. Once a declaration
+  // reaches READY, computeDeclarationDraftFacts (the only function that
+  // recomputes "every non-VOID shipment in this org+period") is never
+  // called again for it -- generateOrRefreshDeclarationDraft refuses a
+  // READY period outright (PERIOD_HAS_READY_DECLARATION), and
   // app.invalidate_declaration_approval_on_reopen only fires when an
   // EXISTING member shipment's own status leaves READY, never for a
   // brand-new shipment inserted into the same period (which is not a
@@ -792,10 +777,25 @@ export async function computeCompletenessReportStaleness(
   // shipment entering the period therefore drifts the declaration out
   // of sync with zero UI signal, until the one control a READY
   // declaration renders (RecordFiledForm) is clicked and the filing is
-  // refused. Scoped to DRAFT/READY and gated on the three checks above
-  // for the identical mutual-exclusivity reason they already share --
-  // set equality (not containment) to catch both directions, exactly
-  // matching record_declaration_filed()'s own comparison.
+  // refused.
+  //
+  // 2026-09-07 (S5 review round 9, finding S5R9-GUID-B1, live-
+  // reproduced). This axis USED to be computed LAST (gated on
+  // memberStatusStale, datasetStale, AND engineVersionStale all being
+  // false) -- but record_declaration_filed()'s own SQL check order
+  // (20260906250000) puts MEMBERS_NOT_PERIOD_COMPLETE immediately after
+  // SHIPMENTS_NOT_LOCKABLE, well BEFORE it ever reaches the
+  // INCOMPLETE/CALCULATION_ENGINE_OUTDATED/DATASET_SUPERSEDED checks.
+  // Gating this axis on the other two being false meant a declaration
+  // that was BOTH engine-outdated/dataset-superseded AND had drifted
+  // out of period membership only ever reported the lower-SQL-priority
+  // reason, masking periodMembershipStale entirely -- so a reader could
+  // follow the shown recovery instruction (e.g. "recalculate, then
+  // record the filing") and still get refused by the RPC for the
+  // unmentioned, higher-priority MEMBERS_NOT_PERIOD_COMPLETE reason.
+  // Moved to be the second axis checked (right after memberStatusStale,
+  // matching SQL's own position for it), so it can never be masked by
+  // the two axes checked after it.
   //
   // 2026-09-07 (S5 review round 8, finding S5R8-NUM-B1). currentPeriodShipmentIds
   // now returns `null` (rather than throwing) on a genuine query error
@@ -806,8 +806,6 @@ export async function computeCompletenessReportStaleness(
   const periodMembershipStale =
     reportClaimsComplete &&
     !memberStatusStale &&
-    !datasetStale &&
-    !engineVersionStale &&
     (declaration.status === "DRAFT" || declaration.status === "READY") &&
     (await (
       async () => {
@@ -841,24 +839,77 @@ export async function computeCompletenessReportStaleness(
       }
     )());
 
-  // 2026-09-06 (S5 review remediation round 2, finding EF2-B3). Lets
-  // the UI explain the ACTUAL reason rather than always printing the
-  // "a member shipment was reopened" copy -- memberStatusStale,
-  // datasetStale, engineVersionStale, and periodMembershipStale are
-  // mutually exclusive by construction (each later check is gated on
-  // every earlier one being false), so this is a true discriminant,
-  // never both/neither when the combined result is stale.
+  // 2026-09-07 (S5 review round 8, finding S5R8-A-B2; REORDERED round
+  // 9, finding S5R9-GUID-B1). At least one member line's latest
+  // calculation was produced by an engine version the app no longer
+  // runs -- the exact fact record_declaration_filed()'s own
+  // CALCULATION_ENGINE_OUTDATED gate enforces. Checked BEFORE
+  // datasetStale (not after, as originally written) because
+  // record_declaration_filed()'s own SQL checks CALCULATION_ENGINE_
+  // OUTDATED before DATASET_SUPERSEDED (20260906250000's own header:
+  // "precisely the same shape as the engine-version gate... one layer
+  // down") -- buildCompletenessReport's own else-if chain
+  // (src/domain/declarations/completeness.ts) already had this order
+  // right; this axis originally did not.
+  const engineVersionStale =
+    reportClaimsComplete &&
+    !memberStatusStale &&
+    !periodMembershipStale &&
+    (declaration.status === "DRAFT" || declaration.status === "READY") &&
+    (await anyMemberLineCalculationEngineOutdated(
+      supabase,
+      memberIds,
+    ));
+
+  // 2026-09-06 (S5 review remediation round 2, finding EF2-B1). Scoped
+  // to declarations that can still be PREPARED or FILED (DRAFT/READY)
+  // -- a FILED_RECORDED declaration IS the historical result
+  // (RegulatoryResolutionSnapshot's own doc comment: "a later dataset
+  // supersession can never change a historical result"; its
+  // filed_snapshot is the archived truth and its completeness report
+  // was correct as of filing), and a VOID declaration is retired.
+  // Without this guard, a regulatory correction landing AFTER filing
+  // made an already-filed, immutable compliance record falsely report
+  // "Needs refresh" -- the exact "no historical version may silently
+  // change meaning" invariant this whole review was run against.
+  //
+  // 2026-09-07 (S5 review round 9, finding S5R9-GUID-B1). Checked LAST
+  // among the four axes -- matches record_declaration_filed()'s own SQL
+  // check order, where DATASET_SUPERSEDED is the final gate.
+  const datasetStale =
+    reportClaimsComplete &&
+    !memberStatusStale &&
+    !periodMembershipStale &&
+    !engineVersionStale &&
+    (declaration.status === "DRAFT" || declaration.status === "READY") &&
+    (await anyMemberLineDatasetSuperseded(
+      supabase,
+      memberIds,
+    ));
+
+  // 2026-09-06 (S5 review remediation round 2, finding EF2-B3;
+  // reordered round 9, finding S5R9-GUID-B1). Lets the UI explain the
+  // ACTUAL reason rather than always printing the "a member shipment
+  // was reopened" copy -- memberStatusStale, periodMembershipStale,
+  // engineVersionStale, and datasetStale are mutually exclusive by
+  // construction (each later check is gated on every earlier one being
+  // false), so this is a true discriminant, never both/neither when the
+  // combined result is stale. Order here (and the gating order above)
+  // matches record_declaration_filed()'s own SQL check priority
+  // (SHIPMENTS_NOT_LOCKABLE, MEMBERS_NOT_PERIOD_COMPLETE, ...,
+  // CALCULATION_ENGINE_OUTDATED, DATASET_SUPERSEDED), so the reason
+  // reported here is always the same one the RPC would refuse on first.
   return {
-    stale: memberStatusStale || datasetStale || engineVersionStale || periodMembershipStale,
+    stale: memberStatusStale || periodMembershipStale || engineVersionStale || datasetStale,
     reason:
       memberStatusStale
         ? "MEMBER_REOPENED"
-        : datasetStale
-        ? "DATASET_SUPERSEDED"
-        : engineVersionStale
-        ? "CALCULATION_ENGINE_OUTDATED"
         : periodMembershipStale
         ? "PERIOD_MEMBERSHIP_CHANGED"
+        : engineVersionStale
+        ? "CALCULATION_ENGINE_OUTDATED"
+        : datasetStale
+        ? "DATASET_SUPERSEDED"
         : null,
   };
 }
