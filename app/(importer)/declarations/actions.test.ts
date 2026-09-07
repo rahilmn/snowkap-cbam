@@ -822,7 +822,7 @@ describe(
     );
 
     it(
-      "2026-09-07 (S5 review round 7, finding S5R7-A-B2): surfaces the MEMBERS_NOT_PERIOD_COMPLETE message naming the real recovery (reopen an existing member shipment) rather than a nonexistent 'Refresh the draft' control -- READY renders no such control",
+      "2026-09-07 (S5 review round 7, finding S5R7-A-B2; hedged round 8, finding S5R8-A-B1): surfaces the MEMBERS_NOT_PERIOD_COMPLETE message naming the real recovery (reopen an existing member shipment) rather than a nonexistent 'Refresh the draft' control, and hedges the all-LOCKED amendment case rather than asserting the reopen unconditionally works",
       async () => {
         checkMock.mockReturnValueOnce(ALLOWED);
         getCurrentOrgSummaryMock.mockResolvedValueOnce(ORG_SUMMARY);
@@ -842,7 +842,7 @@ describe(
           {
             status: "error",
             message:
-              "The shipments in this declaration are no longer exactly the shipments in its reporting period -- one has moved period, or a new one has been added. Reopen one of its existing member shipments from that shipment's own detail page -- this returns the declaration to draft, where a fresh Generate/refresh will pick up the current period membership -- then approve it for filing again.",
+              "The shipments in this declaration are no longer exactly the shipments in its reporting period -- one has moved period, or a new one has been added. If any of its existing member shipments has not been LOCKED, reopen it from that shipment's own detail page -- this returns the declaration to draft, where a fresh Generate/refresh will pick up the current period membership -- then approve it for filing again. If every existing member shipment has already been LOCKED (for example by an earlier filing -- the routine case for an amendment), this cannot be corrected through the normal declaration flow -- contact support.",
           },
         );
       },

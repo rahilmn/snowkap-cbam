@@ -249,6 +249,19 @@ export default async function DeclarationDetailPage(
           anyMemberShipmentLocked={memberShipments.some(
             (shipment) => shipment.status === "LOCKED",
           )}
+          // 2026-09-07 (S5 review round 8, finding S5R8-A-B1). Distinct
+          // from anyMemberShipmentLocked above: the PERIOD_MEMBERSHIP_
+          // CHANGED recovery only needs ONE reopenable (non-LOCKED)
+          // member to work, so the card needs to know whether EVERY
+          // member is LOCKED (none reopenable), not merely whether AT
+          // LEAST ONE is. A READY declaration's members are always
+          // READY or LOCKED (app.enforce_declaration_members_are_approved),
+          // so "every member LOCKED" is the same as "no member is
+          // READY."
+          allMemberShipmentsLocked={
+            memberShipments.length > 0 &&
+            memberShipments.every((shipment) => shipment.status === "LOCKED")
+          }
         />
 
         <Card>

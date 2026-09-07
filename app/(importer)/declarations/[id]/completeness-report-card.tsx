@@ -37,6 +37,7 @@ export function CompletenessReportCard(
     staleReason = null,
     declarationStatus,
     anyMemberShipmentLocked = false,
+    allMemberShipmentsLocked = false,
   }: {
     report: CompletenessReport | null;
     // 2026-09-06 (S5 cross-phase hardening). true when a member shipment
@@ -84,6 +85,14 @@ export function CompletenessReportCard(
     // CALCULATION_ENGINE_OUTDATED messages (finding A2), which hedge the
     // same way for the identical reason.
     anyMemberShipmentLocked?: boolean;
+    // 2026-09-07 (S5 review round 8, finding S5R8-A-B1). Distinct from
+    // anyMemberShipmentLocked above -- the PERIOD_MEMBERSHIP_CHANGED
+    // recovery ("reopen one of its existing member shipments") only
+    // needs ONE reopenable member to work, so it is blocked only once
+    // EVERY member shipment is LOCKED, not merely once one is. See
+    // page.tsx's own call site comment for why "every member LOCKED"
+    // is equivalent to "no member is READY" for a READY declaration.
+    allMemberShipmentsLocked?: boolean;
   },
 ) {
   return (
@@ -127,7 +136,21 @@ export function CompletenessReportCard(
                 // / refresh draft" control on this page at all, until
                 // one of its existing member shipments is reopened.
                 declarationStatus === "READY"
-                ? "The shipments in this declaration's reporting period have changed since this report was generated -- one has moved period, or a new one has been added. Reopen one of its existing member shipments from that shipment's own detail page -- this returns the declaration to draft, where a fresh Generate/refresh will pick up the current period membership -- then approve it for filing again."
+                ? // 2026-09-07 (S5 review round 8, finding S5R8-A-B1).
+                  // The instruction below only needs ONE reopenable
+                  // (non-LOCKED) member shipment to work -- but an
+                  // amendment declaration's entire member set is
+                  // routinely already LOCKED from the predecessor's own
+                  // filing (the same routine case DATASET_SUPERSEDED's
+                  // own hedge above already accounts for), and
+                  // shipments_update_own_org_not_terminal structurally
+                  // refuses to reopen a LOCKED shipment for anyone. Live-
+                  // reproduced: an all-LOCKED amendment whose period
+                  // gains a new shipment reaches this exact branch with
+                  // zero reopenable members.
+                  allMemberShipmentsLocked
+                  ? "The shipments in this declaration's reporting period have changed since this report was generated -- one has moved period, or a new one has been added. Every existing member shipment has already been LOCKED (for example by an earlier filing -- the routine case for an amendment), so this cannot be corrected through the normal declaration flow -- contact support."
+                  : "The shipments in this declaration's reporting period have changed since this report was generated -- one has moved period, or a new one has been added. Reopen one of its existing member shipments from that shipment's own detail page -- this returns the declaration to draft, where a fresh Generate/refresh will pick up the current period membership -- then approve it for filing again."
                 : "The shipments in this declaration's reporting period have changed since this report was generated -- one has moved period, or a new one has been added. Click Generate / refresh draft to recheck the current period membership."
               : "A member shipment was reopened since this was last checked, so this report no longer reflects the current state. Click Generate / refresh draft to recheck completeness."}
           </p>

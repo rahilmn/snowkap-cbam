@@ -272,8 +272,25 @@ function filedMessageFor(
     // Generate/refresh becomes available, and a fresh regeneration then
     // picks up the new period shipment too) -- the same real mechanism
     // the three sibling cases above now name.
+    //
+    // 2026-09-07 (S5 review round 8, finding S5R8-A-B1). The instruction
+    // above assumed at least one existing member shipment is still
+    // READY (reopenable) -- but record_declaration_filed() itself
+    // accepts READY *or* LOCKED members as "lockable" (20260906250000's
+    // own comments call an all-LOCKED member set "the routine case for
+    // an amendment"), and shipments_update_own_org_not_terminal's own
+    // USING clause structurally excludes LOCKED from any UPDATE for
+    // anyone, ADMIN/OWNER included -- live-confirmed via a real RLS
+    // write attempt (`UPDATE 0` rows). An all-LOCKED amendment whose
+    // period gains a new shipment reaches exactly this case with zero
+    // reopenable members, and the old wording sent that reader to a
+    // dead end. filedMessageFor only receives the bare reason string
+    // (no per-shipment context), so this hedges in prose the same way
+    // CALCULATION_ENGINE_OUTDATED/DATASET_SUPERSEDED below already do
+    // for the identical LOCKED-vs-not distinction, rather than covering
+    // only the READY case.
     case "MEMBERS_NOT_PERIOD_COMPLETE":
-      return "The shipments in this declaration are no longer exactly the shipments in its reporting period -- one has moved period, or a new one has been added. Reopen one of its existing member shipments from that shipment's own detail page -- this returns the declaration to draft, where a fresh Generate/refresh will pick up the current period membership -- then approve it for filing again.";
+      return "The shipments in this declaration are no longer exactly the shipments in its reporting period -- one has moved period, or a new one has been added. If any of its existing member shipments has not been LOCKED, reopen it from that shipment's own detail page -- this returns the declaration to draft, where a fresh Generate/refresh will pick up the current period membership -- then approve it for filing again. If every existing member shipment has already been LOCKED (for example by an earlier filing -- the routine case for an amendment), this cannot be corrected through the normal declaration flow -- contact support.";
 
     case "SHIPMENT_ALREADY_FILED":
       return "One or more member shipments have already been recorded as filed on another declaration. If this is a correction, create an amendment of that declaration instead.";
