@@ -814,5 +814,69 @@ describe(
         );
       },
     );
+
+    it(
+      "2026-09-07 (S5 review round 7, finding S5R7-A-2/S5R7-SHARE-B2): chunks the installations lookup rather than issuing one oversized .in() call, when the org's visible records span more than INSTALLATION_ID_CHUNK_SIZE distinct installations",
+      async () => {
+        const INSTALLATION_COUNT =
+          150;
+
+        const emissionDataRows =
+          Array.from(
+            { length: INSTALLATION_COUNT },
+            (_, index) => (
+              {
+                ...ownRow,
+                id: `emission-data-${index}`,
+                installation_id: `installation-${index}`,
+              }
+            ),
+          );
+
+        const allInstallationRows =
+          Array.from(
+            { length: INSTALLATION_COUNT },
+            (_, index) => (
+              {
+                id: `installation-${index}`,
+                name: `Installation ${index}`,
+                country: "DE",
+              }
+            ),
+          );
+
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await listAvailableActualEmissionData(
+            makeMockSupabase(
+              {
+                emission_data: { data: emissionDataRows, error: null },
+                sharing_grants: { data: [], error: null },
+                installations: { data: allInstallationRows, error: null },
+              },
+              recorder,
+            ),
+            orgId,
+            matchingCnCode,
+          );
+
+        expect(result.options).toHaveLength(
+          INSTALLATION_COUNT,
+        );
+
+        // 150 ids at INSTALLATION_ID_CHUNK_SIZE=100 -- exactly 2
+        // chunks, so exactly 2 separate `installations` queries, never
+        // 1 (the old, oversized-.in() shape).
+        expect(
+          recorder.fromCalls.filter(
+            (name) => name === "installations",
+          ),
+        ).toHaveLength(
+          2,
+        );
+      },
+    );
   },
 );

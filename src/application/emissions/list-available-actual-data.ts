@@ -277,6 +277,47 @@ interface OrganizationNameLookupRow {
 const AVAILABLE_ACTUAL_DATA_PAGE_SIZE =
   1000;
 
+// 2026-09-07 (S5 review round 7, finding S5R7-A-2/S5R7-SHARE-B2). The
+// installations follow-up query below is filtered by
+// `.in("id", installationIds)`, where installationIds is every
+// distinct installation among ALL ACTIVE+VERIFIED emission_data rows
+// RLS admits (this org's own + every org's shared-in data) -- unlike
+// max_rows=1000 row-count truncation (already paged above), an
+// oversized `.in()` list overflows the REQUEST URL itself
+// (PostgREST/the API gateway rejects it with HTTP 414), well before
+// 1000 distinct installations. Matches the identical, already
+// live-verified fix shape used for this exact hazard elsewhere in this
+// codebase (list-draft-shipments-with-lines.ts's own
+// SHIPMENT_ID_CHUNK_SIZE/chunk(), list-actual-determined-lines.ts's
+// own SHIPMENT_ID_CHUNK_SIZE, S5R6-SHARE-B3) -- reusing the same
+// conservative chunk size rather than re-deriving a new threshold for
+// what is the same class of query.
+const INSTALLATION_ID_CHUNK_SIZE =
+  100;
+
+function chunk<T>(
+  items: T[],
+  size: number,
+): T[][] {
+  const chunks: T[][] =
+    [];
+
+  for (
+    let index = 0;
+    index < items.length;
+    index += size
+  ) {
+    chunks.push(
+      items.slice(
+        index,
+        index + size,
+      ),
+    );
+  }
+
+  return chunks;
+}
+
 export async function listAvailableActualEmissionData(
   supabase: SupabaseClient,
   orgId: OrganizationId,
@@ -461,23 +502,38 @@ export async function listAvailableActualEmissionData(
       ),
     );
 
-  const { data: installationRows, error: installationError } =
-    await supabase
-      .from("installations")
-      .select(
-        "id, name, country, provenance",
-      )
-      .in("id", installationIds);
-
-  if (installationError || !installationRows) {
-    throw new Error(
-      `emissions: installations fetch failed (${installationError?.message ?? "no rows"}).`,
+  const installationIdChunks =
+    chunk(
+      installationIds,
+      INSTALLATION_ID_CHUNK_SIZE,
     );
-  }
+
+  const installationRowChunks =
+    await Promise.all(
+      installationIdChunks.map(
+        async (ids) => {
+          const { data, error: installationError } =
+            await supabase
+              .from("installations")
+              .select(
+                "id, name, country, provenance",
+              )
+              .in("id", ids);
+
+          if (installationError || !data) {
+            throw new Error(
+              `emissions: installations fetch failed (${installationError?.message ?? "no rows"}).`,
+            );
+          }
+
+          return data as InstallationLookupRow[];
+        },
+      ),
+    );
 
   const installationById =
     new Map<string, InstallationLookupRow>(
-      (installationRows as InstallationLookupRow[]).map(
+      installationRowChunks.flat().map(
         (row) => [row.id, row],
       ),
     );
