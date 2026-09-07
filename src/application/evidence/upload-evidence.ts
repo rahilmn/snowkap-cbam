@@ -573,36 +573,51 @@ export type RemoveEvidenceFileResult =
  *
  * 2026-09-07 (S5 review round 7, findings S5R7-AUTHZ-1/S5R7-AUTHZ-B1,
  * two independent reviewers converged on the same root cause). The
- * S5R6-AUTHZ-1 disambiguation above still had one real gap:
- * evidence_files_delete_own_org's own USING clause was keyed ONLY on
- * the parent's CURRENT verification_status, never on whether THIS
- * row's id was still cited in evidence_file_ids at all -- so a
- * concurrent, fully legitimate VERIFY landing strictly between the
- * array update above (which already, permanently dropped this id) and
- * the metadata delete still left the delete unconditionally refused,
- * and the disambiguation read (finding the row still present, because
- * nothing had deleted it) reported EMISSION_DATA_VERIFIED -- true about
- * the record's status, false about the removal, which had already
- * fully succeeded at the array level. The row and its storage object
- * were then permanently orphaned: S5R3-AUTHZ-B1's own rule guarantees
- * a VERIFIED record can never leave VERIFIED, so the old policy could
- * never open for this row again. Fixed at the RLS layer (migration
- * 20260907310000): evidence_files_delete_own_org now also permits
- * deletion whenever this row's own id is no longer present in its
- * parent's evidence_file_ids, regardless of verification_status --
- * safe by construction, not a new way to strip evidence from a
- * VERIFIED record, since the anti-shrink trigger already guarantees
- * the only way an id leaves that array under a VERIFIED (or
- * VERIFIED-in-this-statement) parent is a removal that committed
- * strictly before that, an already-legitimate state this policy
- * previously had no way to recognize. With this fix, the metadata
- * delete for an already-array-dropped id now succeeds even after a
- * concurrent VERIFY, so the disambiguation branch above is reached
- * only for its two remaining, genuine causes (a still-cited row under
- * a real VERIFIED lock, or a second call that already deleted the
- * row). Live-reproduced (real psql BEGIN...ROLLBACK): the exact race
- * now succeeds, and a control case (a still-cited file under the same
- * VERIFIED parent) remains correctly refused.
+ * S5R6-AUTHZ-1 disambiguation above still had one real gap: the array
+ * update and the metadata delete were two SEPARATE, sequential
+ * statements/round trips (each its own implicit transaction under
+ * PostgREST), so a concurrent, fully legitimate VERIFY landing
+ * strictly between them still left the metadata delete unconditionally
+ * refused (evidence_files_delete_own_org is keyed on the parent's
+ * CURRENT verification_status, not on whether this row's id is still
+ * cited) -- and the disambiguation read (finding the row still
+ * present, because nothing had deleted it) reported
+ * EMISSION_DATA_VERIFIED: true about the record's status, false about
+ * the removal, which had already fully succeeded at the array level.
+ *
+ * First attempt (migration 20260907310000, since corrected by
+ * 20260907320000): widened evidence_files_delete_own_org itself to
+ * also permit deletion whenever a row's id is no longer cited,
+ * regardless of verification_status. That regressed a real P13
+ * security test (emission-data-write-hardening.test.ts's own "rejects
+ * deleting an evidence file whose owning emission_data record is
+ * VERIFIED"), whose fixture seeds a row that was never linked into the
+ * array at all -- a state the widened policy could not distinguish
+ * from "legitimately removed moments before this call," and
+ * incorrectly permitted deleting both. The original P13 invariant (ANY
+ * evidence_files row under a VERIFIED parent is undeletable, full
+ * stop) was the correct one to keep; loosening it to chase this
+ * narrower bug was the wrong tool.
+ *
+ * The actual fix (migration 20260907320000) closes the race by
+ * construction instead, without touching evidence_files_delete_own_org
+ * at all: the array update and the metadata delete now run inside ONE
+ * atomic function (remove_evidence_file_and_metadata), so both share
+ * the same transaction. The array UPDATE's own row lock on the
+ * emission_data row blocks a concurrent VERIFY (itself an UPDATE on
+ * the SAME row) from committing until this whole transaction has
+ * already committed or rolled back -- so by the time the metadata
+ * DELETE runs, moments later in the SAME transaction,
+ * verification_status is PROVABLY unchanged from what the array update
+ * already saw. The disambiguation branch below is reached now only for
+ * its one remaining, genuine cause this atomic call cannot itself
+ * close: a second, independent removeEvidenceFile call for the same
+ * evidenceFileId, which is definitionally a separate request/
+ * transaction. Live-reproduced (real psql BEGIN...ROLLBACK): the exact
+ * race now succeeds end to end, a control case (a still-cited file
+ * under a genuinely VERIFIED parent) remains correctly refused, and
+ * the P13 regression case (an uncited, never-linked row under a
+ * VERIFIED parent) is refused again too.
  *
  * The storage delete that follows a successful metadata delete is
  * best-effort: by that point the record no longer cites this file at
@@ -696,74 +711,74 @@ export async function removeEvidenceFile(
     };
   }
 
-  // 2026-09-07 (S5 review round 4, finding S5R4-AUTHZ-B1). Moved to run
-  // FIRST, before either delete -- see this function's own doc comment
-  // for why. Any error here is treated as EMISSION_DATA_VERIFIED: the
-  // only realistic failure mode for a single-row array_remove UPDATE
-  // against a row `fetched`/`ownership` just confirmed this org owns is
+  // 2026-09-07 (S5 review round 7, findings S5R7-AUTHZ-1/S5R7-AUTHZ-B1).
+  // The array shrink and the metadata delete now run as ONE atomic
+  // function call (remove_evidence_file_and_metadata,
+  // 20260907320000) instead of two separate round trips -- see this
+  // function's own doc comment for the full history of why that gap
+  // existed and why closing it this way (rather than widening
+  // evidence_files_delete_own_org, which regressed a real P13 security
+  // test) is correct. The array UPDATE's own row lock on the emission_
+  // data row makes a concurrent VERIFY (itself an UPDATE on the SAME
+  // row) block until this whole transaction commits or rolls back, so
+  // by the time the metadata DELETE runs, moments later in the SAME
+  // transaction, verification_status is PROVABLY unchanged from what
+  // the array update already saw -- the race is closed by construction,
+  // not merely handled after the fact.
+  //
+  // Any error here is treated as EMISSION_DATA_VERIFIED: the only
+  // realistic failure mode for a single-row array_remove UPDATE against
+  // a row `fetched`/`ownership` just confirmed this org owns is
   // app.enforce_emission_data_verification_gate's live "evidence cannot
   // shrink from a VERIFIED record" rule firing because a concurrent
-  // VERIFY committed between the in-memory check above and this
-  // statement -- exactly the race this reordering exists to close.
-  const { error: arrayUpdateError } =
+  // VERIFY committed strictly BEFORE this whole call started (the one
+  // window this function still cannot close, being a separate PostgREST
+  // request from the in-memory check above).
+  const { data: removalRows, error: removalError } =
     await supabase
       .rpc(
-        "remove_evidence_file_id",
+        "remove_evidence_file_and_metadata",
         {
           p_emission_data_id: fetched.file.emission_data_id,
           p_evidence_file_id: evidenceFileId,
         },
       );
 
-  if (arrayUpdateError) {
+  if (removalError) {
     return {
       status: "REJECTED",
       reason: "EMISSION_DATA_VERIFIED",
     };
   }
 
-  // 2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y2). Runs BEFORE
-  // the storage delete now -- see this function's own doc comment for
-  // the full ordering rationale and the exact race this closes. Same
-  // .select("id") + zero-rows guard manage-membership.ts:236-243
-  // already applies to its own DELETE, for the identical reason:
-  // PostgREST reports NO error for a DELETE that RLS filters to zero
-  // rows, so `deleteError` alone cannot distinguish "deleted" from
-  // "silently refused."
-  const { data: deleted, error: deleteError } =
-    await supabase
-      .from("evidence_files")
-      .delete()
-      .eq("id", evidenceFileId)
-      .select("id");
+  const metadataDeleted =
+    (removalRows as { metadata_deleted: boolean }[] | null)?.[0]?.metadata_deleted ?? false;
 
-  if (deleteError) {
-    return {
-      status: "REJECTED",
-      reason: "PERSIST_FAILED",
-    };
-  }
-
-  if (!deleted || deleted.length === 0) {
-    // 2026-09-07 (S5 review round 6, finding S5R6-AUTHZ-1). A zero-rows
-    // metadata delete is genuinely ambiguous, and this branch used to
-    // pick the wrong cause unconditionally: either (a) a concurrent
-    // VERIFY made evidence_files_delete_own_org's own
+  if (!metadataDeleted) {
+    // 2026-09-07 (S5 review round 6, finding S5R6-AUTHZ-1). A
+    // false/zero-rows metadata delete is genuinely ambiguous, and this
+    // branch used to pick the wrong cause unconditionally: either (a)
+    // a concurrent VERIFY made evidence_files_delete_own_org's own
     // `verification_status <> 'VERIFIED'` clause filter this DELETE, or
     // (b) the row was already deleted by a second, independent
     // removeEvidenceFile call whose own DELETE won the race -- two org
     // members, or two tabs of the same admin, both clicking Remove on
-    // the same evidence row within the same short window (this function
-    // makes several sequential round-trips before its own delete, so
-    // both callers can pass every earlier check before either deletes).
-    // remove_evidence_file_id is a plain idempotent array_remove UPDATE,
-    // so the array-update succeeding just above rules out nothing about
-    // which of these two caused THIS specific zero-rows result -- the
-    // premise the original S5R5-AUTHZ-Y2 fix relied on. Live-
-    // reproduced (real psql, two callers racing the full real statement
-    // sequence): the loser's verification_status was confirmed
-    // UNVERIFIED throughout, yet this branch would have told them
-    // otherwise.
+    // the same evidence row within the same short window (this
+    // function's earlier round trips -- fetchOwnedEvidenceFile,
+    // fetchOwnedEmissionDataForEvidence -- still leave a real window
+    // for that, even though the array-shrink-then-delete pair below
+    // them is now atomic). Live-reproduced (real psql, two callers
+    // racing the full real statement sequence, round 6): the loser's
+    // verification_status was confirmed UNVERIFIED throughout, yet
+    // this branch would have told them otherwise.
+    //
+    // 2026-09-07 (S5 review round 7). Cause (a) above is now
+    // structurally far rarer than before (the atomic RPC above closes
+    // the specific window S5R6-AUTHZ-1 live-reproduced), but this
+    // disambiguation stays as a safety net for whatever narrower window
+    // remains and for cause (b), which the atomic RPC does not and
+    // cannot close (two independent callers are, definitionally, two
+    // separate requests).
     //
     // Disambiguate with one more read: evidence_files_select_own_org
     // (unlike the DELETE policy) carries no verification_status clause

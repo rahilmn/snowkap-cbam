@@ -211,8 +211,29 @@ function makeMockSupabase(
       const configured =
         rpcConfig[fn];
 
+      if (configured) {
+        return Promise.resolve(
+          configured,
+        );
+      }
+
+      // 2026-09-07 (S5 review round 7, findings S5R7-AUTHZ-1/S5R7-AUTHZ-B1):
+      // removeEvidenceFile now calls remove_evidence_file_and_metadata
+      // (the array shrink and the metadata delete combined into one
+      // atomic call, 20260907320000) instead of remove_evidence_file_id
+      // followed by a separate .from("evidence_files").delete() -- this
+      // table-returning RPC's own "happy path" default lets every
+      // existing test that never cared about this specific step keep
+      // describing its own scenario unchanged, the same convention this
+      // mock already used for every other RPC's unconfigured default.
+      if (fn === "remove_evidence_file_and_metadata") {
+        return Promise.resolve(
+          { data: [{ metadata_deleted: true }], error: null },
+        );
+      }
+
       return Promise.resolve(
-        configured ?? { data: null, error: null },
+        { data: null, error: null },
       );
     },
     storage: {
@@ -740,15 +761,9 @@ describe(
           true,
         );
 
-        expect(
-          recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
-        ).toBe(
-          true,
-        );
-
         const removeCall =
           recorder.rpcCalls.find(
-            (call) => call.fn === "remove_evidence_file_id",
+            (call) => call.fn === "remove_evidence_file_and_metadata",
           );
 
         expect(
@@ -766,7 +781,7 @@ describe(
     );
 
     it(
-      "2026-09-07 (S5 review round 4, finding S5R4-AUTHZ-B1): the atomic remove_evidence_file_id RPC now runs FIRST -- an error from it (a concurrent VERIFY racing this call) is EMISSION_DATA_VERIFIED, and stops before storage or the metadata row are touched at all",
+      "2026-09-07 (S5 review round 7, findings S5R7-AUTHZ-1/S5R7-AUTHZ-B1): the atomic remove_evidence_file_and_metadata RPC now runs FIRST -- an error from it (a concurrent VERIFY racing this call) is EMISSION_DATA_VERIFIED, and stops before storage is ever touched",
       async () => {
         const recorder =
           makeRecorder();
@@ -781,21 +796,21 @@ describe(
               },
               {},
               recorder,
-              { remove_evidence_file_id: { data: null, error: { message: "denied" } } },
+              { remove_evidence_file_and_metadata: { data: null, error: { message: "denied" } } },
             ),
             memberContext(),
             "evidence-file-1" as never,
           );
 
-        // The array update is the FIRST mutation and it failed -- the
-        // storage object and the evidence_files metadata row must both
-        // still be genuinely intact, not just "the function said so."
+        // The array update is the FIRST statement of the atomic RPC and
+        // it failed -- the storage object must still be genuinely
+        // intact, not just "the function said so."
         expect(result).toEqual(
           { status: "REJECTED", reason: "EMISSION_DATA_VERIFIED" },
         );
 
         expect(
-          recorder.rpcCalls.filter((call) => call.fn === "remove_evidence_file_id"),
+          recorder.rpcCalls.filter((call) => call.fn === "remove_evidence_file_and_metadata"),
         ).toHaveLength(
           1,
         );
@@ -805,17 +820,11 @@ describe(
         ).toHaveLength(
           0,
         );
-
-        expect(
-          recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
-        ).toBe(
-          false,
-        );
       },
     );
 
     it(
-      "2026-09-07 (S5 review round 5, finding S5R5-AUTHZ-Y2): deletes the metadata row then storage, in order, once the array update succeeds -- reversed from round 4's order, see removeEvidenceFile's own doc comment for why",
+      "2026-09-07 (S5 review round 7, findings S5R7-AUTHZ-1/S5R7-AUTHZ-B1): deletes storage, best-effort, once the atomic array-shrink-and-metadata-delete RPC succeeds",
       async () => {
         const recorder =
           makeRecorder();
@@ -830,7 +839,7 @@ describe(
               },
               {},
               recorder,
-              { remove_evidence_file_id: { data: null, error: null } },
+              { remove_evidence_file_and_metadata: { data: [{ metadata_deleted: true }], error: null } },
             ),
             memberContext(),
             "evidence-file-1" as never,
@@ -841,7 +850,7 @@ describe(
         );
 
         expect(
-          recorder.rpcCalls.filter((call) => call.fn === "remove_evidence_file_id"),
+          recorder.rpcCalls.filter((call) => call.fn === "remove_evidence_file_and_metadata"),
         ).toHaveLength(
           1,
         );
@@ -852,17 +861,19 @@ describe(
           1,
         );
 
-        expect(
-          recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
-        ).toBe(
-          true,
-        );
-
         // No client-side read-then-write fallback: the RPC is called
         // exactly once, never retried, and no `emission_data` table
-        // UPDATE is ever issued directly.
+        // UPDATE, and no separate `evidence_files` DELETE, is ever
+        // issued directly -- both writes happen inside the one atomic
+        // RPC call above.
         expect(
           recorder.ops.some((op) => op.table === "emission_data" && op.op === "update"),
+        ).toBe(
+          false,
+        );
+
+        expect(
+          recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
         ).toBe(
           false,
         );
@@ -940,15 +951,18 @@ describe(
         // manage-membership.ts:236-243 already carries the fix pattern
         // (.select("id") + zero-rows guard) for exactly this hazard.
         //
-        // 2026-09-07 (S5 review round 6, finding S5R6-AUTHZ-1). The
-        // array update succeeding does NOT, by itself, rule out every
-        // other cause of a zero-rows delete (remove_evidence_file_id is
-        // a plain idempotent no-op on a second call) -- so this branch
-        // now takes one more read to confirm the row is genuinely still
+        // 2026-09-07 (S5 review round 6, finding S5R6-AUTHZ-1). Even
+        // once the array shrink and the metadata delete became one
+        // atomic call (round 7's own S5R7-AUTHZ-1/B1 fix), a false
+        // metadata_deleted does NOT, by itself, rule out every other
+        // cause -- a second, independent removeEvidenceFile call for
+        // the same id (a separate request/transaction the atomic RPC
+        // cannot itself close) is still possible -- so this branch
+        // takes one more read to confirm the row is genuinely still
         // there (proving the VERIFIED cause) before reporting
-        // EMISSION_DATA_VERIFIED, rather than assuming it unconditionally
-        // the way the S5R5-AUTHZ-Y2 fix did. See the next test for the
-        // sibling case where that follow-up read finds nothing.
+        // EMISSION_DATA_VERIFIED, rather than assuming it
+        // unconditionally. See the next test for the sibling case where
+        // that follow-up read finds nothing.
         const recorder =
           makeRecorder();
 
@@ -958,11 +972,9 @@ describe(
               {
                 evidence_files: [
                   { data: evidenceFileRow, error: null },
-                  // The DELETE: no error, and no rows.
-                  { data: [], error: null },
                   // The disambiguation follow-up read: the row is
-                  // still there -- the DELETE was genuinely blocked,
-                  // not racing a second removal.
+                  // still there -- the atomic RPC's own metadata delete
+                  // was genuinely blocked, not racing a second removal.
                   { data: evidenceFileRow, error: null },
                 ],
                 emission_data: [
@@ -971,6 +983,7 @@ describe(
               },
               {},
               recorder,
+              { remove_evidence_file_and_metadata: { data: [{ metadata_deleted: false }], error: null } },
             ),
             memberContext(),
             "evidence-file-1" as never,
@@ -987,11 +1000,11 @@ describe(
     );
 
     it(
-      "2026-09-07 (S5 review round 6, finding S5R6-AUTHZ-1): reports NOT_FOUND, never the false EMISSION_DATA_VERIFIED claim, when a zero-rows metadata DELETE turns out to mean a concurrent duplicate removal already deleted the row -- not a VERIFIED lock",
+      "2026-09-07 (S5 review round 6, finding S5R6-AUTHZ-1): reports NOT_FOUND, never the false EMISSION_DATA_VERIFIED claim, when a false metadata_deleted turns out to mean a concurrent duplicate removal already deleted the row -- not a VERIFIED lock",
       async () => {
         // Live-reproduced (real psql, two callers racing the full real
         // statement sequence): the loser of a genuine concurrent
-        // double-removal gets this exact zero-rows signature while
+        // double-removal gets this exact signature while
         // verification_status stays UNVERIFIED throughout. Reporting
         // EMISSION_DATA_VERIFIED here -- as the S5R5-AUTHZ-Y2 fix did
         // unconditionally -- would tell the user their perfectly fine
@@ -1006,11 +1019,9 @@ describe(
               {
                 evidence_files: [
                   { data: evidenceFileRow, error: null },
-                  // The DELETE: no error, and no rows -- a second,
-                  // independent removal already won the race.
-                  { data: [], error: null },
                   // The disambiguation follow-up read: the row is
-                  // genuinely gone.
+                  // genuinely gone -- a second, independent removal
+                  // already won the race.
                   { data: null, error: null },
                 ],
                 emission_data: [
@@ -1019,6 +1030,7 @@ describe(
               },
               {},
               recorder,
+              { remove_evidence_file_and_metadata: { data: [{ metadata_deleted: false }], error: null } },
             ),
             memberContext(),
             "evidence-file-1" as never,
@@ -1102,7 +1114,7 @@ describe(
         );
 
         expect(
-          recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
+          recorder.rpcCalls.some((call) => call.fn === "remove_evidence_file_and_metadata"),
         ).toBe(
           true,
         );
@@ -1183,7 +1195,7 @@ describe(
         );
 
         expect(
-          recorder.ops.some((op) => op.table === "evidence_files" && op.op === "delete"),
+          recorder.rpcCalls.some((call) => call.fn === "remove_evidence_file_and_metadata"),
         ).toBe(
           true,
         );
