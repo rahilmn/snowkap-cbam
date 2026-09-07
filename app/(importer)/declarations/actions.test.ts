@@ -788,7 +788,61 @@ describe(
           {
             status: "error",
             message:
-              "One or more lines were determined against a regulatory dataset that has since been corrected. If the member shipment is still editable, redetermine those lines against the current dataset, then record the filing -- the earlier determination is kept for provenance. If the shipment has already been LOCKED (for example by an earlier filing), this cannot be corrected through the normal declaration flow -- contact support.",
+              "One or more lines were determined against a regulatory dataset that has since been corrected. If the member shipment has not been LOCKED, reopen it, redetermine that line against the current dataset, then approve this declaration for filing again -- the earlier determination is kept for provenance. If it has already been LOCKED (for example by an earlier filing), this cannot be corrected through the normal declaration flow -- contact support.",
+          },
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 7, finding S5R7-A-B1): surfaces the CALCULATION_ENGINE_OUTDATED message naming the real READY-shipment recovery (recalculate directly, no reopen needed), never the impossible 'still editable' framing",
+      async () => {
+        checkMock.mockReturnValueOnce(ALLOWED);
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(ORG_SUMMARY);
+        recordDeclarationFiledMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "CALCULATION_ENGINE_OUTDATED" },
+        );
+
+        const result =
+          await recordDeclarationFiledAction(
+            { status: "idle" },
+            formData(
+              { declarationId: "decl-1", filedReference: "REF-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message:
+              "One or more lines were calculated by an earlier version of the calculation engine. If the member shipment has not been LOCKED, recalculate those lines directly on the shipment's own detail page (no need to reopen it), then record the filing -- the earlier results are kept for provenance. If it has already been LOCKED (for example by an earlier filing), this cannot be corrected through the normal declaration flow -- contact support.",
+          },
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 7, finding S5R7-A-B2): surfaces the MEMBERS_NOT_PERIOD_COMPLETE message naming the real recovery (reopen an existing member shipment) rather than a nonexistent 'Refresh the draft' control -- READY renders no such control",
+      async () => {
+        checkMock.mockReturnValueOnce(ALLOWED);
+        getCurrentOrgSummaryMock.mockResolvedValueOnce(ORG_SUMMARY);
+        recordDeclarationFiledMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "MEMBERS_NOT_PERIOD_COMPLETE" },
+        );
+
+        const result =
+          await recordDeclarationFiledAction(
+            { status: "idle" },
+            formData(
+              { declarationId: "decl-1", filedReference: "REF-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message:
+              "The shipments in this declaration are no longer exactly the shipments in its reporting period -- one has moved period, or a new one has been added. Reopen one of its existing member shipments from that shipment's own detail page -- this returns the declaration to draft, where a fresh Generate/refresh will pick up the current period membership -- then approve it for filing again.",
           },
         );
       },

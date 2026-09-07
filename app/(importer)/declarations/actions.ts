@@ -253,8 +253,27 @@ function filedMessageFor(
     // 2026-09-03 (P14 remediation, 20260903220000). Both messages name
     // the concrete next action, because both are recoverable states an
     // ordinary period edit can produce -- not errors.
+    //
+    // 2026-09-07 (S5 review round 7, finding S5R7-A-B2). This reason is
+    // returned ONLY by record_declaration_filed(), reachable ONLY from
+    // RecordFiledForm, rendered ONLY for a READY declaration -- and
+    // DeclarationActions renders no OTHER control for READY, in
+    // particular no "Generate / refresh draft" (that renders only for
+    // DRAFT). "Refresh the draft" therefore named a control that is not
+    // on the screen this message is shown on. The identical "Reopen the
+    // declaration"/"Reopen it" gap round 6's own S5R6-A-GUID3 fixed
+    // three commits earlier in this same switch statement, for the
+    // three cases immediately above this one -- missed here because a
+    // new shipment entering the period (this reason's own trigger) is
+    // not a shipment REOPENING, so app.invalidate_declaration_approval_
+    // on_reopen never fires and the declaration never becomes DRAFT on
+    // its own. Reopening any one of its EXISTING member shipments still
+    // works (it flips the whole declaration back to DRAFT, where
+    // Generate/refresh becomes available, and a fresh regeneration then
+    // picks up the new period shipment too) -- the same real mechanism
+    // the three sibling cases above now name.
     case "MEMBERS_NOT_PERIOD_COMPLETE":
-      return "The shipments in this declaration are no longer exactly the shipments in its reporting period -- one has moved period, or a new one has been added. Refresh the draft and re-check ready.";
+      return "The shipments in this declaration are no longer exactly the shipments in its reporting period -- one has moved period, or a new one has been added. Reopen one of its existing member shipments from that shipment's own detail page -- this returns the declaration to draft, where a fresh Generate/refresh will pick up the current period membership -- then approve it for filing again.";
 
     case "SHIPMENT_ALREADY_FILED":
       return "One or more member shipments have already been recorded as filed on another declaration. If this is a correction, create an amendment of that declaration instead.";
@@ -272,16 +291,43 @@ function filedMessageFor(
     // (shipments_update_own_org_not_terminal excludes LOCKED). The old
     // wording asserted the fix would work unconditionally; it does not
     // say so when it cannot, per the same finding's own core complaint.
+    //
+    // 2026-09-07 (S5 review round 7, finding S5R7-A-B1). This reason is
+    // returned ONLY by record_declaration_filed(), which only reaches
+    // it after its own SHIPMENTS_NOT_LOCKABLE check has already
+    // confirmed every member shipment is READY or LOCKED -- "still
+    // editable" (DRAFT) can therefore NEVER be true at the exact moment
+    // this message is shown, making the A2 wording above dead text for
+    // the routine case (a first-time filing whose calculation just went
+    // stale, member shipment READY, never locked) and giving that user
+    // nothing to do. The real recovery for a READY (non-LOCKED)
+    // shipment does NOT require reopening at all:
+    // record_calculation_result (20260906210000) deliberately still
+    // permits recalculating a READY line with a new engine version,
+    // specifically so this recovery never needs the full reopen/
+    // re-approve cycle -- app/(importer)/shipments/[id]/page.tsx's own
+    // Recalculate control (canRecalculate) now matches that same
+    // carve-out.
     case "CALCULATION_ENGINE_OUTDATED":
-      return "One or more lines were calculated by an earlier version of the calculation engine. If the member shipment is still editable, recalculate those lines, then record the filing -- the earlier results are kept for provenance. If the shipment has already been LOCKED (for example by an earlier filing), this cannot be corrected through the normal declaration flow -- contact support.";
+      return "One or more lines were calculated by an earlier version of the calculation engine. If the member shipment has not been LOCKED, recalculate those lines directly on the shipment's own detail page (no need to reopen it), then record the filing -- the earlier results are kept for provenance. If it has already been LOCKED (for example by an earlier filing), this cannot be corrected through the normal declaration flow -- contact support.";
 
     // 2026-09-06 (S5 finding #12, 20260906250000; messaging widened same
     // day, S5 review remediation finding A2). A default-value line was
     // determined against a regulatory dataset that has since been
-    // corrected/superseded. Same LOCKED-shipment caveat as
-    // CALCULATION_ENGINE_OUTDATED above, for the identical reason.
+    // corrected/superseded.
+    //
+    // 2026-09-07 (S5 review round 7, finding S5R7-A-B1). Same "still
+    // editable (DRAFT) can never be true here" gap as
+    // CALCULATION_ENGINE_OUTDATED above -- but UNLIKE that case,
+    // redetermining a line genuinely does require reopening first:
+    // redetermination writes shipment_lines.emission_determination,
+    // which stays DRAFT-only (shipment_lines_update_parent_draft_only)
+    // -- record_calculation_result's own READY carve-out is specific to
+    // recalculation, not redetermination. Matches the already-correct
+    // wording completeness-report-card.tsx's own sibling `stale` branch
+    // uses for the identical READY-declaration state.
     case "DATASET_SUPERSEDED":
-      return "One or more lines were determined against a regulatory dataset that has since been corrected. If the member shipment is still editable, redetermine those lines against the current dataset, then record the filing -- the earlier determination is kept for provenance. If the shipment has already been LOCKED (for example by an earlier filing), this cannot be corrected through the normal declaration flow -- contact support.";
+      return "One or more lines were determined against a regulatory dataset that has since been corrected. If the member shipment has not been LOCKED, reopen it, redetermine that line against the current dataset, then approve this declaration for filing again -- the earlier determination is kept for provenance. If it has already been LOCKED (for example by an earlier filing), this cannot be corrected through the normal declaration flow -- contact support.";
 
     // 2026-09-04 (P14). The lines are not the ones this declaration was
     // approved over. Recoverable, and the message says how: re-approving
