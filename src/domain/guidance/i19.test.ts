@@ -185,6 +185,7 @@ describe(
                       reason: "SHIPMENT_NOT_LOCKABLE",
                       shipment_id: "ship-1" as Declaration["member_shipment_ids"][number],
                       shipment_reference: "SHIP-001",
+                      shipment_status: "DRAFT",
                     },
                   ],
                 },
@@ -224,6 +225,7 @@ describe(
                       reason: "SHIPMENT_HAS_NO_LINES",
                       shipment_id: "other" as Declaration["member_shipment_ids"][number],
                       shipment_reference: "OTHER",
+                      shipment_status: "DRAFT",
                     },
                   ],
                 },
@@ -377,7 +379,7 @@ describe(
                   line_count: 0,
                   complete: false,
                   blockers: [
-                    { reason: "NO_SHIPMENTS_IN_PERIOD", shipment_id: null, shipment_reference: null },
+                    { reason: "NO_SHIPMENTS_IN_PERIOD", shipment_id: null, shipment_reference: null, shipment_status: null },
                   ],
                 },
               });

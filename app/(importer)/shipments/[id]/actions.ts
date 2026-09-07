@@ -1145,19 +1145,25 @@ export async function calculateLineAction(
             // DRAFT-only editability -- deliberately keeps READY open
             // for exactly the CALCULATION_ENGINE_OUTDATED recovery
             // shape (20260906210000's own header comment), refusing
-            // only a same-engine-version resubmission against an
-            // already-current READY line.
+            // only a resubmission at an engine_version that already has
+            // a calculation_results row on file for this line.
             //
-            // 2026-09-07 (S5 review round 7, finding S5R7-A-B1). The
-            // UI's own Recalculate control (page.tsx's canRecalculate)
-            // now matches that same carve-out, so "if it's marked
-            // READY, reopen it first" is no longer the right unconditional
-            // claim -- a READY shipment hitting this refusal usually
-            // means the line is already current for the running engine
-            // version (nothing left to do), not that a reopen is
-            // required. Reopening remains the right answer only for a
-            // shipment that has since become LOCKED or VOID.
-            ? "This shipment can no longer be recalculated in its current status, or this line's calculation is already current for the running engine version. Reload the page to check -- if the shipment has been LOCKED or VOIDed, that's final; if it's still READY, no further action is needed."
+            // 2026-09-07 (S5 review round 13 remediation, finding
+            // S5R13-A-1). The round-7 fix this replaces (S5R7-A-B1)
+            // claimed "a READY shipment hitting this refusal usually
+            // means the line is already current ... no further action
+            // is needed" -- live-reproduced FALSE for the far more
+            // common cause: the line was redetermined after its last
+            // calculation (same engine_version, different determination),
+            // which this same RPC also refuses on READY, and which
+            // genuinely DOES require reopening first (see
+            // recovery-availability.ts's recalculateAvailability doc
+            // comment). This function has no way to tell the two READY
+            // causes apart -- record_calculation_result returns the
+            // identical bare reason for both -- so the message now says
+            // so honestly instead of asserting the wrong one is always
+            // true.
+            ? "This shipment can no longer be recalculated in its current status, or a calculation already exists for the currently-running engine version on this line. Reload the page to check -- if the shipment has been LOCKED or VOIDed, that's final. If it's still READY: either this line's calculation is already current (nothing to do), or the line was redetermined since it was last calculated -- reopen the shipment first, then recalculate."
             : result.reason === "CAPABILITY_NOT_HELD"
               ? "Your organization is not set up as a CBAM importer/declarant."
               : result.reason === "CALCULATION_INPUTS_CHANGED"

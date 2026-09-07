@@ -396,6 +396,7 @@ describe(
                 reason: "SHIPMENT_HAS_NO_LINES",
                 shipment_id: "ship-1",
                 shipment_reference: "REF-001",
+                shipment_status: "READY",
               },
             ],
           );

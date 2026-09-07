@@ -42,6 +42,7 @@ import type {
 
 import {
   blockerReasonKey,
+  blockerRecoveryHint,
 } from "../../../../src/domain/status-vocabulary";
 
 /**
@@ -218,16 +219,40 @@ function MarkReadyForm(
                 (blocker, index) => (
                   <li
                     key={`${blocker.reason}-${blocker.shipment_id ?? "period"}-${blocker.line_id ?? index}`}
-                    className="flex items-center justify-between gap-2 text-xs text-[var(--color-danger-700)]"
+                    className="flex flex-col gap-0.5 text-xs text-[var(--color-danger-700)]"
                   >
-                    <span>
-                      {blocker.shipment_reference ?? "This period"}
-                      {blocker.line_number ? ` · line ${blocker.line_number}` : ""}
-                    </span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span>
+                        {blocker.shipment_reference ?? "This period"}
+                        {blocker.line_number ? ` · line ${blocker.line_number}` : ""}
+                      </span>
 
-                    <StatusBadge
-                      statusKey={blockerReasonKey(blocker.reason)}
-                    />
+                      <StatusBadge
+                        statusKey={blockerReasonKey(blocker.reason)}
+                      />
+                    </div>
+
+                    {
+                      // 2026-09-07 (S5 review round 13 remediation,
+                      // finding S5R13-D-1). This list -- never touched
+                      // by any of the 12 prior review rounds -- used to
+                      // render every blocker as a bare badge with zero
+                      // status-based hedging, for any of the three
+                      // action-implying reasons (LINE_DATASET_SUPERSEDED/
+                      // LINE_CALCULATION_ENGINE_OUTDATED/LINE_CALCULATION_
+                      // STALE), regardless of whether the named
+                      // shipment could actually be redetermined/
+                      // recalculated. Uses the SAME shared
+                      // blockerRecoveryHint this declaration's own
+                      // CompletenessReportCard now uses for its blockers
+                      // table -- not a second, independently-derived
+                      // interpretation of the same blocker.
+                      blockerRecoveryHint(blocker) ? (
+                        <p className="text-[var(--text-tertiary)]">
+                          {blockerRecoveryHint(blocker)}
+                        </p>
+                      ) : null
+                    }
                   </li>
                 ),
               )}

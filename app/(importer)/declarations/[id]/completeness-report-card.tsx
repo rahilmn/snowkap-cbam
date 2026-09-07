@@ -18,6 +18,7 @@ import type {
 
 import {
   blockerReasonKey,
+  blockerRecoveryHint,
 } from "../../../../src/domain/status-vocabulary";
 
 type DeclarationStatusForCard =
@@ -405,52 +406,9 @@ export function CompletenessReportCard(
                       />
 
                       {
-                        // 2026-09-07 (S5 review round 6, findings
-                        // S5R6-A-B2/S5R6-A-GUID2). The bare badge above
-                        // reads "redetermine this line" unconditionally
-                        // -- impossible for a LOCKED shipment's line
-                        // (shipments_update_own_org_not_terminal excludes
-                        // LOCKED; transition-actions.tsx renders no
-                        // control at all for one), and a LOCKED member
-                        // shipment is the ROUTINE shape of an amendment,
-                        // not an edge case (buildCompletenessReport
-                        // accepts LOCKED as lockable, same as
-                        // record_declaration_filed's own predicate). This
-                        // card's sibling `stale` branch already hedges
-                        // the identical fact via anyMemberShipmentLocked
-                        // -- the same coarse-grained ("at least one
-                        // member shipment is LOCKED," not which specific
-                        // one) signal, for the identical reason:
-                        // buildCompletenessReport's dataset-currency
-                        // check has no per-blocker shipment status to
-                        // report. Wording matches declarations/
-                        // actions.ts's own DATASET_SUPERSEDED message
-                        // (finding A2) rather than inventing new prose.
-                        //
-                        // 2026-09-07 (S5 review round 9, finding
-                        // S5R9-VOCAB-B2). LINE_CALCULATION_ENGINE_
-                        // OUTDATED (added round 8, S5R8-A-B2) is the
-                        // identical shape -- a LOCKED shipment's line can
-                        // never be recalculated either (record_
-                        // calculation_result refuses LOCKED
-                        // unconditionally, regardless of engine version)
-                        // -- but this hint was never extended to it,
-                        // even though the sibling `stale` banner above
-                        // DOES hedge CALCULATION_ENGINE_OUTDATED on the
-                        // same anyMemberShipmentLocked signal. Verb
-                        // varies with the blocker's own recovery action
-                        // (redetermine vs. recalculate); everything else
-                        // matches.
-                        (blocker.reason === "LINE_DATASET_SUPERSEDED" || blocker.reason === "LINE_CALCULATION_ENGINE_OUTDATED") &&
-                        anyMemberShipmentLocked ? (
+                        blockerRecoveryHint(blocker) ? (
                           <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                            If this shipment has already been LOCKED (the
-                            routine case for an amendment), it cannot be
-                            {" "}
-                            {blocker.reason === "LINE_DATASET_SUPERSEDED" ? "redetermined" : "recalculated"}
-                            {" "}
-                            through the normal declaration flow -- contact
-                            support.
+                            {blockerRecoveryHint(blocker)}
                           </p>
                         ) : null
                       }

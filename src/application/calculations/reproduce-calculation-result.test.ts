@@ -583,6 +583,92 @@ describe(
     );
 
     it(
+      // S5 review round 13 remediation (S5R13-SILENT-B1's lower-severity
+      // sibling). A genuine fetch error resolving the line's current
+      // cn_code (resolveCnCodeForLine) used to be silently folded into
+      // "sector unknown," which could report a false REPRODUCIBLE for a
+      // row that was never actually re-verified. It must now report
+      // FETCH_FAILED instead of attempting any comparison.
+      "reports FETCH_FAILED, not REPRODUCIBLE/MISMATCH, when the shipment_lines fetch for an ACTUAL row's current cn_code returns a genuine DB error",
+      async () => {
+        const result =
+          await reproduceCalculationResult(
+            mockSupabase(
+              {
+                calculationResultFetchResult: {
+                  data: {
+                    org_id: "org-1",
+                    line_id: "line-1",
+                    shipment_id: "ship-1",
+                    engine_version: ENGINE_VERSION,
+                    quantity: "10.5",
+                    quantity_unit: "TONNES",
+                    determination: actualDeterminationZeroIndirect,
+                    steps: actualStoredSteps,
+                    embedded_emissions_tco2e: "10.5",
+                  },
+                  error: null,
+                },
+                lineFetchResult: {
+                  data: null,
+                  error: { code: "22P02", message: "invalid input syntax for type uuid" },
+                },
+              },
+            ),
+            mockRepository(
+              "IRON_STEEL",
+            ),
+            orgId,
+            calculationResultId,
+          );
+
+        expect(result).toEqual(
+          { status: "FETCH_FAILED" },
+        );
+      },
+    );
+
+    it(
+      "reports FETCH_FAILED, not REPRODUCIBLE/MISMATCH, when the shipments fetch for an ACTUAL row's sector lookup returns a genuine DB error",
+      async () => {
+        const result =
+          await reproduceCalculationResult(
+            mockSupabase(
+              {
+                calculationResultFetchResult: {
+                  data: {
+                    org_id: "org-1",
+                    line_id: "line-1",
+                    shipment_id: "ship-1",
+                    engine_version: ENGINE_VERSION,
+                    quantity: "10.5",
+                    quantity_unit: "TONNES",
+                    determination: actualDeterminationZeroIndirect,
+                    steps: actualStoredSteps,
+                    embedded_emissions_tco2e: "10.5",
+                  },
+                  error: null,
+                },
+                shipmentFetchResult: {
+                  data: null,
+                  error: { code: "22P02", message: "invalid input syntax for type uuid" },
+                },
+              },
+            ),
+            mockRepository(
+              "IRON_STEEL",
+            ),
+            orgId,
+            calculationResultId,
+          );
+
+        expect(result).toEqual(
+          { status: "FETCH_FAILED" },
+        );
+      },
+    );
+
+    it(
       "reports MISMATCH when a stored ACTUAL row's line has since been reclassified into an Annex II sector -- the recompute now succeeds and disagrees, rather than failing to run (D1)",
       async () => {
         const result =

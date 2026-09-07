@@ -630,6 +630,132 @@ describe(
     );
 
     it(
+      // S5 review round 13 remediation (S5R13-SILENT-B1). Live-reproduced
+      // against real local Postgres: this exact shipments-fetch error
+      // shape (a genuine 22P02 Postgres error, not RLS-filtered-empty)
+      // used to be silently swallowed, the sector collapsed to `null`,
+      // the Annex II direct-only gate was skipped, and calculateLine
+      // PERSISTED an over-inclusive 12.6 figure (direct+indirect summed)
+      // instead of the correct 10.5 (direct-only) for the same
+      // IRON_STEEL fixture -- with `status: "OK"` and zero error signal
+      // anywhere in the chain. It must now fail closed instead.
+      "rejects FETCH_FAILED and persists nothing when the shipments fetch for an ACTUAL determination's Annex-II sector lookup returns a genuine DB error -- must not silently skip the Annex II gate",
+      async () => {
+        const insertPayloads: unknown[] =
+          [];
+
+        const result =
+          await calculateLine(
+            mockSupabase(
+              {
+                lineFetchResult: {
+                  data: {
+                    org_id: "org-1",
+                    shipment_id: "ship-1",
+                    cn_code: "72061000",
+                    net_mass_tonnes: "10.5",
+                    quantity_mwh: null,
+                    emission_determination: actualDetermination,
+                  },
+                  error: null,
+                },
+                // A genuine Postgres-level fetch error, distinct from a
+                // legitimate not-found (data: null, error: null) --
+                // matching the live-reproduced 22P02 error exactly.
+                shipmentFetchResult: {
+                  data: null,
+                  error: { code: "22P02", message: "invalid input syntax for type uuid" },
+                },
+              },
+            ),
+            mockRepository(
+              "IRON_STEEL",
+            ),
+            mockWriter(
+              { payloads: insertPayloads },
+            ),
+            memberContext(),
+            lineId,
+          );
+
+        expect(result).toEqual(
+          { status: "REJECTED", reason: "FETCH_FAILED" },
+        );
+
+        // The over-inclusive figure this bug used to produce and persist
+        // (12.6, direct+indirect summed) must never reach the writer.
+        expect(insertPayloads).toHaveLength(
+          0,
+        );
+      },
+    );
+
+    it(
+      // Distinguishes the fix above from the pre-existing, legitimate
+      // not-found case: a genuinely absent/cross-org shipment (no error)
+      // still computes -- the Annex II gate simply doesn't apply, exactly
+      // as it did before this fix. Only a genuine fetch ERROR (the test
+      // above) must now be rejected; a true not-found must not become a
+      // rejection just because this fix started checking `error`.
+      "still computes (Annex II gate not applied, non-Annex-II-summed figure) when the shipment genuinely does not exist -- no error, just no row -- proving a genuine fetch error is distinguishable from legitimate not-found",
+      async () => {
+        const insertPayloads: unknown[] =
+          [];
+
+        const result =
+          await calculateLine(
+            mockSupabase(
+              {
+                lineFetchResult: {
+                  data: {
+                    org_id: "org-1",
+                    shipment_id: "ship-1",
+                    cn_code: "72061000",
+                    net_mass_tonnes: "10.5",
+                    quantity_mwh: null,
+                    emission_determination: actualDetermination,
+                  },
+                  error: null,
+                },
+                shipmentFetchResult: {
+                  data: null,
+                  error: null,
+                },
+              },
+            ),
+            mockRepository(
+              "IRON_STEEL",
+            ),
+            mockWriter(
+              { payloads: insertPayloads },
+            ),
+            memberContext(),
+            lineId,
+          );
+
+        expect(result.status).toBe(
+          "OK",
+        );
+
+        if (result.status === "OK") {
+          expect(result.calculation.status).toBe(
+            "COMPUTED",
+          );
+
+          if (result.calculation.status === "COMPUTED") {
+            expect(result.calculation.embedded_emissions_tco2e).toBe(
+              "12.6",
+            );
+          }
+        }
+
+        expect(insertPayloads).toHaveLength(
+          1,
+        );
+      },
+    );
+
+    it(
       "computes normally for an ACTUAL determination when the repository resolves a non-Annex-II sector",
       async () => {
         const insertPayloads: unknown[] =

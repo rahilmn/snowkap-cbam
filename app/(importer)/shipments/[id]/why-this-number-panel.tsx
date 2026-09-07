@@ -55,6 +55,15 @@ import type {
   DefaultReferenceDisplay,
 } from "../../../../src/domain/emissions/default-reference";
 
+import {
+  ENGINE_VERSION,
+} from "../../../../src/domain/calculations/types";
+
+import {
+  recalculateAvailability,
+  redetermineAvailability,
+} from "../../../../src/domain/shipments/recovery-availability";
+
 function ValuePill(
   {
     label,
@@ -357,6 +366,15 @@ function ReproducibilityCheck(
           reproducibility. Please try again.
         </p>
       ) : null}
+
+      {result?.status === "FETCH_FAILED" ? (
+        <p className="text-xs text-[var(--color-danger-700)]">
+          Couldn&apos;t check this calculation&apos;s reproducibility --
+          a data lookup failed. This does not mean the stored result is
+          wrong, only that this check could not be re-run right now.
+          Please try again.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -468,6 +486,25 @@ export function WhyThisNumberPanel(
       determination,
     ) === "STALE";
 
+  // 2026-09-07 (S5 review round 13, findings S5R13-A-1 x2). See
+  // recovery-availability.ts's own doc comment for why this is keyed on
+  // calculationEngineIsCurrent, NOT a two-value "why is it stale"
+  // reason -- record_calculation_result's own READY carve-out cares
+  // only about whether a row already exists at the running engine
+  // version, independent of determination staleness.
+  const recalculation =
+    latestCalculation === undefined
+      ? null
+      : recalculateAvailability(
+          shipmentStatus,
+          latestCalculation.engine_version === ENGINE_VERSION,
+        );
+
+  const redetermination =
+    redetermineAvailability(
+      shipmentStatus,
+    );
+
   /**
    * 2026-09-03 (owner decision D1). Was the Annex II direct-only
    * treatment applied to the figure shown here?
@@ -571,18 +608,18 @@ export function WhyThisNumberPanel(
                 for the determination shown above, but the filing gate
                 will refuse a declaration that includes it unchanged.{" "}
                 {
-                  // 2026-09-07 (S5 review round 12, finding S5R12-A-2).
-                  // Same 4-way hedge as this page's own
-                  // datasetSupersededLineCount caption (S5R12-GUID-B1/
-                  // S5R12-A-1) -- redetermining writes shipment_lines,
-                  // DRAFT-only writable, so READY needs a "reopen first"
-                  // instruction and LOCKED/VOID need to be told the
-                  // action is impossible outright.
-                  shipmentStatus === "LOCKED"
-                    ? "This shipment has already been LOCKED (the routine case for an amendment), so it cannot be redetermined through the normal declaration flow. Contact support."
-                    : shipmentStatus === "VOID"
-                    ? "This shipment has been voided and can never be edited or reopened. Contact support."
-                    : shipmentStatus === "READY"
+                  // 2026-09-07 (S5 review round 13 remediation). Now
+                  // driven by the shared redetermineAvailability
+                  // (recovery-availability.ts) rather than an inline
+                  // ternary re-deriving the same DRAFT-only-writable
+                  // rule a fourth time -- see that module's own doc
+                  // comment. Behavior is unchanged from the round-12 fix
+                  // (S5R12-A-2/S5R12-GUID-B1/S5R12-A-1) this replaces.
+                  redetermination.status === "BLOCKED"
+                    ? redetermination.blockedStatus === "LOCKED"
+                      ? "This shipment has already been LOCKED (the routine case for an amendment), so it cannot be redetermined through the normal declaration flow. Contact support."
+                      : "This shipment has been voided and can never be edited or reopened. Contact support."
+                    : redetermination.status === "REQUIRES_REOPEN"
                     ? "This shipment is READY; reopen it first, then redetermine this line against the current dataset."
                     : "Redetermine this line against the current dataset."
                 }
@@ -760,16 +797,22 @@ export function WhyThisNumberPanel(
               this line no longer carries (it was re-determined, or
               edited, since this calculation ran).{" "}
               {
-                // 2026-09-07 (S5 review round 12, finding S5R12-A-2).
-                // Same 2-way hedge as this page's own
-                // engineOutdatedLineCount caption -- record_calculation_result
-                // deliberately still permits recalculating a READY line
-                // directly (no reopen needed), so only LOCKED/VOID need
-                // the "impossible" hedge.
-                shipmentStatus === "LOCKED"
-                  ? "This shipment has already been LOCKED (the routine case for an amendment), so it cannot be recalculated through the normal declaration flow. Contact support."
-                  : shipmentStatus === "VOID"
-                  ? "This shipment has been voided and can never be edited or reopened. Contact support."
+                // 2026-09-07 (S5 review round 13 remediation, findings
+                // S5R13-A-1 x2). The round-12 fix this replaces used a
+                // 2-way hedge (LOCKED/VOID vs "always recalculate
+                // directly on READY") -- WRONG for the redetermination-
+                // stale case, live-reproduced to be refused with
+                // SHIPMENT_NOT_EDITABLE on READY (see
+                // recovery-availability.ts's recalculateAvailability doc
+                // comment and tests/integration/calculation-result-ready-shipment-lock.test.ts).
+                // Now a real 3-way hedge, driven by the same shared
+                // helper every other recalculate-guidance surface uses.
+                recalculation?.status === "BLOCKED"
+                  ? recalculation.blockedStatus === "LOCKED"
+                    ? "This shipment has already been LOCKED (the routine case for an amendment), so it cannot be recalculated through the normal declaration flow. Contact support."
+                    : "This shipment has been voided and can never be edited or reopened. Contact support."
+                  : recalculation?.status === "REQUIRES_REOPEN"
+                  ? "This shipment is READY, and a calculation already exists for the currently-running engine version -- recalculating directly is refused. Reopen the shipment first, then recalculate."
                   : "Recalculate to bring the result in line with the determination shown above."
               }
             </div>

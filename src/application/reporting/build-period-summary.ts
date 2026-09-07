@@ -85,10 +85,24 @@ export type IncompleteLineReason =
 export interface IncompletePeriodLine {
   shipment_id: ShipmentId;
   shipment_reference: string;
+  // 2026-09-07 (S5 review round 13 remediation, finding S5R13-E-1). Its
+  // siblings DatasetSupersededPeriodLine/EngineOutdatedPeriodLine both
+  // carry this (rounds 6/10) so the Reports page can hedge their own
+  // cards' "redetermine"/"recalculate" instruction by shipment status --
+  // this interface never got the same field, even though `entry.
+  // shipment_status` was already in scope right where this type is
+  // constructed (build-period-summary.ts's own loop already reads it
+  // for the other two pushes just above).
+  shipment_status: ShipmentStatus;
   line_id: ShipmentLineId;
   line_number: number;
   cn_code: string;
   reason: IncompleteLineReason;
+  // Only meaningful (and only ever set) for reason === "CALCULATION_STALE"
+  // -- see recovery-availability.ts's recalculateAvailability doc
+  // comment for why READY-recalculate availability depends on this
+  // specific fact, not on which reason fired.
+  calculation_engine_is_current?: boolean;
 }
 
 /**
@@ -478,10 +492,15 @@ export async function buildPeriodSummary(
         {
           shipment_id: entry.shipment_id,
           shipment_reference: entry.shipment_reference,
+          shipment_status: entry.shipment_status,
           line_id: entry.line.id,
           line_number: entry.line.line_number,
           cn_code: entry.line.cn_code,
           reason: incompleteReasonFor(entry),
+          calculation_engine_is_current:
+            entry.calculation === null
+              ? undefined
+              : entry.calculation.engine_version === currentEngineVersion,
         },
       );
     }

@@ -21,6 +21,10 @@ import {
 } from "../../../src/domain/status-vocabulary";
 
 import {
+  recalculateAvailability,
+} from "../../../src/domain/shipments/recovery-availability";
+
+import {
   PeriodPicker,
 } from "../../../components/reporting/period-picker";
 
@@ -535,6 +539,43 @@ function IncompleteLinesCard(
                       <StatusBadge
                         statusKey={incompleteLineReasonKey(line.reason)}
                       />
+
+                      {
+                        // 2026-09-07 (S5 review round 13 remediation,
+                        // finding S5R13-E-1). CALCULATION_STALE is the
+                        // one incomplete-line reason that names an
+                        // action ("recalculate") whose availability
+                        // actually depends on shipment status -- unlike
+                        // NO_DETERMINATION/NOT_CALCULATED, which always
+                        // need a first determination/calculation
+                        // regardless of status. Uses the same shared
+                        // recalculateAvailability this codebase's other
+                        // recalculate-guidance surfaces now use, not a
+                        // new, independently-derived hedge.
+                        line.reason === "CALCULATION_STALE" ? (
+                          (() => {
+                            const availability =
+                              recalculateAvailability(
+                                line.shipment_status,
+                                line.calculation_engine_is_current ?? true,
+                              );
+
+                            if (availability.status === "AVAILABLE") {
+                              return null;
+                            }
+
+                            return (
+                              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                                {availability.status === "BLOCKED"
+                                  ? availability.blockedStatus === "LOCKED"
+                                    ? "This shipment has already been LOCKED (the routine case for an amendment), so it cannot be recalculated through the normal declaration flow -- contact support."
+                                    : "This shipment has been voided and can never be edited or reopened. Contact support."
+                                  : "This shipment is READY, but a calculation already exists for the currently-running engine version -- reopen it first, then recalculate."}
+                              </p>
+                            );
+                          })()
+                        ) : null
+                      }
                     </td>
                   </tr>
                 ),

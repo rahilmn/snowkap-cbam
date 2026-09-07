@@ -32,15 +32,38 @@ import {
   checkCalculationCurrency,
 } from "../../../../src/domain/emissions/check-calculation-currency";
 
+import {
+  ENGINE_VERSION,
+} from "../../../../src/domain/calculations/types";
+
+import {
+  recalculateAvailability,
+} from "../../../../src/domain/shipments/recovery-availability";
+
+import type {
+  ShipmentStatus,
+} from "../../../../src/domain/shipments/types";
+
 export function CalculationCell(
   {
     shipmentId,
+    shipmentStatus,
     lineId,
     editable,
     latestCalculation,
     currentDetermination,
   }: {
     shipmentId: string;
+    // 2026-09-07 (S5 review round 13, finding S5R13-C-1). This compact
+    // badge used to render "Stale -- recalculate" with zero reference to
+    // shipment status at all -- unlike the Recalculate button right next
+    // to it (gated on `editable`), so a LOCKED/VOID shipment's badge
+    // still commanded an impossible action, and a READY shipment's badge
+    // couldn't distinguish the safe case (engine-outdated, recalculates
+    // directly) from the doomed one (redetermination-stale, needs a
+    // reopen first -- record_calculation_result's own READY carve-out;
+    // see recovery-availability.ts's recalculateAvailability).
+    shipmentStatus: ShipmentStatus;
     lineId: string;
     editable: boolean;
     latestCalculation: LatestLineCalculation | undefined;
@@ -70,6 +93,14 @@ export function CalculationCell(
       currentDetermination,
     ) === "STALE";
 
+  const recalculation =
+    latestCalculation === undefined
+      ? null
+      : recalculateAvailability(
+          shipmentStatus,
+          latestCalculation.engine_version === ENGINE_VERSION,
+        );
+
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2">
@@ -83,7 +114,15 @@ export function CalculationCell(
           </Badge>
         )}
 
-        {isStale ? (
+        {isStale && recalculation?.status === "BLOCKED" ? (
+          <Badge tone="warning" title={`This shipment has been ${recalculation.blockedStatus === "LOCKED" ? "LOCKED" : "voided"} -- this line can no longer be recalculated.`}>
+            Stale — permanently
+          </Badge>
+        ) : isStale && recalculation?.status === "REQUIRES_REOPEN" ? (
+          <Badge tone="warning" title="This shipment is READY -- reopen it first, then recalculate.">
+            Stale — reopen to recalculate
+          </Badge>
+        ) : isStale ? (
           <Badge tone="warning">
             Stale — recalculate
           </Badge>

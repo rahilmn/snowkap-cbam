@@ -31,6 +31,14 @@ import {
   initialEmissionDataScreenActionState,
 } from "./action-state";
 
+import type {
+  VerificationStatus,
+} from "../../../src/domain/emissions/types";
+
+import {
+  evidenceRemovalLocked,
+} from "../../../src/domain/evidence/evidence-removal-availability";
+
 export interface EvidenceFileListItem {
   id: string;
   originalFilename: string;
@@ -107,9 +115,19 @@ function uploadErrorMessageFor(
 export function EvidenceSection(
   {
     emissionDataId,
+    verificationStatus,
     files,
   }: {
     emissionDataId: string;
+    // 2026-09-07 (S5 review round 13 remediation, finding S5R13-EVID-B1).
+    // Threaded through so EvidenceFileRow's own Remove confirm dialog
+    // can stop unconditionally promising a deletion that is structurally
+    // impossible once this record is VERIFIED (also true for every
+    // ACTIVE/SUPERSEDED record, since both require verification first --
+    // see evidence_files_delete_own_org's own RLS predicate). Upload
+    // stays gated on nothing, correctly -- see this component's own
+    // upload handling below, unchanged.
+    verificationStatus: VerificationStatus;
     files: EvidenceFileListItem[];
   },
 ) {
@@ -223,6 +241,7 @@ export function EvidenceSection(
               <EvidenceFileRow
                 key={file.id}
                 file={file}
+                verificationStatus={verificationStatus}
               />
             ),
           )}
@@ -299,14 +318,32 @@ export function EvidenceSection(
 function EvidenceFileRow(
   {
     file,
+    verificationStatus,
   }: {
     file: EvidenceFileListItem;
+    verificationStatus: VerificationStatus;
   },
 ) {
   const [state, formAction, pending] =
     useActionState(
       removeEvidenceFileAction,
       initialEmissionDataScreenActionState,
+    );
+
+  // 2026-09-07 (S5 review round 13 remediation, finding S5R13-EVID-B1,
+  // live-reproduced against real Postgres). Once VERIFIED, removal is
+  // structurally blocked at the RLS layer (evidence_files_delete_own_org
+  // requires verification_status <> 'VERIFIED') AND the application
+  // layer (removeEvidenceFile's own EMISSION_DATA_VERIFIED rejection) --
+  // both deliberately unchanged by this fix; only the UI's own promise
+  // is corrected to match. Matches VerifyButton's own confirm-dialog
+  // text elsewhere on this page ("The evidence attached to it can no
+  // longer be removed"), just surfaced here too, where a user can reach
+  // this exact record independently (a different session, days later),
+  // not only at the moment of clicking Verify.
+  const removalLocked =
+    evidenceRemovalLocked(
+      verificationStatus,
     );
 
   return (
@@ -322,30 +359,39 @@ function EvidenceFileRow(
         {formatFileSize(file.sizeBytes)} · {file.createdAt.slice(0, 10)}
       </span>
 
-      <form action={formAction}>
-        <input
-          type="hidden"
-          name="evidenceFileId"
-          value={file.id}
-        />
-
-        <ConfirmSubmitButton
-          size="sm"
-          variant="destructive"
-          pending={pending}
-          confirm={
-            {
-              title: `Remove ${file.originalFilename}?`,
-              description:
-                "The file is deleted from storage. If this record is then left with no evidence it becomes incomplete, and cannot be approved in internal review or activated until evidence is attached again.",
-              confirmLabel: "Remove file",
-              variant: "destructive",
-            }
-          }
+      {removalLocked ? (
+        <span
+          className="text-[var(--text-tertiary)]"
+          title="This record has already completed internal review, so its evidence can no longer be removed."
         >
-          Remove
-        </ConfirmSubmitButton>
-      </form>
+          Locked (internal review complete)
+        </span>
+      ) : (
+        <form action={formAction}>
+          <input
+            type="hidden"
+            name="evidenceFileId"
+            value={file.id}
+          />
+
+          <ConfirmSubmitButton
+            size="sm"
+            variant="destructive"
+            pending={pending}
+            confirm={
+              {
+                title: `Remove ${file.originalFilename}?`,
+                description:
+                  "The file is deleted from storage. If this record is then left with no evidence it becomes incomplete, and cannot be approved in internal review or activated until evidence is attached again.",
+                confirmLabel: "Remove file",
+                variant: "destructive",
+              }
+            }
+          >
+            Remove
+          </ConfirmSubmitButton>
+        </form>
+      )}
 
       {state.status === "error" ? (
         <p className="w-full text-right text-[var(--color-danger-700)]">

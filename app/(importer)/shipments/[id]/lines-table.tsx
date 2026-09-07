@@ -332,6 +332,7 @@ function LineRow(
         <td className="px-4 py-2.5">
           <CalculationCell
             shipmentId={shipmentId}
+            shipmentStatus={shipmentStatus}
             lineId={line.id}
             editable={canRecalculate}
             latestCalculation={latestCalculation}

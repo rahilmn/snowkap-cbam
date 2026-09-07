@@ -11,6 +11,10 @@ import type {
   ReportingPeriod,
 } from "../shared/reporting-period";
 
+import type {
+  ShipmentStatus,
+} from "../shipments/types";
+
 export type DeclarationStatus =
   | "DRAFT"
   | "READY"
@@ -156,20 +160,39 @@ export type CompletenessBlockerReason =
   | "LINE_DATASET_SUPERSEDED";
 
 /**
- * One named blocker. `shipment_id`/`shipment_reference` are null only
- * for the period-level NO_SHIPMENTS_IN_PERIOD reason -- every other
- * reason names the exact shipment (and, for the two line-level reasons,
- * the exact line) it blocks on. Never a bare boolean: per this
- * codebase's "never treat no value as value is zero" posture
- * (CLAUDE.md), a caller must always be able to say WHY a period isn't
- * ready, not just THAT it isn't.
+ * One named blocker. `shipment_id`/`shipment_reference`/`shipment_status`
+ * are null only for the period-level NO_SHIPMENTS_IN_PERIOD reason --
+ * every other reason names the exact shipment (and, for the two
+ * line-level reasons, the exact line) it blocks on. Never a bare
+ * boolean: per this codebase's "never treat no value as value is zero"
+ * posture (CLAUDE.md), a caller must always be able to say WHY a period
+ * isn't ready, not just THAT it isn't.
+ *
+ * 2026-09-07 (S5 review round 13 remediation, findings S5R13-A-1/
+ * S5R13-B-1/S5R13-D-1). `shipment_status` and `calculation_engine_is_
+ * current` were added so every UI surface rendering a blocker (this
+ * declaration's own completeness card, MarkReadyForm's inline blockers
+ * list) can consult the ONE shared recovery-availability.ts helper
+ * (recalculateAvailability/redetermineAvailability) directly off the
+ * blocker itself, instead of independently re-deriving (and, per that
+ * round's findings, getting wrong) a per-surface hedge from a coarse
+ * aggregate like "is ANY member shipment LOCKED." Matches the pattern
+ * build-period-summary.ts's own DatasetSupersededPeriodLine/
+ * EngineOutdatedPeriodLine already established for the Reports page.
+ * `calculation_engine_is_current` is populated only for
+ * LINE_CALCULATION_STALE (the one reason recalculateAvailability needs
+ * it for -- see that function's own doc comment on why READY-recalculate
+ * availability depends on this, not on which blocker reason fired) and
+ * is `undefined` for every other reason, where it has no meaning.
  */
 export interface CompletenessBlocker {
   reason: CompletenessBlockerReason;
   shipment_id: ShipmentId | null;
   shipment_reference: string | null;
+  shipment_status: ShipmentStatus | null;
   line_id?: ShipmentLineId;
   line_number?: number;
+  calculation_engine_is_current?: boolean;
 }
 
 export interface CompletenessReport {

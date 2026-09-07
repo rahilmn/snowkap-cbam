@@ -263,10 +263,12 @@ describe(
             {
               shipment_id: "ship-1",
               shipment_reference: "REF-001",
+              shipment_status: "READY",
               line_id: "line-1",
               line_number: 1,
               cn_code: "25232100",
               reason: "NO_DETERMINATION",
+              calculation_engine_is_current: undefined,
             },
           ],
         );

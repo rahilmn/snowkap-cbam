@@ -93,6 +93,33 @@ function quantityInput(
 }
 
 /**
+ * `sector: null` -- not a rejection -- means the shipment's release_date
+ * can't be found, belongs to a different org, or no matching good
+ * exists: an already-classified line reaching ACTUAL determination
+ * should always have exactly one match, so this is an
+ * unexpected-data-drift case, not a normal outcome; the engine's own
+ * `good_sector: null` handling already treats "unknown" as "don't gate"
+ * (conservative in the other direction is not this function's job --
+ * see calculate-line-emissions.ts's own doc comment on why an
+ * indeterminate sector does not block calculation).
+ *
+ * `FETCH_FAILED` is a DIFFERENT thing from `sector: null` and callers
+ * must not conflate them (S5 review round 13, finding S5R13-SILENT-B1,
+ * live-reproduced: a swallowed fetch error here silently skipped the
+ * Annex II direct-only exclusion and persisted a 20%-over-inclusive
+ * figure with status "OK"). A genuine fetch error carries no
+ * information about whether the shipment exists or what sector its
+ * good belongs to -- treating it as "sector unknown, don't gate" is
+ * exactly the "infrastructure failure collapsed into a successful
+ * empty/default state" hazard CLAUDE.md names. Every caller must fail
+ * closed on `FETCH_FAILED` (reject the calculation / report the check
+ * as unable to run), never substitute `sector: null` for it.
+ */
+export type ResolveGoodSectorResult =
+  | { status: "OK"; sector: string | null }
+  | { status: "FETCH_FAILED" };
+
+/**
  * The engine's Annex II gate (calculate-line-emissions.ts,
  * ANNEX_II_SECTORS) needs the line's declared good's `cbam_goods.sector`
  * -- data this pure engine cannot fetch itself. Only called for ACTUAL
@@ -104,15 +131,10 @@ function quantityInput(
  * this codebase's convention of sequential queries over embedded joins
  * (see the regulatory adapter's own five-sequential-query design).
  *
- * Returns `null` -- not a rejection -- when the shipment's release_date
- * can't be found, belongs to a different org, or no matching good
- * exists: an already-classified line reaching ACTUAL determination
- * should always have exactly one match, so this is an
- * unexpected-data-drift case, not a normal outcome; the engine's own
- * `good_sector: null` handling already treats "unknown" as "don't gate"
- * (conservative in the other direction is not this function's job --
- * see calculate-line-emissions.ts's own doc comment on why an
- * indeterminate sector does not block calculation).
+ * See ResolveGoodSectorResult's own doc comment for the OK/FETCH_FAILED
+ * split -- added in S5 review round 13 remediation (S5R13-SILENT-B1)
+ * because a genuine Postgres/PostgREST error on the `shipments` fetch
+ * below was previously indistinguishable from a legitimate not-found.
  *
  * Verifies the fetched shipment's own org_id against the caller's
  * orgId before proceeding -- every caller of this function has already
@@ -123,9 +145,11 @@ function quantityInput(
  * attached, so it re-derives ownership itself rather than trusting the
  * caller -- the same "re-authorized rather than believed" posture
  * calculateLine's own doc comment states, applied one level deeper.
- * Folded into the same null return as "not found" (not a distinct
- * "forbidden" outcome), matching the not-found-not-forbidden IDOR
- * defense already used elsewhere in this file's callers.
+ * A cross-org shipment is folded into the same `sector: null` outcome
+ * as "not found" (not a distinct "forbidden" outcome), matching the
+ * not-found-not-forbidden IDOR defense already used elsewhere in this
+ * file's callers -- this is unrelated to, and unaffected by, the
+ * FETCH_FAILED split above.
  */
 export async function resolveGoodSectorForActualLine(
   supabase: SupabaseClient,
@@ -133,8 +157,8 @@ export async function resolveGoodSectorForActualLine(
   orgId: string,
   shipmentId: string,
   cnCode: string,
-): Promise<string | null> {
-  const { data: shipment } =
+): Promise<ResolveGoodSectorResult> {
+  const { data: shipment, error } =
     await supabase
       .from("shipments")
       .select(
@@ -143,15 +167,27 @@ export async function resolveGoodSectorForActualLine(
       .eq("id", shipmentId)
       .maybeSingle();
 
+  if (error) {
+    return {
+      status: "FETCH_FAILED",
+    };
+  }
+
   if (!shipment) {
-    return null;
+    return {
+      status: "OK",
+      sector: null,
+    };
   }
 
   const shipmentRow =
     shipment as { release_date: string; org_id: string };
 
   if (shipmentRow.org_id !== orgId) {
-    return null;
+    return {
+      status: "OK",
+      sector: null,
+    };
   }
 
   const candidates =
@@ -160,7 +196,10 @@ export async function resolveGoodSectorForActualLine(
       shipmentRow.release_date,
     );
 
-  return candidates[0]?.sector ?? null;
+  return {
+    status: "OK",
+    sector: candidates[0]?.sector ?? null,
+  };
 }
 
 /**
@@ -234,7 +273,7 @@ export async function calculateLine(
     };
   }
 
-  const goodSector =
+  const goodSectorResult =
     line.emission_determination?.method === "ACTUAL"
       ? await resolveGoodSectorForActualLine(
           supabase,
@@ -243,7 +282,22 @@ export async function calculateLine(
           line.shipment_id,
           line.cn_code,
         )
-      : null;
+      : { status: "OK" as const, sector: null };
+
+  // S5 review round 13 remediation (S5R13-SILENT-B1). A genuine fetch
+  // error here must fail closed, the same way the shipment_lines fetch
+  // above already does -- not silently fall through as "sector
+  // unknown," which would skip the Annex II direct-only exclusion and
+  // persist an over-inclusive figure with zero error signal.
+  if (goodSectorResult.status === "FETCH_FAILED") {
+    return {
+      status: "REJECTED",
+      reason: "FETCH_FAILED",
+    };
+  }
+
+  const goodSector =
+    goodSectorResult.sector;
 
   const calculation =
     calculateLineEmissions(

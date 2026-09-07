@@ -103,11 +103,24 @@ export async function getDefaultReferenceForLine(
   // classified good's sector -- the same lookup the calculation
   // engine's own Annex-II gate already performs for an ACTUAL
   // determination (calculate-line.ts), reused rather than
-  // re-implemented. `null` (shipment/good not found -- an
+  // re-implemented. `sector: null` (shipment/good not found -- an
   // unexpected-data-drift case per that function's own doc comment)
   // means the treatment rule cannot be evaluated at all, so the
   // reference is not shown rather than guessed at.
-  const sector =
+  //
+  // 2026-09-07 (S5 review round 13 remediation, S5R13-SILENT-B1). This
+  // is the lowest-severity of that finding's three call sites -- purely
+  // a read-only display, never persisted -- so a genuine FETCH_FAILED
+  // is deliberately folded into the same UNAVAILABLE outcome a
+  // legitimate not-found already produces (this function's own
+  // read-only contract has no separate "error" status to report one).
+  // That is now an explicit, typed decision this line makes (the
+  // compiler forces every ResolveGoodSectorResult variant to be
+  // handled), not the accidental swallow calculate-line.ts's own
+  // ACTUAL-determination persistence path had -- that path fails
+  // closed instead, since a wrong number persisted is a different
+  // order of harm than a reference widget hiding for one page load.
+  const sectorResult =
     await resolveGoodSectorForActualLine(
       supabase,
       repository,
@@ -116,7 +129,7 @@ export async function getDefaultReferenceForLine(
       line.cnCode,
     );
 
-  if (sector === null) {
+  if (sectorResult.status === "FETCH_FAILED" || sectorResult.sector === null) {
     return {
       status: "UNAVAILABLE",
     };
@@ -124,6 +137,6 @@ export async function getDefaultReferenceForLine(
 
   return describeDefaultReference(
     resolution.record,
-    sector,
+    sectorResult.sector,
   );
 }

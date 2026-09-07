@@ -256,6 +256,7 @@ function EmissionDataRow(
       */}
       <EvidenceSection
         emissionDataId={record.id}
+        verificationStatus={record.verificationStatus}
         files={record.evidenceFiles}
       />
 

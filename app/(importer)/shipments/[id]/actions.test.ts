@@ -1116,7 +1116,16 @@ describe(
     }
 
     it(
-      "2026-09-07 (S5 review round 7, finding S5R7-A-B1): SHIPMENT_NOT_EDITABLE no longer unconditionally tells the user to reopen a READY shipment -- record_calculation_result deliberately still permits recalculating a READY (non-LOCKED) line with a new engine version",
+      // 2026-09-07 (S5 review round 13 remediation, finding S5R13-A-1).
+      // Replaces the round-7 fix (S5R7-A-B1) this test used to assert,
+      // which claimed a READY shipment hitting this refusal always means
+      // "nothing left to do" -- live-reproduced false whenever the line
+      // was redetermined (not merely engine-version-outdated), the far
+      // more common cause. The message must not unconditionally assert
+      // either READY sub-case; record_calculation_result returns the
+      // identical bare reason for both, so this function genuinely
+      // cannot tell them apart.
+      "SHIPMENT_NOT_EDITABLE honestly names both possible READY causes -- already current (nothing to do) or redetermined (needs a reopen) -- rather than asserting the wrong one is always true",
       async () => {
         allowRateLimit();
         resolveOrgSummaryOnce();
@@ -1137,7 +1146,7 @@ describe(
           {
             status: "error",
             message:
-              "This shipment can no longer be recalculated in its current status, or this line's calculation is already current for the running engine version. Reload the page to check -- if the shipment has been LOCKED or VOIDed, that's final; if it's still READY, no further action is needed.",
+              "This shipment can no longer be recalculated in its current status, or a calculation already exists for the currently-running engine version on this line. Reload the page to check -- if the shipment has been LOCKED or VOIDed, that's final. If it's still READY: either this line's calculation is already current (nothing to do), or the line was redetermined since it was last calculated -- reopen the shipment first, then recalculate.",
           },
         );
       },

@@ -24,6 +24,10 @@ export {
 } from "./verifier-report-badges";
 
 export {
+  blockerRecoveryHint,
+} from "./blocker-recovery-hints";
+
+export {
   shipmentStatusKey,
   declarationStatusKey,
   emissionRecordStatusKey,

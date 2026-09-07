@@ -107,6 +107,19 @@ export interface ReproductionSide {
  *   re-derivation than the one the original calculation saw. Carries
  *   the actual non-COMPUTED status the recompute returned, so a caller
  *   can explain *what* drifted rather than just failing.
+ * - FETCH_FAILED (added in S5 review round 13 remediation,
+ *   S5R13-SILENT-B1): a genuine fetch error resolving the line's
+ *   *current* cn_code (resolveCnCodeForLine) or its good's sector
+ *   (resolveGoodSectorForActualLine) -- as opposed to the top-level
+ *   calculation_results fetch above, whose error is deliberately folded
+ *   into NOT_FOUND (see that comment). Unlike NOT_FOUND, this is not
+ *   folded into a null good_sector: doing so would silently skip the
+ *   Annex II direct-only gate and could report a false REPRODUCIBLE (if
+ *   the stored row itself never applied the gate) or a false MISMATCH
+ *   (if it did) for a row this function was never actually able to
+ *   recompute -- the exact "infrastructure failure collapsed into a
+ *   successful/default outcome" hazard CLAUDE.md names, on an audit
+ *   tool rather than a persist path.
  */
 export type ReproductionResult =
   | { status: "REPRODUCIBLE" }
@@ -124,7 +137,8 @@ export type ReproductionResult =
       status: "INPUTS_DRIFTED";
       recomputedStatus: Exclude<CalculationStatus, "COMPUTED">;
     }
-  | { status: "NOT_FOUND" };
+  | { status: "NOT_FOUND" }
+  | { status: "FETCH_FAILED" };
 
 /**
  * The inverse of calculate-line.ts's own quantityInput: that function
@@ -174,13 +188,21 @@ function quantityFieldsFromRow(
  * accepts lineId as a bare parameter with no proof attached, so it
  * re-derives ownership itself rather than relying on a caller
  * invariant holding forever.
+ *
+ * `FETCH_FAILED` (S5 review round 13 remediation, S5R13-SILENT-B1) is
+ * distinct from `cnCode: null` for the same reason it is in
+ * resolveGoodSectorForActualLine -- a genuine fetch error here carries
+ * no information about the line's real cn_code, so it must not be
+ * folded into "not found"; the caller propagates it as
+ * ReproductionResult's own FETCH_FAILED rather than treating it as
+ * "sector unknown, don't gate."
  */
 async function resolveCnCodeForLine(
   supabase: SupabaseClient,
   orgId: OrganizationId,
   lineId: string,
-): Promise<string | null> {
-  const { data } =
+): Promise<{ status: "OK"; cnCode: string | null } | { status: "FETCH_FAILED" }> {
+  const { data, error } =
     await supabase
       .from("shipment_lines")
       .select(
@@ -189,14 +211,26 @@ async function resolveCnCodeForLine(
       .eq("id", lineId)
       .maybeSingle();
 
+  if (error) {
+    return {
+      status: "FETCH_FAILED",
+    };
+  }
+
   const line =
     data as { cn_code: string; org_id: string } | null;
 
   if (!line || line.org_id !== orgId) {
-    return null;
+    return {
+      status: "OK",
+      cnCode: null,
+    };
   }
 
-  return line.cn_code;
+  return {
+    status: "OK",
+    cnCode: line.cn_code,
+  };
 }
 
 /**
@@ -348,29 +382,49 @@ export async function reproduceCalculationResult(
     };
   }
 
-  const goodSector =
+  const goodSectorOutcome =
     row.determination.method === "ACTUAL"
       ? await (
           async () => {
-            const cnCode =
+            const cnCodeResult =
               await resolveCnCodeForLine(
                 supabase,
                 orgId,
                 row.line_id,
               );
 
-            return cnCode === null
-              ? null
+            if (cnCodeResult.status === "FETCH_FAILED") {
+              return {
+                status: "FETCH_FAILED" as const,
+              };
+            }
+
+            return cnCodeResult.cnCode === null
+              ? { status: "OK" as const, sector: null }
               : resolveGoodSectorForActualLine(
                   supabase,
                   repository,
                   orgId,
                   row.shipment_id,
-                  cnCode,
+                  cnCodeResult.cnCode,
                 );
           }
         )()
-      : null;
+      : { status: "OK" as const, sector: null };
+
+  // S5 review round 13 remediation (S5R13-SILENT-B1). A genuine fetch
+  // error resolving the line's current cn_code or its good's sector
+  // must fail this check closed -- not be silently treated as "sector
+  // unknown," which could report a false REPRODUCIBLE/MISMATCH (see
+  // ReproductionResult's own doc comment on FETCH_FAILED above).
+  if (goodSectorOutcome.status === "FETCH_FAILED") {
+    return {
+      status: "FETCH_FAILED",
+    };
+  }
+
+  const goodSector =
+    goodSectorOutcome.sector;
 
   const recomputed =
     calculateLineEmissions(

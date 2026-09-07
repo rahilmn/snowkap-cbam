@@ -57,6 +57,11 @@ import {
   getDefaultReferenceForLine,
 } from "../../../../src/application/emissions/get-default-reference-for-line";
 
+import {
+  recalculateAvailability,
+  redetermineAvailability,
+} from "../../../../src/domain/shipments/recovery-availability";
+
 import type {
   DefaultReferenceDisplay,
 } from "../../../../src/domain/emissions/default-reference";
@@ -351,6 +356,41 @@ export default async function ShipmentDetailPage(
   const canRecalculate =
     shipment.status === "DRAFT" || shipment.status === "READY";
 
+  // 2026-09-07 (S5 review round 13 remediation, finding S5R13-A-1). The
+  // captions below used to independently re-derive "is READY safe for
+  // this action" per caption, and staleLineCount's own 2-way version was
+  // WRONG -- see recovery-availability.ts's own doc comment for why
+  // READY-recalculate availability depends on calculationEngineIsCurrent,
+  // not on determination staleness. staleLineCount is an AGGREGATE
+  // (get-shipment-emissions-total.ts counts every line failing
+  // checkCalculationCurrency, regardless of its own engine_version), so
+  // individual stale lines here may differ on that axis -- this
+  // deliberately computes the CONSERVATIVE (always-safe) answer for the
+  // aggregate caption by assuming calculationEngineIsCurrent=true
+  // (READY -> REQUIRES_REOPEN): recommending "reopen first" is never
+  // wrong, even for the subset of stale lines that would have
+  // recalculated directly without it. engineOutdatedLineCount, by
+  // contrast, is exactly and only lines with calculationEngineIsCurrent
+  // false (the loop `continue`s past a stale line before ever
+  // incrementing it), so its own availability below is computed exactly,
+  // not conservatively.
+  const staleLineRecalculateAvailability =
+    recalculateAvailability(
+      shipment.status,
+      true,
+    );
+
+  const engineOutdatedRecalculateAvailability =
+    recalculateAvailability(
+      shipment.status,
+      false,
+    );
+
+  const datasetSupersededRedetermineAvailability =
+    redetermineAvailability(
+      shipment.status,
+    );
+
   return (
     <AppShell
       breadcrumbs={[
@@ -403,19 +443,20 @@ export default async function ShipmentDetailPage(
                   since their last calculation -- their embedded
                   emissions are excluded from this total
                   {
-                    // 2026-09-07 (S5 review round 12, finding S5R12-A-3,
-                    // live-reproduced). "Until recalculated" implies
-                    // eventual recoverability -- false once the shipment
-                    // is LOCKED or VOID, since record_calculation_result
-                    // refuses both statuses unconditionally, making the
-                    // exclusion permanent, not merely pending. Reachable
-                    // through ordinary actions: redetermine a line while
-                    // DRAFT, mark READY, then LOCK, and the shipment
-                    // reaches LOCKED still carrying a permanently-stale
-                    // calculation. Never touched by any of rounds 4-11's
-                    // own LOCKED-hedge fixes until now.
-                    shipment.status === "LOCKED" || shipment.status === "VOID"
+                    // 2026-09-07 (S5 review round 13 remediation, finding
+                    // S5R13-A-1). Round 12's fix (S5R12-A-3) was a 2-way
+                    // branch assuming READY could always recalculate
+                    // directly -- wrong whenever the stale line's own
+                    // calculation is already at the current engine
+                    // version (the common redetermine-without-recalculate
+                    // case), which the RPC refuses on READY. See this
+                    // page's own staleLineRecalculateAvailability
+                    // comment for why this caption conservatively treats
+                    // READY as needing a reopen.
+                    staleLineRecalculateAvailability.status === "BLOCKED"
                       ? " permanently -- recalculation is no longer possible for this shipment."
+                      : staleLineRecalculateAvailability.status === "REQUIRES_REOPEN"
+                      ? " -- reopen the shipment first, then recalculate."
                       : " until recalculated."
                   }
                 </p>
@@ -458,11 +499,13 @@ export default async function ShipmentDetailPage(
                   redetermined since their last calculation -- their
                   embedded emissions are excluded from this total
                   {
-                    // 2026-09-07 (S5 review round 12, finding S5R12-A-3).
-                    // See the identical NONE-total caption above for the
+                    // 2026-09-07 (S5 review round 13 remediation). See
+                    // the identical NONE-total caption above for the
                     // full reasoning -- same hedge, same reason.
-                    shipment.status === "LOCKED" || shipment.status === "VOID"
+                    staleLineRecalculateAvailability.status === "BLOCKED"
                       ? " permanently -- recalculation is no longer possible for this shipment."
+                      : staleLineRecalculateAvailability.status === "REQUIRES_REOPEN"
+                      ? " -- reopen the shipment first, then recalculate."
                       : " until recalculated."
                   }
                 </p>
@@ -502,13 +545,19 @@ export default async function ShipmentDetailPage(
                   {emissionsTotal.datasetSupersededLineCount} of{" "}
                   {shipment.lines.length} line(s) used a regulatory dataset
                   that has since been corrected
-                  {shipment.status === "LOCKED"
-                    ? " -- this shipment has already been LOCKED (the routine case for an amendment), so it cannot be redetermined through the normal declaration flow. Contact support."
-                    : shipment.status === "VOID"
-                    ? " -- this shipment has been voided and can never be edited or reopened. Contact support."
-                    : shipment.status === "READY"
-                    ? " -- this shipment is READY; reopen it first, then redetermine before filing."
-                    : " -- redetermine before filing."}
+                  {
+                    // 2026-09-07 (S5 review round 13 remediation). Now
+                    // driven by the shared redetermineAvailability
+                    // (recovery-availability.ts) -- behavior unchanged
+                    // from the round-12 fix this replaces.
+                    datasetSupersededRedetermineAvailability.status === "BLOCKED"
+                      ? datasetSupersededRedetermineAvailability.blockedStatus === "LOCKED"
+                        ? " -- this shipment has already been LOCKED (the routine case for an amendment), so it cannot be redetermined through the normal declaration flow. Contact support."
+                        : " -- this shipment has been voided and can never be edited or reopened. Contact support."
+                      : datasetSupersededRedetermineAvailability.status === "REQUIRES_REOPEN"
+                      ? " -- this shipment is READY; reopen it first, then redetermine before filing."
+                      : " -- redetermine before filing."
+                  }
                 </p>
               ) : null
             }
@@ -535,11 +584,25 @@ export default async function ShipmentDetailPage(
                   {emissionsTotal.engineOutdatedLineCount} of{" "}
                   {shipment.lines.length} line(s) were calculated by an
                   earlier version of the calculation engine
-                  {shipment.status === "LOCKED"
-                    ? " -- this shipment has already been LOCKED (the routine case for an amendment), so it cannot be recalculated through the normal declaration flow. Contact support."
-                    : shipment.status === "VOID"
-                    ? " -- this shipment has been voided and can never be edited or reopened. Contact support."
-                    : " -- recalculate before filing."}
+                  {
+                    // 2026-09-07 (S5 review round 13 remediation). Now
+                    // driven by the shared recalculateAvailability
+                    // (recovery-availability.ts), passed
+                    // calculationEngineIsCurrent=false because every
+                    // line counted here IS exactly that (see
+                    // get-shipment-emissions-total.ts's own loop --
+                    // engineOutdatedLineCount only increments past the
+                    // checkCalculationCurrency guard, so it never
+                    // double-counts a determination-stale line) --
+                    // behavior unchanged from the round-12 fix this
+                    // replaces; still correctly a 2-way branch, not a
+                    // 3rd READY case.
+                    engineOutdatedRecalculateAvailability.status === "BLOCKED"
+                      ? engineOutdatedRecalculateAvailability.blockedStatus === "LOCKED"
+                        ? " -- this shipment has already been LOCKED (the routine case for an amendment), so it cannot be recalculated through the normal declaration flow. Contact support."
+                        : " -- this shipment has been voided and can never be edited or reopened. Contact support."
+                      : " -- recalculate before filing."
+                  }
                 </p>
               ) : null
             }

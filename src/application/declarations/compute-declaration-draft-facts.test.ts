@@ -247,6 +247,7 @@ describe(
               reason: "SHIPMENT_HAS_NO_LINES",
               shipment_id: "ship-1",
               shipment_reference: "REF-001",
+              shipment_status: "READY",
             },
           ],
         );
@@ -279,6 +280,7 @@ describe(
             reason: "SHIPMENT_NOT_LOCKABLE",
             shipment_id: "ship-1",
             shipment_reference: "REF-001",
+            shipment_status: "DRAFT",
           },
         );
       },
@@ -343,6 +345,7 @@ describe(
               reason: "NO_SHIPMENTS_IN_PERIOD",
               shipment_id: null,
               shipment_reference: null,
+              shipment_status: null,
             },
           ],
         );
@@ -408,8 +411,10 @@ describe(
               reason: "LINE_CALCULATION_STALE",
               shipment_id: "ship-1",
               shipment_reference: "REF-001",
+              shipment_status: "READY",
               line_id: "line-1",
               line_number: 1,
+              calculation_engine_is_current: true,
             },
           ],
         );
@@ -537,6 +542,7 @@ describe(
               reason: "LINE_DATASET_SUPERSEDED",
               shipment_id: "ship-1",
               shipment_reference: "REF-001",
+              shipment_status: "READY",
               line_id: "line-1",
               line_number: 1,
             },
@@ -595,6 +601,7 @@ describe(
               reason: "LINE_DATASET_SUPERSEDED",
               shipment_id: "ship-1",
               shipment_reference: "REF-001",
+              shipment_status: "READY",
               line_id: "line-1",
               line_number: 1,
             },
@@ -715,6 +722,7 @@ describe(
               reason: "LINE_CALCULATION_ENGINE_OUTDATED",
               shipment_id: "ship-1",
               shipment_reference: "REF-001",
+              shipment_status: "READY",
               line_id: "line-1",
               line_number: 1,
             },

@@ -106,6 +106,7 @@ export function buildCompletenessReport(
         reason: "NO_SHIPMENTS_IN_PERIOD",
         shipment_id: null,
         shipment_reference: null,
+        shipment_status: null,
       },
     );
   }
@@ -117,6 +118,7 @@ export function buildCompletenessReport(
           reason: "SHIPMENT_NOT_LOCKABLE",
           shipment_id: shipment.shipment_id,
           shipment_reference: shipment.shipment_reference,
+          shipment_status: shipment.status,
         },
       );
     }
@@ -127,6 +129,7 @@ export function buildCompletenessReport(
           reason: "SHIPMENT_HAS_NO_LINES",
           shipment_id: shipment.shipment_id,
           shipment_reference: shipment.shipment_reference,
+          shipment_status: shipment.status,
         },
       );
 
@@ -142,6 +145,7 @@ export function buildCompletenessReport(
             reason: "LINE_NOT_DETERMINED",
             shipment_id: shipment.shipment_id,
             shipment_reference: shipment.shipment_reference,
+            shipment_status: shipment.status,
             line_id: line.line_id,
             line_number: line.line_number,
           },
@@ -156,6 +160,7 @@ export function buildCompletenessReport(
             reason: "LINE_NOT_CALCULATED",
             shipment_id: shipment.shipment_id,
             shipment_reference: shipment.shipment_reference,
+            shipment_status: shipment.status,
             line_id: line.line_id,
             line_number: line.line_number,
           },
@@ -169,13 +174,22 @@ export function buildCompletenessReport(
         // layered onto, LINE_NOT_CALCULATED above -- an `else if`, not a
         // second independent check, so a line is never flagged with
         // both for the same underlying fact.
+        //
+        // 2026-09-07 (S5 review round 13 remediation). Carries
+        // calculation_engine_is_current alongside shipment_status --
+        // see CompletenessBlocker's own doc comment for why
+        // recalculateAvailability needs this specific fact, not just
+        // "which reason fired," to answer whether this line can be
+        // recalculated directly on a READY shipment.
         blockers.push(
           {
             reason: "LINE_CALCULATION_STALE",
             shipment_id: shipment.shipment_id,
             shipment_reference: shipment.shipment_reference,
+            shipment_status: shipment.status,
             line_id: line.line_id,
             line_number: line.line_number,
+            calculation_engine_is_current: line.calculation_engine_is_current,
           },
         );
       } else if (!line.calculation_engine_is_current) {
@@ -195,6 +209,7 @@ export function buildCompletenessReport(
             reason: "LINE_CALCULATION_ENGINE_OUTDATED",
             shipment_id: shipment.shipment_id,
             shipment_reference: shipment.shipment_reference,
+            shipment_status: shipment.status,
             line_id: line.line_id,
             line_number: line.line_number,
           },
@@ -211,6 +226,7 @@ export function buildCompletenessReport(
             reason: "LINE_DATASET_SUPERSEDED",
             shipment_id: shipment.shipment_id,
             shipment_reference: shipment.shipment_reference,
+            shipment_status: shipment.status,
             line_id: line.line_id,
             line_number: line.line_number,
           },
