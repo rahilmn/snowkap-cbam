@@ -510,5 +510,97 @@ describe(
         );
       },
     );
+
+    it(
+      "2026-09-07 (S5 review round 7, finding S5R7-A-2/S5R7-STALE-B1): chunks both the emission_data and sharing_grants lookups rather than issuing one oversized .in() call each, when the org-wide period group spans more than INSTALLATION_ID_CHUNK_SIZE distinct installations",
+      async () => {
+        const INSTALLATION_COUNT =
+          150;
+
+        const lines =
+          Array.from(
+            { length: INSTALLATION_COUNT },
+            (_, index) =>
+              actualLine(
+                {
+                  id: `line-${index}`,
+                  emission_determination: {
+                    method: "ACTUAL",
+                    snapshot: {
+                      ...actualDeterminationSnapshot,
+                      installation_id: `installation-${index}`,
+                    },
+                  },
+                } as never,
+              ),
+          );
+
+        const emissionDataRows =
+          Array.from(
+            { length: INSTALLATION_COUNT },
+            (_, index) => (
+              {
+                ...currentActiveRowSameVersion,
+                id: `emission-data-${index}`,
+                installation_id: `installation-${index}`,
+              }
+            ),
+          );
+
+        const sharingGrantRows =
+          Array.from(
+            { length: INSTALLATION_COUNT },
+            (_, index) => (
+              {
+                installation_id: `installation-${index}`,
+                expires_at: null,
+              }
+            ),
+          );
+
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await checkActualDeterminationStalenessByShipment(
+            makeMockSupabase(
+              {
+                emission_data: { data: emissionDataRows, error: null },
+                sharing_grants: { data: sharingGrantRows, error: null },
+              },
+              recorder,
+            ),
+            "org-1" as never,
+            lines,
+            annualPeriod,
+          );
+
+        expect(Object.keys(result)).toHaveLength(
+          INSTALLATION_COUNT,
+        );
+
+        expect(result["line-0"]).toBe(
+          "CURRENT",
+        );
+
+        // 150 ids at INSTALLATION_ID_CHUNK_SIZE=100 -- exactly 2 chunks
+        // for each query, never 1 (the old, oversized-.in() shape).
+        expect(
+          recorder.fromCalls.filter(
+            (name) => name === "emission_data",
+          ),
+        ).toHaveLength(
+          2,
+        );
+
+        expect(
+          recorder.fromCalls.filter(
+            (name) => name === "sharing_grants",
+          ),
+        ).toHaveLength(
+          2,
+        );
+      },
+    );
   },
 );

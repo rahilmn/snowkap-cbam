@@ -30,6 +30,48 @@ import {
   type EmissionDataRow,
 } from "./emission-data-mapper";
 
+// 2026-09-07 (S5 review round 7, findings S5R7-A-2/S5R7-STALE-B1). This
+// module was designed around "every distinct installation_id among ONE
+// shipment's ACTUAL-determined lines" (a naturally small set for its
+// original caller, app/(importer)/shipments/[id]/page.tsx), but
+// list-actual-determined-lines.ts reuses it a second way: grouping the
+// ORG's entire set of ACTUAL-determined lines by reporting period and
+// calling this function once per distinct period group -- so
+// `installationIds` here can be every distinct installation among every
+// shipment in the org sharing one period, not one shipment's handful.
+// Unlike max_rows=1000 row-count truncation (bounded here by
+// emission_data_one_active_per_installation_period_uq to at most one
+// row per installation_id anyway), an oversized `.in()` list overflows
+// the REQUEST URL itself (PostgREST/the API gateway rejects it with
+// HTTP 414) -- both `.in()` calls below are chunked for that reason,
+// matching the identical, already live-verified fix shape used
+// elsewhere in this codebase for this exact hazard.
+const INSTALLATION_ID_CHUNK_SIZE =
+  100;
+
+function chunk<T>(
+  items: T[],
+  size: number,
+): T[][] {
+  const chunks: T[][] =
+    [];
+
+  for (
+    let index = 0;
+    index < items.length;
+    index += size
+  ) {
+    chunks.push(
+      items.slice(
+        index,
+        index + size,
+      ),
+    );
+  }
+
+  return chunks;
+}
+
 function actualSnapshotOf(
   line: ShipmentLine,
 ): ActualEmissionSnapshot | null {
@@ -107,15 +149,28 @@ async function activeGrantedInstallationIds(
     return new Set();
   }
 
-  const { data, error } =
-    await supabase
-      .from("sharing_grants")
-      .select("installation_id, expires_at")
-      .eq("grantee_org_id", orgId)
-      .eq("status", "ACTIVE")
-      .in("installation_id", installationIds);
+  const chunkResults =
+    await Promise.all(
+      chunk(
+        installationIds,
+        INSTALLATION_ID_CHUNK_SIZE,
+      ).map(
+        (idsChunk) =>
+          supabase
+            .from("sharing_grants")
+            .select("installation_id, expires_at")
+            .eq("grantee_org_id", orgId)
+            .eq("status", "ACTIVE")
+            .in("installation_id", idsChunk),
+      ),
+    );
 
-  if (error || !data) {
+  const firstError =
+    chunkResults.find(
+      (result) => result.error !== null,
+    )?.error;
+
+  if (firstError || chunkResults.some((result) => !result.data)) {
     // 2026-09-06 (S5 review remediation, finding S5B-4). Previously
     // failed closed to an empty Set -- "no grant evidence" -- which is
     // exactly wrong for a SHARED installation: it does not merely
@@ -129,7 +184,7 @@ async function activeGrantedInstallationIds(
     // the page's own error boundary, matching this module's sibling
     // fix below.
     throw new Error(
-      `emissions: staleness sharing-grants fetch failed (${error?.message ?? "no rows"}).`,
+      `emissions: staleness sharing-grants fetch failed (${firstError?.message ?? "no rows"}).`,
     );
   }
 
@@ -137,7 +192,10 @@ async function activeGrantedInstallationIds(
     Date.now();
 
   return new Set(
-    (data as { installation_id: string; expires_at: string | null }[])
+    chunkResults
+      .flatMap(
+        (result) => result.data as { installation_id: string; expires_at: string | null }[],
+      )
       .filter(
         (row) =>
           row.expires_at === null ||
@@ -184,26 +242,40 @@ export async function checkActualDeterminationStalenessByShipment(
       period,
     );
 
-  let query =
-    supabase
-      .from("emission_data")
-      .select(
-        EMISSION_DATA_COLUMNS,
-      )
-      .eq("status", "ACTIVE")
-      .eq("reporting_period_kind", periodColumns.reporting_period_kind)
-      .eq("reporting_period_year", periodColumns.reporting_period_year)
-      .in("installation_id", installationIds);
+  const chunkResults =
+    await Promise.all(
+      chunk(
+        installationIds,
+        INSTALLATION_ID_CHUNK_SIZE,
+      ).map(
+        (idsChunk) => {
+          let query =
+            supabase
+              .from("emission_data")
+              .select(
+                EMISSION_DATA_COLUMNS,
+              )
+              .eq("status", "ACTIVE")
+              .eq("reporting_period_kind", periodColumns.reporting_period_kind)
+              .eq("reporting_period_year", periodColumns.reporting_period_year)
+              .in("installation_id", idsChunk);
 
-  query =
-    periodColumns.reporting_period_quarter === null
-      ? query.is("reporting_period_quarter", null)
-      : query.eq("reporting_period_quarter", periodColumns.reporting_period_quarter);
+          query =
+            periodColumns.reporting_period_quarter === null
+              ? query.is("reporting_period_quarter", null)
+              : query.eq("reporting_period_quarter", periodColumns.reporting_period_quarter);
 
-  const { data, error } =
-    await query;
+          return query;
+        },
+      ),
+    );
 
-  if (error) {
+  const firstError =
+    chunkResults.find(
+      (result) => result.error !== null,
+    )?.error;
+
+  if (firstError) {
     // 2026-09-06 (S5 review remediation, finding S5B-4). Previously
     // degraded the WHOLE result to {} -- no entry for any line -- which
     // list-actual-determined-lines.ts:481's own
@@ -217,12 +289,14 @@ export async function checkActualDeterminationStalenessByShipment(
     // throw here reaches the page's error boundary exactly the way that
     // function's own four query legs already do (see its doc comment).
     throw new Error(
-      `emissions: staleness emission_data fetch failed (${error.message}).`,
+      `emissions: staleness emission_data fetch failed (${firstError.message}).`,
     );
   }
 
   const rows =
-    (data ?? []) as EmissionDataRow[];
+    chunkResults.flatMap(
+      (result) => (result.data ?? []) as EmissionDataRow[],
+    );
 
   // Scope to what the ACTIVE org may legitimately see: its own data, or
   // an installation it currently holds a live grant for. Anything else
