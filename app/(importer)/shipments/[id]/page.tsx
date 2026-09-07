@@ -299,12 +299,38 @@ export default async function ShipmentDetailPage(
   // editable here, but supabase/migrations/20260904090000_p14_ready_
   // shipments_are_not_editable.sql (2026-09-04) made shipment_lines
   // writes DRAFT-only for every role, at both the RLS and trigger
-  // layer -- every control this flag gates (Add line, Remove, redeter-
-  // mine, recalculate) was rendering fully active for a READY shipment
-  // while every one of those writes was already guaranteed to fail
-  // server-side. Matches the database's own editability boundary now.
+  // layer -- Add line, Remove, and redetermine (all of which write
+  // shipment_lines itself) were rendering fully active for a READY
+  // shipment while every one of those writes was already guaranteed to
+  // fail server-side. Matches the database's own editability boundary
+  // for those three controls.
   const editable =
     shipment.status === "DRAFT";
+
+  // 2026-09-07 (S5 review round 7, finding S5R7-A-B1). Recalculate is
+  // NOT one of the three writes `editable` above governs -- it inserts
+  // a calculation_results row, never touches shipment_lines itself --
+  // and record_calculation_result (supabase/migrations/
+  // 20260906210000_s5_calculation_result_refuses_ready.sql) was
+  // DELIBERATELY widened, in the SAME S5 commit that narrowed
+  // `editable` to DRAFT-only, to keep permitting exactly this write for
+  // a READY (non-LOCKED) shipment's line, specifically so a
+  // CALCULATION_ENGINE_OUTDATED line can be recalculated with the
+  // current engine version WITHOUT forcing a full reopen/re-approve
+  // cycle over a shipment whose own content never changed -- that
+  // migration's own header comment states this in so many words. But
+  // the SAME commit's UI change (this file, point 2) collapsed
+  // Calculate/Recalculate's own visibility into the same DRAFT-only
+  // `editable` flag as the other three controls, silently making the
+  // backend's own sanctioned recovery path unreachable through any
+  // control a real user could click -- reachable only via a direct RPC
+  // call (exactly what tests/integration/declaration-filing-engine-
+  // version.test.ts does). Kept separate from `editable` so this one
+  // control's own visibility matches what the database will actually
+  // allow, not what the other three (genuinely DRAFT-only) controls
+  // allow.
+  const canRecalculate =
+    shipment.status === "DRAFT" || shipment.status === "READY";
 
   return (
     <AppShell
@@ -485,6 +511,7 @@ export default async function ShipmentDetailPage(
           shipmentId={shipment.id}
           lines={shipment.lines}
           editable={editable}
+          canRecalculate={canRecalculate}
           latestCalculations={latestCalculations}
           availableActualDataByLineId={availableActualDataByLineId}
           actualDeterminationStaleness={actualDeterminationStaleness}

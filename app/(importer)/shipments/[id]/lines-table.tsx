@@ -77,6 +77,7 @@ export function LinesTable(
     shipmentId,
     lines,
     editable,
+    canRecalculate,
     latestCalculations,
     availableActualDataByLineId,
     actualDeterminationStaleness,
@@ -86,6 +87,11 @@ export function LinesTable(
     shipmentId: string;
     lines: ShipmentLine[];
     editable: boolean;
+    // 2026-09-07 (S5 review round 7, finding S5R7-A-B1). Distinct from
+    // `editable` -- see page.tsx's own doc comment on canRecalculate
+    // for why Calculate/Recalculate's own visibility must not share
+    // the DRAFT-only gate the other three line-editing controls do.
+    canRecalculate: boolean;
     latestCalculations: Record<string, LatestLineCalculation>;
     availableActualDataByLineId: Record<string, ActualEmissionDataOptionForLine[]>;
     actualDeterminationStaleness: Record<string, ActualSnapshotStaleness>;
@@ -150,6 +156,7 @@ export function LinesTable(
                 shipmentId={shipmentId}
                 line={line}
                 editable={editable}
+                canRecalculate={canRecalculate}
                 latestCalculation={latestCalculations[line.id]}
                 availableActualData={availableActualDataByLineId[line.id] ?? []}
                 staleness={actualDeterminationStaleness[line.id]}
@@ -169,6 +176,7 @@ function LineRow(
     shipmentId,
     line,
     editable,
+    canRecalculate,
     latestCalculation,
     availableActualData,
     staleness,
@@ -178,6 +186,7 @@ function LineRow(
     shipmentId: string;
     line: ShipmentLine;
     editable: boolean;
+    canRecalculate: boolean;
     latestCalculation: LatestLineCalculation | undefined;
     availableActualData: ActualEmissionDataOptionForLine[];
     staleness: ActualSnapshotStaleness | undefined;
@@ -308,7 +317,7 @@ function LineRow(
           <CalculationCell
             shipmentId={shipmentId}
             lineId={line.id}
-            editable={editable}
+            editable={canRecalculate}
             latestCalculation={latestCalculation}
             currentDetermination={line.emission_determination}
           />

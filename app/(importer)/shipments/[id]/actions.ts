@@ -1140,11 +1140,24 @@ export async function calculateLineAction(
           ? "That line could not be found."
           : result.reason === "SHIPMENT_NOT_EDITABLE"
             // 2026-09-06 (S5 cross-phase hardening). record_calculation_
-            // result's own SHIPMENT_NOT_EDITABLE gate now also refuses
-            // READY (20260906210000), matching shipment_lines' own
-            // DRAFT-only editability -- "locked or void" is no longer
-            // the only state this can mean.
-            ? "This shipment can no longer be recalculated in its current status. If it's marked READY, reopen it first."
+            // result's own SHIPMENT_NOT_EDITABLE gate refuses LOCKED/
+            // VOID unconditionally, but -- unlike shipment_lines' own
+            // DRAFT-only editability -- deliberately keeps READY open
+            // for exactly the CALCULATION_ENGINE_OUTDATED recovery
+            // shape (20260906210000's own header comment), refusing
+            // only a same-engine-version resubmission against an
+            // already-current READY line.
+            //
+            // 2026-09-07 (S5 review round 7, finding S5R7-A-B1). The
+            // UI's own Recalculate control (page.tsx's canRecalculate)
+            // now matches that same carve-out, so "if it's marked
+            // READY, reopen it first" is no longer the right unconditional
+            // claim -- a READY shipment hitting this refusal usually
+            // means the line is already current for the running engine
+            // version (nothing left to do), not that a reopen is
+            // required. Reopening remains the right answer only for a
+            // shipment that has since become LOCKED or VOID.
+            ? "This shipment can no longer be recalculated in its current status, or this line's calculation is already current for the running engine version. Reload the page to check -- if the shipment has been LOCKED or VOIDed, that's final; if it's still READY, no further action is needed."
             : result.reason === "CAPABILITY_NOT_HELD"
               ? "Your organization is not set up as a CBAM importer/declarant."
               : result.reason === "CALCULATION_INPUTS_CHANGED"

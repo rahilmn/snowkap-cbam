@@ -1114,5 +1114,33 @@ describe(
         },
       );
     }
+
+    it(
+      "2026-09-07 (S5 review round 7, finding S5R7-A-B1): SHIPMENT_NOT_EDITABLE no longer unconditionally tells the user to reopen a READY shipment -- record_calculation_result deliberately still permits recalculating a READY (non-LOCKED) line with a new engine version",
+      async () => {
+        allowRateLimit();
+        resolveOrgSummaryOnce();
+
+        calculateLineMock.mockResolvedValueOnce(
+          { status: "REJECTED", reason: "SHIPMENT_NOT_EDITABLE" },
+        );
+
+        const result =
+          await calculateLineAction(
+            { status: "idle" },
+            formData(
+              { lineId: "line-1", shipmentId: "shipment-1" },
+            ),
+          );
+
+        expect(result).toEqual(
+          {
+            status: "error",
+            message:
+              "This shipment can no longer be recalculated in its current status, or this line's calculation is already current for the running engine version. Reload the page to check -- if the shipment has been LOCKED or VOIDed, that's final; if it's still READY, no further action is needed.",
+          },
+        );
+      },
+    );
   },
 );
