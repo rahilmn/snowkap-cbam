@@ -46,6 +46,7 @@ import {
 
 import type {
   ShipmentLine,
+  ShipmentStatus,
 } from "../../../../src/domain/shipments/types";
 
 import type {
@@ -75,6 +76,7 @@ const BASE_COLUMN_COUNT = 7;
 export function LinesTable(
   {
     shipmentId,
+    shipmentStatus,
     lines,
     editable,
     canRecalculate,
@@ -85,6 +87,17 @@ export function LinesTable(
     datasetSupersededByLineId,
   }: {
     shipmentId: string;
+    // 2026-09-07 (S5 review round 12, finding S5R12-A-2). The shipment's
+    // own status, threaded all the way down to WhyThisNumberPanel --
+    // that panel's own "Redetermine"/"Recalculate" instructions had
+    // never checked status at all (not even the LOCKED hedge every
+    // other surface carrying these facts already has), because nothing
+    // above it in this component chain ever passed it through. `editable`/
+    // `canRecalculate` already encode DRAFT/READY-vs-LOCKED/VOID for
+    // the OTHER controls on this page, but the panel's own hedge needs
+    // to name LOCKED and VOID distinctly (matching this page's own
+    // sibling captions), which a pair of booleans can't express.
+    shipmentStatus: ShipmentStatus;
     lines: ShipmentLine[];
     editable: boolean;
     // 2026-09-07 (S5 review round 7, finding S5R7-A-B1). Distinct from
@@ -154,6 +167,7 @@ export function LinesTable(
               <LineRow
                 key={line.id}
                 shipmentId={shipmentId}
+                shipmentStatus={shipmentStatus}
                 line={line}
                 editable={editable}
                 canRecalculate={canRecalculate}
@@ -174,6 +188,7 @@ export function LinesTable(
 function LineRow(
   {
     shipmentId,
+    shipmentStatus,
     line,
     editable,
     canRecalculate,
@@ -184,6 +199,7 @@ function LineRow(
     datasetSuperseded,
   }: {
     shipmentId: string;
+    shipmentStatus: ShipmentStatus;
     line: ShipmentLine;
     editable: boolean;
     canRecalculate: boolean;
@@ -378,6 +394,7 @@ function LineRow(
           >
             <WhyThisNumberPanel
               line={line}
+              shipmentStatus={shipmentStatus}
               latestCalculation={latestCalculation}
               resolveState={resolveState}
               defaultReference={defaultReference}

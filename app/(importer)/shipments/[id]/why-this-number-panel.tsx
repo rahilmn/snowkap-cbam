@@ -36,6 +36,7 @@ import type {
 
 import type {
   ShipmentLine,
+  ShipmentStatus,
 } from "../../../../src/domain/shipments/types";
 
 import type {
@@ -383,12 +384,22 @@ function ReproducibilityCheck(
 export function WhyThisNumberPanel(
   {
     line,
+    shipmentStatus,
     latestCalculation,
     resolveState,
     defaultReference,
     datasetSuperseded,
   }: {
     line: ShipmentLine;
+    // 2026-09-07 (S5 review round 12, finding S5R12-A-2, live-
+    // reproduced). This panel's own "Redetermine this line..."/
+    // "Recalculate..." instructions (below) had never checked shipment
+    // status at all -- not even the LOCKED hedge every OTHER surface
+    // carrying these identical facts (Reports page cards, completeness-
+    // report-card.tsx, declarations/actions.ts's filedMessageFor, and
+    // this same page's own captions two components up) already has.
+    // Threaded down from page.tsx via LinesTable/LineRow.
+    shipmentStatus: ShipmentStatus;
     latestCalculation: LatestLineCalculation | undefined;
     resolveState: ResolveEmissionsActionState;
     /**
@@ -558,8 +569,23 @@ export function WhyThisNumberPanel(
                 result was resolved against ({resolution.dataset_version})
                 is no longer the active one. This result is still current
                 for the determination shown above, but the filing gate
-                will refuse a declaration that includes it unchanged.
-                Redetermine this line against the current dataset.
+                will refuse a declaration that includes it unchanged.{" "}
+                {
+                  // 2026-09-07 (S5 review round 12, finding S5R12-A-2).
+                  // Same 4-way hedge as this page's own
+                  // datasetSupersededLineCount caption (S5R12-GUID-B1/
+                  // S5R12-A-1) -- redetermining writes shipment_lines,
+                  // DRAFT-only writable, so READY needs a "reopen first"
+                  // instruction and LOCKED/VOID need to be told the
+                  // action is impossible outright.
+                  shipmentStatus === "LOCKED"
+                    ? "This shipment has already been LOCKED (the routine case for an amendment), so it cannot be redetermined through the normal declaration flow. Contact support."
+                    : shipmentStatus === "VOID"
+                    ? "This shipment has been voided and can never be edited or reopened. Contact support."
+                    : shipmentStatus === "READY"
+                    ? "This shipment is READY; reopen it first, then redetermine this line against the current dataset."
+                    : "Redetermine this line against the current dataset."
+                }
               </div>
             ) : null}
           </div>
@@ -732,8 +758,20 @@ export function WhyThisNumberPanel(
             <div className="mt-2 rounded-[var(--radius-sm)] bg-[var(--color-warning-100)] px-3 py-2 text-xs text-[var(--color-warning-700)]">
               Stale -- this result was calculated against a determination
               this line no longer carries (it was re-determined, or
-              edited, since this calculation ran). Recalculate to bring
-              the result in line with the determination shown above.
+              edited, since this calculation ran).{" "}
+              {
+                // 2026-09-07 (S5 review round 12, finding S5R12-A-2).
+                // Same 2-way hedge as this page's own
+                // engineOutdatedLineCount caption -- record_calculation_result
+                // deliberately still permits recalculating a READY line
+                // directly (no reopen needed), so only LOCKED/VOID need
+                // the "impossible" hedge.
+                shipmentStatus === "LOCKED"
+                  ? "This shipment has already been LOCKED (the routine case for an amendment), so it cannot be recalculated through the normal declaration flow. Contact support."
+                  : shipmentStatus === "VOID"
+                  ? "This shipment has been voided and can never be edited or reopened. Contact support."
+                  : "Recalculate to bring the result in line with the determination shown above."
+              }
             </div>
           ) : null}
         </PanelSection>

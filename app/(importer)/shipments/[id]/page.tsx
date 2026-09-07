@@ -401,8 +401,23 @@ export default async function ShipmentDetailPage(
                   {emissionsTotal.total.staleLineCount} of{" "}
                   {shipment.lines.length} line(s) were redetermined
                   since their last calculation -- their embedded
-                  emissions are excluded from this total until
-                  recalculated.
+                  emissions are excluded from this total
+                  {
+                    // 2026-09-07 (S5 review round 12, finding S5R12-A-3,
+                    // live-reproduced). "Until recalculated" implies
+                    // eventual recoverability -- false once the shipment
+                    // is LOCKED or VOID, since record_calculation_result
+                    // refuses both statuses unconditionally, making the
+                    // exclusion permanent, not merely pending. Reachable
+                    // through ordinary actions: redetermine a line while
+                    // DRAFT, mark READY, then LOCK, and the shipment
+                    // reaches LOCKED still carrying a permanently-stale
+                    // calculation. Never touched by any of rounds 4-11's
+                    // own LOCKED-hedge fixes until now.
+                    shipment.status === "LOCKED" || shipment.status === "VOID"
+                      ? " permanently -- recalculation is no longer possible for this shipment."
+                      : " until recalculated."
+                  }
                 </p>
               ) : null
             }
@@ -441,8 +456,15 @@ export default async function ShipmentDetailPage(
                   {emissionsTotal.total.staleLineCount} of{" "}
                   {emissionsTotal.total.totalLineCount} line(s) were
                   redetermined since their last calculation -- their
-                  embedded emissions are excluded from this total until
-                  recalculated.
+                  embedded emissions are excluded from this total
+                  {
+                    // 2026-09-07 (S5 review round 12, finding S5R12-A-3).
+                    // See the identical NONE-total caption above for the
+                    // full reasoning -- same hedge, same reason.
+                    shipment.status === "LOCKED" || shipment.status === "VOID"
+                      ? " permanently -- recalculation is no longer possible for this shipment."
+                      : " until recalculated."
+                  }
                 </p>
               ) : null
             }
@@ -458,11 +480,23 @@ export default async function ShipmentDetailPage(
               // same characterization this codebase already uses for the
               // identical hedge on the Reports page's own
               // DatasetSupersededLinesCard/EngineOutdatedLinesCard, the
-              // declaration completeness card, and filedMessageFor. Round
-              // 6 (commit 7d40a5c) already fixed this exact gap in every
-              // other place these facts are surfaced except this one page
-              // -- and round 10 (S5R10-NUM-B1) then copied the same
-              // unconditional pattern into a second caption below.
+              // declaration completeness card, and filedMessageFor.
+              //
+              // 2026-09-07 (S5 review round 12, findings S5R12-GUID-B1 and
+              // S5R12-A-1, live-reproduced). Round 11's own fix was only a
+              // 2-way branch (LOCKED vs everything else), which left TWO
+              // gaps: (1) READY was folded into the "redetermine before
+              // filing" branch, but redetermining writes shipment_lines
+              // (DRAFT-only writable), so a READY-but-not-LOCKED shipment
+              // needs "reopen it first" -- exactly the 3-way pattern
+              // Reports page's own DatasetSupersededLinesCard (fixed
+              // round 7, S5R7-A-B1) and completeness-report-card.tsx's own
+              // `stale`/DATASET_SUPERSEDED branch already use; (2) VOID is
+              // exactly as terminal as LOCKED (lifecycle.ts's own doc
+              // comment: "LOCKED and VOID are terminal") but was never
+              // checked at all. Now a genuine 4-way branch, matching the
+              // wording already established on those two sibling
+              // surfaces.
               emissionsTotal.datasetSupersededLineCount > 0 ? (
                 <p className="mt-1 text-xs text-[var(--color-warning-700)]">
                   {emissionsTotal.datasetSupersededLineCount} of{" "}
@@ -470,6 +504,10 @@ export default async function ShipmentDetailPage(
                   that has since been corrected
                   {shipment.status === "LOCKED"
                     ? " -- this shipment has already been LOCKED (the routine case for an amendment), so it cannot be redetermined through the normal declaration flow. Contact support."
+                    : shipment.status === "VOID"
+                    ? " -- this shipment has been voided and can never be edited or reopened. Contact support."
+                    : shipment.status === "READY"
+                    ? " -- this shipment is READY; reopen it first, then redetermine before filing."
                     : " -- redetermine before filing."}
                 </p>
               ) : null
@@ -477,15 +515,21 @@ export default async function ShipmentDetailPage(
 
             {
               // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1;
-              // hedged round 11, finding S5R11-A-1). The identical
-              // caption shape as datasetSupersededLineCount just above,
-              // one axis over -- round 8 (S5R8-A-B2) added this fact to
-              // the DECLARATION-level completeness gate but never here,
-              // even though a reader could see a confident total on this
-              // exact page and only discover the filing gate would
-              // refuse it once they reached the declaration screen. Now
-              // hedged on LOCKED the same way its sibling caption above
-              // is, for the identical reason.
+              // hedged round 11, finding S5R11-A-1; VOID added round 12,
+              // finding S5R12-A-1). The identical caption shape as
+              // datasetSupersededLineCount just above, one axis over --
+              // round 8 (S5R8-A-B2) added this fact to the DECLARATION-
+              // level completeness gate but never here, even though a
+              // reader could see a confident total on this exact page and
+              // only discover the filing gate would refuse it once they
+              // reached the declaration screen. Deliberately STAYS a
+              // 2-way branch (LOCKED/VOID vs everything else) rather than
+              // adding a 3rd READY case the way the sibling
+              // datasetSupersededLineCount caption above needed --
+              // record_calculation_result (20260906210000) deliberately
+              // still permits recalculating a READY line directly, no
+              // reopen required, so "recalculate before filing" is
+              // already accurate for READY.
               emissionsTotal.engineOutdatedLineCount > 0 ? (
                 <p className="mt-1 text-xs text-[var(--color-warning-700)]">
                   {emissionsTotal.engineOutdatedLineCount} of{" "}
@@ -493,6 +537,8 @@ export default async function ShipmentDetailPage(
                   earlier version of the calculation engine
                   {shipment.status === "LOCKED"
                     ? " -- this shipment has already been LOCKED (the routine case for an amendment), so it cannot be recalculated through the normal declaration flow. Contact support."
+                    : shipment.status === "VOID"
+                    ? " -- this shipment has been voided and can never be edited or reopened. Contact support."
                     : " -- recalculate before filing."}
                 </p>
               ) : null
@@ -571,6 +617,7 @@ export default async function ShipmentDetailPage(
 
         <LinesTable
           shipmentId={shipment.id}
+          shipmentStatus={shipment.status}
           lines={shipment.lines}
           editable={editable}
           canRecalculate={canRecalculate}
