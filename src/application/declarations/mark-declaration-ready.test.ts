@@ -189,6 +189,15 @@ function makeMockSupabase(
       recorder.fromCalls.push(table);
       return builder(table);
     },
+    // 2026-09-07 (S5 review round 8, finding S5R8-A-B2).
+    // computeDeclarationDraftFacts now reads the current engine version
+    // once per call -- matches calculationRow's own default engine_version
+    // ("1.1.0") below, so every pre-existing test's "complete: true"
+    // expectation stays intact.
+    rpc: () =>
+      Promise.resolve(
+        { data: "1.1.0", error: null },
+      ),
   } as never;
 }
 

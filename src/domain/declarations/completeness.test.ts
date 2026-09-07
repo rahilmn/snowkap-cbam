@@ -26,6 +26,7 @@ function readyShipment(
         has_emission_determination: true,
         has_calculation_result: true,
         calculation_is_current: true,
+        calculation_engine_is_current: true,
         dataset_is_current: true,
       },
     ],
@@ -172,6 +173,7 @@ describe(
                       has_emission_determination: false,
                       has_calculation_result: false,
                       calculation_is_current: false,
+                      calculation_engine_is_current: false,
                       dataset_is_current: true,
                     },
                   ],
@@ -210,6 +212,7 @@ describe(
                       has_emission_determination: true,
                       has_calculation_result: false,
                       calculation_is_current: false,
+                      calculation_engine_is_current: false,
                       dataset_is_current: true,
                     },
                   ],
@@ -250,6 +253,7 @@ describe(
                       has_emission_determination: false,
                       has_calculation_result: false,
                       calculation_is_current: false,
+                      calculation_engine_is_current: false,
                       dataset_is_current: true,
                     },
                     {
@@ -258,6 +262,7 @@ describe(
                       has_emission_determination: false,
                       has_calculation_result: false,
                       calculation_is_current: false,
+                      calculation_engine_is_current: false,
                       dataset_is_current: true,
                     },
                   ],
@@ -272,6 +277,7 @@ describe(
                       has_emission_determination: false,
                       has_calculation_result: false,
                       calculation_is_current: false,
+                      calculation_engine_is_current: false,
                       dataset_is_current: true,
                     },
                   ],
@@ -310,6 +316,7 @@ describe(
                       has_emission_determination: true,
                       has_calculation_result: true,
                       calculation_is_current: true,
+                      calculation_engine_is_current: true,
                       dataset_is_current: true,
                     },
                     {
@@ -318,6 +325,7 @@ describe(
                       has_emission_determination: false,
                       has_calculation_result: false,
                       calculation_is_current: false,
+                      calculation_engine_is_current: false,
                       dataset_is_current: true,
                     },
                   ],
@@ -352,6 +360,7 @@ describe(
                       has_emission_determination: true,
                       has_calculation_result: true,
                       calculation_is_current: false,
+                      calculation_engine_is_current: true,
                       dataset_is_current: true,
                     },
                   ],
@@ -400,6 +409,7 @@ describe(
                       // has_calculation_result alone rather than
                       // evaluating calculation_is_current independently.
                       calculation_is_current: false,
+                      calculation_engine_is_current: false,
                       dataset_is_current: true,
                     },
                   ],
@@ -424,6 +434,114 @@ describe(
     );
 
     it(
+      "2026-09-07 (S5 review round 8, finding S5R8-A-B2): reports LINE_CALCULATION_ENGINE_OUTDATED for a determined AND calculated AND current line whose latest calculation was produced by a superseded engine version",
+      () => {
+        const report =
+          buildCompletenessReport(
+            [
+              readyShipment(
+                {
+                  lines: [
+                    {
+                      line_id: "line-1" as never,
+                      line_number: 1,
+                      has_emission_determination: true,
+                      has_calculation_result: true,
+                      calculation_is_current: true,
+                      calculation_engine_is_current: false,
+                      dataset_is_current: true,
+                    },
+                  ],
+                },
+              ),
+            ],
+            generatedAt,
+          );
+
+        expect(report.complete).toBe(
+          false,
+        );
+
+        expect(report.blockers).toEqual(
+          [
+            {
+              reason: "LINE_CALCULATION_ENGINE_OUTDATED",
+              shipment_id: "ship-1",
+              shipment_reference: "REF-001",
+              line_id: "line-1",
+              line_number: 1,
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 8, finding S5R8-A-B2): never reports LINE_CALCULATION_ENGINE_OUTDATED for a line already flagged LINE_NOT_CALCULATED or LINE_CALCULATION_STALE -- exactly one blocker per line for the same underlying fact",
+      () => {
+        const notCalculated =
+          buildCompletenessReport(
+            [
+              readyShipment(
+                {
+                  lines: [
+                    {
+                      line_id: "line-1" as never,
+                      line_number: 1,
+                      has_emission_determination: true,
+                      has_calculation_result: false,
+                      calculation_is_current: false,
+                      // Deliberately inconsistent, same reasoning as the
+                      // dataset-superseded test below -- proves
+                      // LINE_NOT_CALCULATED short-circuits before
+                      // calculation_engine_is_current is ever consulted.
+                      calculation_engine_is_current: false,
+                      dataset_is_current: false,
+                    },
+                  ],
+                },
+              ),
+            ],
+            generatedAt,
+          );
+
+        expect(
+          notCalculated.blockers.map((blocker) => blocker.reason),
+        ).toEqual(
+          ["LINE_NOT_CALCULATED"],
+        );
+
+        const calculationStale =
+          buildCompletenessReport(
+            [
+              readyShipment(
+                {
+                  lines: [
+                    {
+                      line_id: "line-1" as never,
+                      line_number: 1,
+                      has_emission_determination: true,
+                      has_calculation_result: true,
+                      calculation_is_current: false,
+                      calculation_engine_is_current: false,
+                      dataset_is_current: false,
+                    },
+                  ],
+                },
+              ),
+            ],
+            generatedAt,
+          );
+
+        expect(
+          calculationStale.blockers.map((blocker) => blocker.reason),
+        ).toEqual(
+          ["LINE_CALCULATION_STALE"],
+        );
+      },
+    );
+
+    it(
       "2026-09-06 (S5 cross-phase hardening, live-reproduced): reports LINE_DATASET_SUPERSEDED for a determined AND calculated AND current line whose DEFAULT determination names a since-superseded regulatory dataset",
       () => {
         const report =
@@ -438,6 +556,7 @@ describe(
                       has_emission_determination: true,
                       has_calculation_result: true,
                       calculation_is_current: true,
+                      calculation_engine_is_current: true,
                       dataset_is_current: false,
                     },
                   ],
@@ -466,7 +585,7 @@ describe(
     );
 
     it(
-      "never reports LINE_DATASET_SUPERSEDED for a line already flagged LINE_NOT_CALCULATED or LINE_CALCULATION_STALE -- exactly one blocker per line for the same underlying fact",
+      "never reports LINE_DATASET_SUPERSEDED for a line already flagged LINE_NOT_CALCULATED, LINE_CALCULATION_STALE, or LINE_CALCULATION_ENGINE_OUTDATED -- exactly one blocker per line for the same underlying fact",
       () => {
         const notCalculated =
           buildCompletenessReport(
@@ -484,6 +603,7 @@ describe(
                       // test above this one -- proves LINE_NOT_CALCULATED
                       // short-circuits before dataset_is_current is ever
                       // consulted.
+                      calculation_engine_is_current: false,
                       dataset_is_current: false,
                     },
                   ],
@@ -511,6 +631,7 @@ describe(
                       has_emission_determination: true,
                       has_calculation_result: true,
                       calculation_is_current: false,
+                      calculation_engine_is_current: false,
                       dataset_is_current: false,
                     },
                   ],
@@ -524,6 +645,34 @@ describe(
           calculationStale.blockers.map((blocker) => blocker.reason),
         ).toEqual(
           ["LINE_CALCULATION_STALE"],
+        );
+
+        const engineOutdated =
+          buildCompletenessReport(
+            [
+              readyShipment(
+                {
+                  lines: [
+                    {
+                      line_id: "line-1" as never,
+                      line_number: 1,
+                      has_emission_determination: true,
+                      has_calculation_result: true,
+                      calculation_is_current: true,
+                      calculation_engine_is_current: false,
+                      dataset_is_current: false,
+                    },
+                  ],
+                },
+              ),
+            ],
+            generatedAt,
+          );
+
+        expect(
+          engineOutdated.blockers.map((blocker) => blocker.reason),
+        ).toEqual(
+          ["LINE_CALCULATION_ENGINE_OUTDATED"],
         );
       },
     );

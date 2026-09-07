@@ -112,6 +112,19 @@ function makeMockSupabase(
 
   return {
     from: (table: string) => builder(table),
+    // 2026-09-07 (S5 review round 8, finding S5R8-A-B2).
+    // anyMemberLineCalculationEngineOutdated calls this RPC once before
+    // its own `latest_calculation_results` query -- defaulted here (not
+    // per-table like `tables` above, since RPCs aren't table reads) so
+    // every pre-existing test that never sets `latest_calculation_results`
+    // keeps its prior "not stale on this axis" behavior without change:
+    // that table defaults to {data: null, error: null} via nextResult
+    // above, and the function fails open (returns false) on `!rows`
+    // regardless of what version this RPC reports.
+    rpc: () =>
+      Promise.resolve(
+        { data: "1.1.0", error: null },
+      ),
   } as never;
 }
 
@@ -590,6 +603,130 @@ describe(
                   { data: [shipmentSummaryRow], error: null },
                   { data: [{ id: "ship-1" }], error: null },
                 ],
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          false,
+        );
+
+        expect(result?.completeness_report_stale_reason).toBeNull();
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 8, finding S5R8-NUM-B1, live-reproduced): a transient period-membership query error fails OPEN to 'not stale' rather than throwing and taking down the whole page -- matches the sibling dataset-currency check's own posture",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "READY",
+                        member_shipment_ids: ["ship-1"],
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: [
+                  // fetchMemberShipments: succeeds normally.
+                  { data: [shipmentSummaryRow], error: null },
+                  // currentPeriodShipmentIds: a genuine transient error.
+                  { data: null, error: { message: "simulated transient connection reset" } },
+                ],
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          false,
+        );
+
+        expect(result?.completeness_report_stale_reason).toBeNull();
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 8, finding S5R8-A-B2, live-reproduced through the real record_declaration_filed() RPC): flags completeness_report_stale as CALCULATION_ENGINE_OUTDATED when a member line's latest calculation was produced by an engine version the app no longer runs",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "READY",
+                        member_shipment_ids: ["ship-1"],
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                // memberStatusStale must stay false so this axis is even
+                // reached -- LOCKED is an accepted member status.
+                shipments: { data: [shipmentSummaryRow], error: null },
+                latest_calculation_results: {
+                  data: [{ line_id: "line-1", engine_version: "0.9.0" }],
+                  error: null,
+                },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          true,
+        );
+
+        expect(result?.completeness_report_stale_reason).toBe(
+          "CALCULATION_ENGINE_OUTDATED",
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 8, finding S5R8-A-B2): does NOT flag CALCULATION_ENGINE_OUTDATED when every member line's latest calculation matches the current engine version",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "READY",
+                        member_shipment_ids: ["ship-1"],
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: { data: [shipmentSummaryRow], error: null },
+                // makeMockSupabase's own rpc() default reports "1.1.0" --
+                // matching that here keeps this axis "not stale."
+                latest_calculation_results: {
+                  data: [{ line_id: "line-1", engine_version: "1.1.0" }],
+                  error: null,
+                },
               },
             ),
             "org-1" as never,

@@ -273,6 +273,38 @@ export async function computeDeclarationDraftFacts(
       ),
     );
 
+  // 2026-09-07 (S5 review round 8, finding S5R8-A-B2, live-reproduced
+  // end to end through the real record_declaration_filed() RPC). A
+  // declaration could reach "Complete -- approved for filing" while a
+  // member line's latest calculation was produced by a superseded
+  // engine version -- record_declaration_filed() has refused exactly
+  // that (CALCULATION_ENGINE_OUTDATED, 20260904100000/P14 owner
+  // decision 2) since before this S5 phase began, but nothing in this
+  // completeness preview ever compared a line's calculation against the
+  // live engine version, so the refusal came as a surprise at "Record
+  // filed" time. public.current_engine_version() (20260904110000) is
+  // the sanctioned read-only accessor for exactly this comparison --
+  // its own doc comment names this use case ("a UI that wants to tell
+  // someone 'recalculate before filing' needs to know what the current
+  // version is"). Fetched once per call, matching the identical
+  // "one small query, not per line" shape activeDatasetIds above uses,
+  // for the identical reason (the value is shared reference state, not
+  // per-line data).
+  const { data: currentEngineVersionData, error: currentEngineVersionError } =
+    await supabase
+      .rpc(
+        "current_engine_version",
+      );
+
+  if (currentEngineVersionError) {
+    throw new Error(
+      `declarations: current engine version fetch failed (${currentEngineVersionError.message}).`,
+    );
+  }
+
+  const currentEngineVersion =
+    currentEngineVersionData as string;
+
   function datasetIsCurrent(
     determination: EmissionDetermination | null,
   ): boolean {
@@ -341,6 +373,18 @@ export async function computeDeclarationDraftFacts(
                     entry.calculation.determination,
                     entry.line.emission_determination,
                   ) === "CURRENT",
+                // 2026-09-07 (S5 review round 8, finding S5R8-A-B2).
+                // "false" whenever there's nothing to compare
+                // (entry.calculation === null -- meaningless in that
+                // case, matching calculation_is_current's own short-
+                // circuit reasoning immediately above), otherwise a
+                // direct comparison against the live engine version
+                // fetched once above -- the same fact record_declaration_
+                // filed()'s own CALCULATION_ENGINE_OUTDATED check makes
+                // in SQL (`is distinct from`).
+                calculation_engine_is_current:
+                  entry.calculation !== null &&
+                  entry.calculation.engine_version === currentEngineVersion,
                 dataset_is_current:
                   datasetIsCurrent(
                     entry.line.emission_determination,

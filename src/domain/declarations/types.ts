@@ -112,6 +112,25 @@ export type CompletenessBlockerReason =
   // determination that is still present, but no longer the one the
   // line's latest calculation was computed against.
   | "LINE_CALCULATION_STALE"
+  // 2026-09-07 (S5 review round 8, finding S5R8-A-B2, live-reproduced):
+  // a line can be determined, calculated, AND current against its own
+  // determination (calculation_is_current: true) while its latest
+  // calculation_results row's frozen engine_version still names an
+  // engine version the app no longer runs. record_declaration_filed()
+  // has refused exactly this (CALCULATION_ENGINE_OUTDATED,
+  // 20260904100000/P14 owner decision 2) since before this S5 phase
+  // began -- but nothing in this completeness report previewed it: a
+  // declaration reached "Complete -- approved for filing" and was only
+  // refused, out of nowhere, at the "Record filed" click. Distinct from
+  // LINE_CALCULATION_STALE (that reason is "the calc doesn't match the
+  // CURRENT determination"; this one is "the calc matches the current
+  // determination, but was produced by a SUPERSEDED engine version") --
+  // same "different fix" reasoning that separates every other reason in
+  // this union. Checked after LINE_CALCULATION_STALE and before
+  // LINE_DATASET_SUPERSEDED, mirroring record_declaration_filed()'s own
+  // check order (CALCULATION_ENGINE_OUTDATED, then DATASET_SUPERSEDED,
+  // both only reached once the line is otherwise complete/current).
+  | "LINE_CALCULATION_ENGINE_OUTDATED"
   // 2026-09-06 (S5 cross-phase hardening, live-reproduced): a
   // DEFAULT-determined line freezes resolution.dataset_id/dataset_
   // version at resolve/redetermine time (owner decision, RULE-EE-xxx

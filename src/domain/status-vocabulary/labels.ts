@@ -92,6 +92,8 @@ export const STATUS_LABEL: Record<StatusKey, string> =
     "blocker.LINE_NOT_DETERMINED": "Line not determined",
     "blocker.LINE_NOT_CALCULATED": "Line not calculated",
     "blocker.LINE_CALCULATION_STALE": "Calculation is stale -- recalculate after re-determination",
+    // 2026-09-07 (S5 review round 8, finding S5R8-A-B2).
+    "blocker.LINE_CALCULATION_ENGINE_OUTDATED": "Calculated by an earlier engine version -- recalculate this line",
     "blocker.LINE_DATASET_SUPERSEDED": "Regulatory dataset since corrected -- redetermine this line",
 
     // -- incomplete_line (importer reports summary) --
@@ -196,6 +198,7 @@ export const STATUS_TONE: Record<StatusKey, StatusTone> =
     "blocker.LINE_NOT_DETERMINED": "warning",
     "blocker.LINE_NOT_CALCULATED": "warning",
     "blocker.LINE_CALCULATION_STALE": "warning",
+    "blocker.LINE_CALCULATION_ENGINE_OUTDATED": "warning",
     "blocker.LINE_DATASET_SUPERSEDED": "warning",
 
     // -- incomplete_line --

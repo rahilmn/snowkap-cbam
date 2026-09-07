@@ -115,6 +115,14 @@ interface Recorder {
 function makeMockSupabase(
   tables: Record<string, { data: unknown; error: unknown }>,
   recorder: Recorder = { shipmentsOps: [] },
+  // 2026-09-07 (S5 review round 8, finding S5R8-A-B2). Defaults to
+  // "1.1.0" -- matching calculationRow's own default engine_version
+  // above -- so every pre-existing test's "complete: true" expectation
+  // stays intact without each one having to know about this new RPC
+  // call, the identical reasoning `tables`' own regulatory_datasets
+  // default already uses for ACTIVE_DATASET_ID. A test that wants an
+  // OUTDATED engine version passes its own override.
+  currentEngineVersionResult: { data: unknown; error: unknown } = { data: "1.1.0", error: null },
 ) {
   function builder(
     table: string,
@@ -169,6 +177,10 @@ function makeMockSupabase(
 
   return {
     from: (table: string) => builder(table),
+    rpc: (name: string) =>
+      name === "current_engine_version"
+        ? Promise.resolve(currentEngineVersionResult)
+        : Promise.resolve({ data: null, error: null }),
   } as never;
 }
 
@@ -655,6 +667,100 @@ describe(
                 shipment_lines: { data: [lineRow()], error: null },
                 regulatory_datasets: { data: null, error: { message: "boom" } },
               },
+            ),
+            orgId,
+            annualPeriod,
+          ),
+        ).rejects.toThrow(
+          "boom",
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 8, finding S5R8-A-B2, live-reproduced end to end through the real record_declaration_filed() RPC): reports LINE_CALCULATION_ENGINE_OUTDATED for a determined, calculated, current line whose latest calculation was produced by a superseded engine version",
+      async () => {
+        const facts =
+          await computeDeclarationDraftFacts(
+            makeMockSupabase(
+              {
+                shipments: { data: [fullShipmentRow()], error: null },
+                shipment_lines: { data: [lineRow()], error: null },
+                latest_calculation_results: {
+                  data: [
+                    { ...calculationRow, engine_version: "0.0.1" },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: ACTIVE_DATASET_ID }], error: null },
+              },
+              undefined,
+              // The live app.engine_version is "1.4.0" as of this
+              // migration -- "1.1.0" (deliberately distinct from both)
+              // isolates this test to the engine-version axis alone,
+              // matching this finding's own live psql reproduction.
+              { data: "1.4.0", error: null },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(facts.completeness_report.complete).toBe(
+          false,
+        );
+
+        expect(facts.completeness_report.blockers).toEqual(
+          [
+            {
+              reason: "LINE_CALCULATION_ENGINE_OUTDATED",
+              shipment_id: "ship-1",
+              shipment_reference: "REF-001",
+              line_id: "line-1",
+              line_number: 1,
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 8, finding S5R8-A-B2): never flags LINE_CALCULATION_ENGINE_OUTDATED for a line with no calculation result at all -- LINE_NOT_CALCULATED already covers that case",
+      async () => {
+        const facts =
+          await computeDeclarationDraftFacts(
+            makeMockSupabase(
+              {
+                shipments: { data: [fullShipmentRow()], error: null },
+                shipment_lines: { data: [lineRow()], error: null },
+                regulatory_datasets: { data: [{ id: ACTIVE_DATASET_ID }], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(
+          facts.completeness_report.blockers.map((blocker) => blocker.reason),
+        ).toEqual(
+          ["LINE_NOT_CALCULATED"],
+        );
+      },
+    );
+
+    it(
+      "throws on a genuine current_engine_version fetch error -- never silently treats every line's calculation as current (or as outdated) without a real answer",
+      async () => {
+        await expect(
+          computeDeclarationDraftFacts(
+            makeMockSupabase(
+              {
+                shipments: { data: [fullShipmentRow()], error: null },
+                shipment_lines: { data: [lineRow()], error: null },
+                latest_calculation_results: { data: [calculationRow], error: null },
+                regulatory_datasets: { data: [{ id: ACTIVE_DATASET_ID }], error: null },
+              },
+              undefined,
+              { data: null, error: { message: "boom" } },
             ),
             orgId,
             annualPeriod,

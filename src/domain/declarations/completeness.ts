@@ -31,6 +31,17 @@ export interface CompletenessCheckLine {
   // pure boolean-in, blocker-out function exactly as before, never
   // performing the structural comparison itself.
   calculation_is_current: boolean;
+  // 2026-09-07 (S5 review round 8, finding S5R8-A-B2). Whether this
+  // line's latest calculation_results row's own frozen engine_version
+  // still matches the engine version the app currently runs --
+  // computed by the caller (compute-declaration-draft-facts.ts, the
+  // layer that has both the frozen calculation and the live
+  // current_engine_version() fact in hand), the same "caller computes,
+  // this module only decides" split calculation_is_current/dataset_is_
+  // current already use. Meaningless (and never consulted) when
+  // has_calculation_result is false, exactly like calculation_is_current
+  // -- LINE_NOT_CALCULATED already covers that case.
+  calculation_engine_is_current: boolean;
   // 2026-09-06 (S5 cross-phase hardening). Whether this line's own
   // DEFAULT determination still names a regulatory_datasets row that is
   // currently ACTIVE -- computed by the caller (compute-declaration-
@@ -167,14 +178,34 @@ export function buildCompletenessReport(
             line_number: line.line_number,
           },
         );
-      } else if (!line.dataset_is_current) {
+      } else if (!line.calculation_engine_is_current) {
         // Determined, calculated, AND the calculation matches the
-        // current determination -- but the determination itself now
-        // names a superseded regulatory dataset. A third, independent
-        // `else if`, not layered onto the two above: a line is flagged
+        // current determination -- but that calculation was produced by
+        // an engine version the app no longer runs.
+        // record_declaration_filed() refuses this at filing time
+        // (CALCULATION_ENGINE_OUTDATED); this reason previews the same
+        // fact here, before filing is attempted. A fourth, independent
+        // `else if`, not layered onto the ones above: a line is flagged
         // with exactly one of LINE_NOT_CALCULATED / LINE_CALCULATION_
-        // STALE / LINE_DATASET_SUPERSEDED for the same underlying fact,
-        // never more than one at once.
+        // STALE / LINE_CALCULATION_ENGINE_OUTDATED / LINE_DATASET_
+        // SUPERSEDED for the same underlying fact, never more than one
+        // at once.
+        blockers.push(
+          {
+            reason: "LINE_CALCULATION_ENGINE_OUTDATED",
+            shipment_id: shipment.shipment_id,
+            shipment_reference: shipment.shipment_reference,
+            line_id: line.line_id,
+            line_number: line.line_number,
+          },
+        );
+      } else if (!line.dataset_is_current) {
+        // Determined, calculated, current against both its own
+        // determination AND the engine version -- but the determination
+        // itself now names a superseded regulatory dataset. A fifth,
+        // independent `else if`, not layered onto the ones above: a line
+        // is flagged with exactly one of these reasons for the same
+        // underlying fact, never more than one at once.
         blockers.push(
           {
             reason: "LINE_DATASET_SUPERSEDED",

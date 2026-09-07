@@ -57,7 +57,7 @@ export function CompletenessReportCard(
     // FALSE (and pointed at a "Generate / refresh draft" control that
     // isn't even rendered for a READY declaration) whenever
     // DATASET_SUPERSEDED was the actual reason.
-    staleReason?: "MEMBER_REOPENED" | "DATASET_SUPERSEDED" | "PERIOD_MEMBERSHIP_CHANGED" | null;
+    staleReason?: "MEMBER_REOPENED" | "DATASET_SUPERSEDED" | "PERIOD_MEMBERSHIP_CHANGED" | "CALCULATION_ENGINE_OUTDATED" | null;
     // Needed alongside staleReason because the DATASET_SUPERSEDED
     // recovery instruction differs by status: a DRAFT declaration can
     // still be refreshed directly on this page; a READY declaration has
@@ -126,6 +126,23 @@ export function CompletenessReportCard(
                   ? "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. If the affected member shipment is still editable, reopen it, redetermine that line against the current dataset, then approve this declaration for filing again. If it has already been LOCKED (for example by an earlier filing -- the routine case for an amendment), this cannot be corrected through the normal declaration flow -- contact support."
                   : "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. Reopen the affected shipment, redetermine that line against the current dataset, then approve this declaration for filing again."
                 : "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. Click Generate / refresh draft to recheck completeness against the current dataset."
+              : staleReason === "CALCULATION_ENGINE_OUTDATED"
+              ? // 2026-09-07 (S5 review round 8, finding S5R8-A-B2).
+                // Unlike DATASET_SUPERSEDED, the READY recovery here does
+                // NOT require reopening the member shipment first --
+                // record_calculation_result (20260906210000) deliberately
+                // still permits recalculating a READY line with a new
+                // engine version, specifically so this recovery never
+                // needs the full reopen/re-approve cycle (matches
+                // filedMessageFor's own CALCULATION_ENGINE_OUTDATED
+                // wording in actions.ts). Still hedges on
+                // anyMemberShipmentLocked: a LOCKED member has no
+                // recalculate path either (canRecalculate is READY-only).
+                declarationStatus === "READY"
+                ? anyMemberShipmentLocked
+                  ? "One or more lines were calculated by an earlier version of the calculation engine, so this report no longer reflects the current state. If the affected member shipment is still READY (not LOCKED), recalculate those lines directly on the shipment's own detail page (no need to reopen it), then approve this declaration for filing again. If it has already been LOCKED (for example by an earlier filing -- the routine case for an amendment), this cannot be corrected through the normal declaration flow -- contact support."
+                  : "One or more lines were calculated by an earlier version of the calculation engine, so this report no longer reflects the current state. Recalculate those lines directly on the shipment's own detail page (no need to reopen it), then approve this declaration for filing again."
+                : "One or more lines were calculated by an earlier version of the calculation engine, so this report no longer reflects the current state. Click Generate / refresh draft to recheck completeness against the current calculation engine version."
               : staleReason === "PERIOD_MEMBERSHIP_CHANGED"
               ? // 2026-09-07 (S5 review round 7, finding S5R7-A-B1,
                 // guidance dimension). A new shipment entering the
