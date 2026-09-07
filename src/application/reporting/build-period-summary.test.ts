@@ -130,6 +130,12 @@ interface TableResult {
 
 function makeMockSupabase(
   tables: Record<string, TableResult>,
+  // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1).
+  // buildPeriodSummary now reads the current engine version once per
+  // call -- defaults to "1.1.0", matching this file's own fixture rows'
+  // engine_version default, so every pre-existing test's expectations
+  // stay intact without each having to know about this new RPC call.
+  currentEngineVersionResult: TableResult = { data: "1.1.0", error: null },
 ) {
   function builder(
     table: string,
@@ -156,6 +162,10 @@ function makeMockSupabase(
 
   return {
     from: (table: string) => builder(table),
+    rpc: (name: string) =>
+      name === "current_engine_version"
+        ? Promise.resolve(currentEngineVersionResult)
+        : Promise.resolve({ data: null, error: null }),
   } as never;
 }
 
@@ -727,6 +737,128 @@ describe(
 
         expect(result.dataset_superseded_lines).toEqual(
           [],
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 10, finding S5R10-NUM-B1): lists a CURRENT, calculated line as engine_outdated_lines when its calculation was produced by a superseded engine version -- but STILL counts its figure in the total",
+      async () => {
+        const result =
+          await buildPeriodSummary(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow({ id: "line-1", emission_determination: defaultDetermination }),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "0.9.0", embedded_emissions_tco2e: "1.39", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-1" }], error: null },
+              },
+              // Default rpc result is "1.1.0" -- deliberately distinct
+              // from the calculation's own "0.9.0" above.
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result.total_embedded_emissions_tco2e).toBe(
+          "1.39",
+        );
+
+        expect(result.calculated_line_count).toBe(
+          1,
+        );
+
+        expect(result.incomplete_lines).toEqual(
+          [],
+        );
+
+        expect(result.engine_outdated_lines).toEqual(
+          [
+            {
+              shipment_id: "ship-1",
+              shipment_reference: "REF-001",
+              shipment_status: "READY",
+              line_id: "line-1",
+              line_number: 1,
+              cn_code: "25232100",
+            },
+          ],
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 10, finding S5R10-NUM-B1): does NOT list a line as engine_outdated_lines when its calculation matches the current engine version",
+      async () => {
+        const result =
+          await buildPeriodSummary(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow({ id: "line-1", emission_determination: defaultDetermination }),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "1.1.0", embedded_emissions_tco2e: "1.39", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-1" }], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result.engine_outdated_lines).toEqual(
+          [],
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 10, finding S5R10-NUM-B1): THROWS on a current-engine-version fetch error",
+      async () => {
+        await expect(
+          buildPeriodSummary(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: {
+                  data: [
+                    lineRow({ id: "line-1", emission_determination: defaultDetermination }),
+                  ],
+                  error: null,
+                },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "1.1.0", embedded_emissions_tco2e: "1.39", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-1" }], error: null },
+              },
+              { data: null, error: { message: "boom" } },
+            ),
+            orgId,
+            annualPeriod,
+          ),
+        ).rejects.toThrow(
+          "boom",
         );
       },
     );

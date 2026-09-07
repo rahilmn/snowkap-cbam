@@ -156,6 +156,24 @@ export default async function ShipmentDetailPage(
       ),
     );
 
+  // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1). The engine-
+  // version sibling of the activeDatasetIds fetch just above -- same
+  // "fetched once per call, not per line" shape, same reason
+  // (current_engine_version() carries no org scoping; it is one shared
+  // fact). public.current_engine_version() (20260904110000) is the
+  // sanctioned read-only accessor for exactly this comparison.
+  const { data: currentEngineVersion, error: currentEngineVersionError } =
+    await supabase
+      .rpc(
+        "current_engine_version",
+      );
+
+  if (currentEngineVersionError) {
+    throw new Error(
+      `shipments: current engine version fetch failed (${currentEngineVersionError.message}).`,
+    );
+  }
+
   // 2026-09-06 (S5 review remediation, finding A4). Computed server-side
   // -- the client never receives activeDatasetIds itself, only the
   // resulting per-line boolean, matching this page's own established
@@ -185,6 +203,7 @@ export default async function ShipmentDetailPage(
       shipment.lines,
       latestCalculations,
       activeDatasetIds,
+      currentEngineVersion as string,
     );
 
   // Per-line, not org-wide -- listAvailableActualEmissionData now filters
@@ -435,6 +454,25 @@ export default async function ShipmentDetailPage(
                 that has since been corrected -- redetermine before filing.
               </p>
             ) : null}
+
+            {
+              // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1).
+              // The identical caption shape as datasetSupersededLineCount
+              // just above, one axis over -- round 8 (S5R8-A-B2) added
+              // this fact to the DECLARATION-level completeness gate but
+              // never here, even though a reader could see a confident
+              // total on this exact page and only discover the filing
+              // gate would refuse it once they reached the declaration
+              // screen.
+              emissionsTotal.engineOutdatedLineCount > 0 ? (
+                <p className="mt-1 text-xs text-[var(--color-warning-700)]">
+                  {emissionsTotal.engineOutdatedLineCount} of{" "}
+                  {shipment.lines.length} line(s) were calculated by an
+                  earlier version of the calculation engine -- recalculate
+                  before filing.
+                </p>
+              ) : null
+            }
           </>
         )}
       </Card>

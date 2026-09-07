@@ -71,6 +71,12 @@ function calculation(
 const activeDatasetIds =
   new Set([ACTIVE_DATASET_ID]);
 
+// Matches calculation()'s own default engine_version above, so every
+// pre-existing test's expectations stay intact without each having to
+// know about the new engine-version parameter.
+const CURRENT_ENGINE_VERSION =
+  "1.4.0";
+
 describe(
   "getShipmentEmissionsTotal",
   () => {
@@ -82,6 +88,7 @@ describe(
             [{ id: "line-1", emission_determination: determination() }],
             {},
             activeDatasetIds,
+            CURRENT_ENGINE_VERSION,
           );
 
         expect(result.total).toEqual(
@@ -108,6 +115,7 @@ describe(
               "line-2": calculation({ embedded_emissions_tco2e: "5.5" }),
             },
             activeDatasetIds,
+            CURRENT_ENGINE_VERSION,
           );
 
         expect(result.total).toEqual(
@@ -142,6 +150,7 @@ describe(
               "line-2": calculation({ embedded_emissions_tco2e: "999", calculatedAgainst: determination("EXACT_CN8_MATCH") }),
             },
             activeDatasetIds,
+            CURRENT_ENGINE_VERSION,
           );
 
         // line-2's 999 must NOT appear anywhere in the total -- proves
@@ -176,6 +185,7 @@ describe(
               "line-1": calculation({ embedded_emissions_tco2e: "42" }),
             },
             activeDatasetIds,
+            CURRENT_ENGINE_VERSION,
           );
 
         expect(result.total).toEqual(
@@ -199,6 +209,7 @@ describe(
               "line-1": calculation({ embedded_emissions_tco2e: "10.5", calculatedAgainst: supersededDetermination }),
             },
             activeDatasetIds,
+            CURRENT_ENGINE_VERSION,
           );
 
         expect(result.total).toEqual(
@@ -227,6 +238,7 @@ describe(
               "line-1": calculation({ embedded_emissions_tco2e: "999", calculatedAgainst: determination("EXACT_CN8_MATCH", "dataset-superseded-1") }),
             },
             activeDatasetIds,
+            CURRENT_ENGINE_VERSION,
           );
 
         expect(result.total).toEqual(
@@ -234,6 +246,66 @@ describe(
         );
 
         expect(result.datasetSupersededLineCount).toBe(
+          0,
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 10, finding S5R10-NUM-B1): counts a CURRENT calculation produced by a superseded engine version as engineOutdatedLineCount -- but STILL includes its figure in the total, mirroring datasetSupersededLineCount's own posture",
+      () => {
+        const result =
+          getShipmentEmissionsTotal(
+            [
+              { id: "line-1", emission_determination: determination() },
+            ],
+            {
+              "line-1": {
+                ...calculation({ embedded_emissions_tco2e: "10.5" }),
+                engine_version: "0.9.0" as never,
+              },
+            },
+            activeDatasetIds,
+            CURRENT_ENGINE_VERSION,
+          );
+
+        expect(result.total).toEqual(
+          {
+            status: "COMPLETE",
+            total_tco2e: "10.5",
+            totalLineCount: 1,
+          },
+        );
+
+        expect(result.engineOutdatedLineCount).toBe(
+          1,
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 10, finding S5R10-NUM-B1): does not double-count a STALE line as also engine-outdated",
+      () => {
+        const result =
+          getShipmentEmissionsTotal(
+            [
+              { id: "line-1", emission_determination: determination("REGULATORY_REDETERMINED") },
+            ],
+            {
+              "line-1": {
+                ...calculation({ embedded_emissions_tco2e: "999", calculatedAgainst: determination("EXACT_CN8_MATCH") }),
+                engine_version: "0.9.0" as never,
+              },
+            },
+            activeDatasetIds,
+            CURRENT_ENGINE_VERSION,
+          );
+
+        expect(result.total).toEqual(
+          { status: "NONE", staleLineCount: 1 },
+        );
+
+        expect(result.engineOutdatedLineCount).toBe(
           0,
         );
       },

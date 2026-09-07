@@ -158,10 +158,16 @@ export interface PeriodExportRow {
    * "CURRENT", which this row's own embedded_emissions_tco2e value
    * still is -- checkCalculationCurrency only ever compares a
    * determination against itself, never against live regulatory
-   * state, so this is a genuinely independent axis), or
-   * "NOT_CALCULATED".
+   * state, so this is a genuinely independent axis), "ENGINE_VERSION_
+   * OUTDATED" (2026-09-07, S5 review round 10 finding S5R10-NUM-B1: the
+   * engine-version sibling of DATASET_SUPERSEDED -- a CURRENT
+   * calculation produced by an engine version the app no longer runs,
+   * record_declaration_filed()'s CALCULATION_ENGINE_OUTDATED check;
+   * likewise not folded into "CURRENT" and likewise a genuinely
+   * independent axis, since checkCalculationCurrency never compares
+   * engine_version either), or "NOT_CALCULATED".
    */
-  calculation_currency: "CURRENT" | "STALE" | "DATASET_SUPERSEDED" | "NOT_CALCULATED";
+  calculation_currency: "CURRENT" | "STALE" | "DATASET_SUPERSEDED" | "ENGINE_VERSION_OUTDATED" | "NOT_CALCULATED";
 }
 
 interface InstallationNameRow {
@@ -216,6 +222,7 @@ function describedDetermination(
 function currencyOf(
   entry: PeriodShipmentLine,
   activeDatasetIds: ReadonlySet<string>,
+  currentEngineVersion: string,
 ): PeriodExportRow["calculation_currency"] {
   if (entry.calculation === null) {
     return "NOT_CALCULATED";
@@ -227,13 +234,23 @@ function currencyOf(
       entry.line.emission_determination,
     );
 
-  // 2026-09-06 (S5 review remediation, finding A4). A STALE calculation
-  // is already refused for a reason unrelated to dataset currency --
-  // don't relabel it. Only a CURRENT calculation gets checked against
-  // live regulatory state, which checkCalculationCurrency itself never
-  // does.
+  // 2026-09-06 (S5 review remediation, finding A4; ordering finding
+  // S5R10-NUM-B1/S5R9-GUID-B1). A STALE calculation is already refused
+  // for a reason unrelated to dataset/engine currency -- don't relabel
+  // it. Only a CURRENT calculation gets checked against live state,
+  // which checkCalculationCurrency itself never does. Engine version is
+  // checked BEFORE dataset currency, matching record_declaration_filed()'s
+  // own SQL check order (CALCULATION_ENGINE_OUTDATED before
+  // DATASET_SUPERSEDED) and buildCompletenessReport's own else-if chain.
+  if (currency !== "CURRENT") {
+    return currency;
+  }
+
+  if (entry.calculation.engine_version !== currentEngineVersion) {
+    return "ENGINE_VERSION_OUTDATED";
+  }
+
   if (
-    currency === "CURRENT" &&
     !determinationDatasetIsCurrent(
       entry.line.emission_determination,
       activeDatasetIds,
@@ -249,6 +266,7 @@ function toExportRow(
   entry: PeriodShipmentLine,
   installationNameById: ReadonlyMap<string, string>,
   activeDatasetIds: ReadonlySet<string>,
+  currentEngineVersion: string,
 ): PeriodExportRow {
   const determination =
     describedDetermination(entry);
@@ -308,7 +326,7 @@ function toExportRow(
 
     sharing_grant_id: snapshot?.sharing_grant_id ?? null,
 
-    calculation_currency: currencyOf(entry, activeDatasetIds),
+    calculation_currency: currencyOf(entry, activeDatasetIds, currentEngineVersion),
   };
 }
 
@@ -487,6 +505,24 @@ export async function buildPeriodExportRows(
       ),
     );
 
+  // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1). The engine-
+  // version sibling of the activeDatasetIds fetch just above -- same
+  // "fetched once per call, not per line" shape, same reason.
+  const { data: currentEngineVersionData, error: currentEngineVersionError } =
+    await supabase
+      .rpc(
+        "current_engine_version",
+      );
+
+  if (currentEngineVersionError) {
+    throw new Error(
+      `reporting: current engine version fetch failed (${currentEngineVersionError.message}).`,
+    );
+  }
+
+  const currentEngineVersion =
+    currentEngineVersionData as string;
+
   return lines
     .map(
       (entry) =>
@@ -494,6 +530,7 @@ export async function buildPeriodExportRows(
           entry,
           installationNameById,
           activeDatasetIds,
+          currentEngineVersion,
         ),
     )
     .sort(

@@ -55,6 +55,20 @@ export interface ShipmentEmissionsTotalResult {
   // data behind it has moved). Zero when none are, which is the common
   // case and needs no caption.
   datasetSupersededLineCount: number;
+
+  // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1). The
+  // identical fact as datasetSupersededLineCount, one axis over: how
+  // many of the CURRENT, included-in-`total` lines were calculated by
+  // an engine version that is no longer the one the app runs. Round 8
+  // (S5R8-A-B2) propagated this fact to the declaration-level
+  // completeness gate but never here, even though it is structurally
+  // the same "the figure IS in the total, but it is a figure the
+  // filing gate would currently refuse" shape as dataset supersession.
+  // Deliberately NOT excluded from `total` for the identical reason
+  // dataset supersession isn't: the calculation itself is a genuine,
+  // correctly-computed value under the engine version recorded on the
+  // row -- this is a staleness SIGNAL, not a correction to the sum.
+  engineOutdatedLineCount: number;
 }
 
 export function getShipmentEmissionsTotal(
@@ -64,11 +78,15 @@ export function getShipmentEmissionsTotal(
   }[],
   latestCalculations: Record<string, LatestLineCalculation>,
   activeDatasetIds: ReadonlySet<string>,
+  currentEngineVersion: string,
 ): ShipmentEmissionsTotalResult {
   const currentComputedEmissions: DecimalString[] =
     [];
 
   let datasetSupersededLineCount =
+    0;
+
+  let engineOutdatedLineCount =
     0;
 
   // 2026-09-07 (S5 review round 4, finding S5R4-VOCAB-2). Tracked
@@ -108,6 +126,10 @@ export function getShipmentEmissionsTotal(
     ) {
       datasetSupersededLineCount += 1;
     }
+
+    if (calculation.engine_version !== currentEngineVersion) {
+      engineOutdatedLineCount += 1;
+    }
   }
 
   return {
@@ -117,5 +139,6 @@ export function getShipmentEmissionsTotal(
       staleLineCount,
     ),
     datasetSupersededLineCount,
+    engineOutdatedLineCount,
   };
 }

@@ -43,6 +43,7 @@ import {
 import {
   buildPeriodSummary,
   type DatasetSupersededPeriodLine,
+  type EngineOutdatedPeriodLine,
   type IncompletePeriodLine,
   type PeriodBreakdownEntry,
   type PeriodSummary,
@@ -359,6 +360,12 @@ function ReportBody(
           lines={summary.dataset_superseded_lines}
         />
       ) : null}
+
+      {summary.engine_outdated_lines.length > 0 ? (
+        <EngineOutdatedLinesCard
+          lines={summary.engine_outdated_lines}
+        />
+      ) : null}
     </div>
   );
 }
@@ -650,6 +657,105 @@ function DatasetSupersededLinesCard(
                           This shipment is READY -- reopen it first, then
                           redetermine the line against the current
                           dataset.
+                        </p>
+                      ) : null
+                    }
+                  </td>
+                </tr>
+              ),
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+// 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1). The
+// engine-version sibling of DatasetSupersededLinesCard just above --
+// see that component's own doc comment for the shared reasoning
+// (figures stay IN the totals/breakdowns; this card's job is to
+// surface, not hide, that they are figures the filing gate currently
+// refuses -- CALCULATION_ENGINE_OUTDATED). Unlike a dataset
+// supersession, recalculating a READY (not yet LOCKED) line does NOT
+// require reopening the shipment first -- record_calculation_result
+// (20260906210000) deliberately still permits recalculating a READY
+// line with a new engine version -- so this card has no READY-specific
+// hedge, only the LOCKED one.
+function EngineOutdatedLinesCard(
+  {
+    lines,
+  }: {
+    lines: EngineOutdatedPeriodLine[];
+  },
+) {
+  return (
+    <Card>
+      <div className="border-b border-[var(--border-default)] p-4">
+        <h2 className="text-sm font-medium text-[var(--text-primary)]">
+          Calculated by an earlier engine version
+        </h2>
+
+        <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+          These lines are calculated and included in the totals above,
+          but their latest calculation was produced by a version of the
+          calculation engine that is no longer current -- the filing
+          gate will refuse a declaration that includes them unchanged.
+          If a listed shipment is not yet LOCKED, recalculate that line
+          before filing -- see each row below for whether that applies.
+        </p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-[var(--border-default)] text-[var(--text-tertiary)]">
+              <th className="px-4 py-2 font-medium">
+                Shipment
+              </th>
+
+              <th className="px-4 py-2 font-medium">
+                Line
+              </th>
+
+              <th className="px-4 py-2 font-medium">
+                CN / TARIC code
+              </th>
+
+              <th className="px-4 py-2 font-medium">
+                Status
+              </th>
+            </tr>
+          </thead>
+
+          <tbody className="divide-y divide-[var(--border-default)]">
+            {lines.map(
+              (line) => (
+                <tr key={line.line_id}>
+                  <td className="px-4 py-2 text-[var(--text-primary)]">
+                    {line.shipment_reference}
+                  </td>
+
+                  <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
+                    {line.line_number}
+                  </td>
+
+                  <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
+                    {line.cn_code}
+                  </td>
+
+                  <td className="px-4 py-2">
+                    <StatusBadge
+                      statusKey="blocker.LINE_CALCULATION_ENGINE_OUTDATED"
+                    />
+
+                    {
+                      line.shipment_status === "LOCKED" ? (
+                        <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                          This shipment has already been LOCKED (the
+                          routine case for an amendment) -- it cannot be
+                          recalculated through the normal declaration
+                          flow. Contact support.
                         </p>
                       ) : null
                     }

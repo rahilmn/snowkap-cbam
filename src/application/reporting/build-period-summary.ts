@@ -125,6 +125,24 @@ export interface DatasetSupersededPeriodLine {
 }
 
 /**
+ * 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1). The engine-
+ * version sibling of DatasetSupersededPeriodLine -- see that interface's
+ * own doc comment for the shared reasoning (stays IN the total/
+ * breakdowns rather than being excluded, because the calculation itself
+ * is a genuine, correctly-computed value; this is a staleness SIGNAL,
+ * not a correction). Round 8 (S5R8-A-B2) propagated this fact to the
+ * declaration-level completeness gate but never here.
+ */
+export interface EngineOutdatedPeriodLine {
+  shipment_id: ShipmentId;
+  shipment_reference: string;
+  shipment_status: ShipmentStatus;
+  line_id: ShipmentLineId;
+  line_number: number;
+  cn_code: string;
+}
+
+/**
  * One bucket of the period's line population, sliced by one dimension
  * (CN code / origin country / production route / determination
  * method). `calculated_line_count` is always <= `line_count`;
@@ -191,6 +209,12 @@ export interface PeriodSummary {
   // stay IN total_embedded_emissions_tco2e/the breakdowns rather than
   // being excluded like incomplete_lines.
   dataset_superseded_lines: DatasetSupersededPeriodLine[];
+
+  // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1). Every
+  // CALCULATED, CURRENT line whose latest calculation was produced by
+  // an engine version the app no longer runs -- see
+  // EngineOutdatedPeriodLine's own doc comment.
+  engine_outdated_lines: EngineOutdatedPeriodLine[];
 }
 
 interface BreakdownAccumulator {
@@ -346,7 +370,29 @@ export async function buildPeriodSummary(
       ),
     );
 
+  // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1). The engine-
+  // version sibling of the activeDatasetIds fetch just above -- same
+  // "one small query for the whole period" shape, same reason
+  // (current_engine_version() carries no org scoping).
+  const { data: currentEngineVersionData, error: currentEngineVersionError } =
+    await supabase
+      .rpc(
+        "current_engine_version",
+      );
+
+  if (currentEngineVersionError) {
+    throw new Error(
+      `reporting: current engine version fetch failed (${currentEngineVersionError.message}).`,
+    );
+  }
+
+  const currentEngineVersion =
+    currentEngineVersionData as string;
+
   const datasetSupersededLines: DatasetSupersededPeriodLine[] =
+    [];
+
+  const engineOutdatedLines: EngineOutdatedPeriodLine[] =
     [];
 
   const cnCodeBreakdown =
@@ -398,6 +444,25 @@ export async function buildPeriodSummary(
         )
       ) {
         datasetSupersededLines.push(
+          {
+            shipment_id: entry.shipment_id,
+            shipment_reference: entry.shipment_reference,
+            shipment_status: entry.shipment_status,
+            line_id: entry.line.id,
+            line_number: entry.line.line_number,
+            cn_code: entry.line.cn_code,
+          },
+        );
+      }
+
+      // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1). A CURRENT
+      // calculation can still have been produced by an engine version
+      // the app no longer runs -- a genuinely independent check from
+      // the dataset-supersession one above, matching how the two are
+      // independent axes everywhere else this fact is tracked
+      // (buildCompletenessReport, computeCompletenessReportStaleness).
+      if (entry.calculation!.engine_version !== currentEngineVersion) {
+        engineOutdatedLines.push(
           {
             shipment_id: entry.shipment_id,
             shipment_reference: entry.shipment_reference,
@@ -470,6 +535,18 @@ export async function buildPeriodSummary(
     },
   );
 
+  engineOutdatedLines.sort(
+    (a, b) => {
+      if (a.shipment_reference !== b.shipment_reference) {
+        return a.shipment_reference.localeCompare(
+          b.shipment_reference,
+        );
+      }
+
+      return a.line_number - b.line_number;
+    },
+  );
+
   return {
     period,
     shipment_count,
@@ -482,5 +559,6 @@ export async function buildPeriodSummary(
     breakdown_by_determination_method: toBreakdownEntries(determinationMethodBreakdown),
     incomplete_lines: incompleteLines,
     dataset_superseded_lines: datasetSupersededLines,
+    engine_outdated_lines: engineOutdatedLines,
   };
 }

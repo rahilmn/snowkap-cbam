@@ -115,6 +115,12 @@ interface TableResult {
 function makeMockSupabase(
   tables: Record<string, TableResult>,
   fromCalls: string[] = [],
+  // 2026-09-07 (S5 review round 10, finding S5R10-NUM-B1).
+  // buildPeriodExportRows now reads the current engine version once per
+  // call -- defaults to "1.1.0", matching this file's own fixture rows'
+  // engine_version default, so every pre-existing test's expectations
+  // stay intact without each having to know about this new RPC call.
+  currentEngineVersionResult: TableResult = { data: "1.1.0", error: null },
 ) {
   function builder(
     table: string,
@@ -147,6 +153,10 @@ function makeMockSupabase(
 
       return builder(table);
     },
+    rpc: (name: string) =>
+      name === "current_engine_version"
+        ? Promise.resolve(currentEngineVersionResult)
+        : Promise.resolve({ data: null, error: null }),
   } as never;
 }
 
@@ -503,6 +513,102 @@ describe(
 
         expect(result[0]?.calculation_currency).toBe(
           "STALE",
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 10, finding S5R10-NUM-B1): reports calculation_currency as ENGINE_VERSION_OUTDATED -- not CURRENT -- for a CURRENT calculation produced by a superseded engine version, while still including its figure",
+      async () => {
+        const result =
+          await buildPeriodExportRows(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: { data: [lineRow({ emission_determination: defaultDetermination })], error: null },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "0.9.0", embedded_emissions_tco2e: "20", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-1" }], error: null },
+              },
+              // Default rpc result is "1.1.0" -- deliberately distinct
+              // from the calculation's own "0.9.0" above.
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result[0]?.calculation_currency).toBe(
+          "ENGINE_VERSION_OUTDATED",
+        );
+
+        expect(result[0]?.embedded_emissions_tco2e).toBe(
+          "20",
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 10, finding S5R10-NUM-B1): a STALE calculation stays STALE, never relabelled ENGINE_VERSION_OUTDATED even when its engine version is also superseded",
+      async () => {
+        const staleDetermination =
+          { ...defaultDetermination, resolution: { ...defaultDetermination.resolution, reason: "OTHER_COUNTRIES_FALLBACK" } };
+
+        const result =
+          await buildPeriodExportRows(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: { data: [lineRow({ emission_determination: staleDetermination })], error: null },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "0.9.0", embedded_emissions_tco2e: "20", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                regulatory_datasets: { data: [{ id: "dataset-1" }], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result[0]?.calculation_currency).toBe(
+          "STALE",
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 10, finding S5R10-NUM-B1): when a line is BOTH engine-outdated AND dataset-superseded, reports ENGINE_VERSION_OUTDATED -- matching record_declaration_filed()'s own SQL check order (engine version before dataset)",
+      async () => {
+        const result =
+          await buildPeriodExportRows(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: { data: [lineRow({ emission_determination: defaultDetermination })], error: null },
+                latest_calculation_results: {
+                  data: [
+                    { id: "calc-1", line_id: "line-1", engine_version: "0.9.0", embedded_emissions_tco2e: "20", steps: [], calculated_at: "2026-02-01T00:00:00Z", determination: defaultDetermination },
+                  ],
+                  error: null,
+                },
+                // dataset-1 (defaultDetermination's own dataset_id) is
+                // deliberately NOT in the ACTIVE set -- both axes are
+                // simultaneously true for this one line.
+                regulatory_datasets: { data: [{ id: "dataset-2" }], error: null },
+              },
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result[0]?.calculation_currency).toBe(
+          "ENGINE_VERSION_OUTDATED",
         );
       },
     );
