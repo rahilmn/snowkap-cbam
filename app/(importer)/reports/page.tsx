@@ -305,13 +305,22 @@ function ReportBody(
           value={
             summary.total_embedded_emissions_tco2e !== null
               ? `${summary.total_embedded_emissions_tco2e} tCO2e`
-              // 2026-09-07 (S5 review round 6, finding S5R6-NUM-A). A
-              // total excluded because every contributing line is
-              // stale (already calculated, just against a superseded
+              // 2026-09-07 (S5 review round 6, finding S5R6-NUM-A;
+              // widened round 7, finding S5R7-NUM-A2). A total excluded
+              // because at least one contributing line is stale
+              // (already calculated, just against a superseded
               // determination) is a different fact from one where
-              // nothing has ever been calculated -- see this
-              // function's own staleLineCount comment above.
-              : staleLineCount === summary.line_count && staleLineCount > 0
+              // nothing has ever been calculated -- see this function's
+              // own staleLineCount comment above. Originally gated on
+              // "every line is stale" (staleLineCount === line_count),
+              // which missed the more common real-world shape for a
+              // period spanning many shipments/lines: a MIX of stale
+              // and never-calculated reasons, where this KPI still said
+              // "Not yet available" one line below a banner already
+              // explaining some lines have a real, frozen calculation.
+              // Matches the banner's own less strict `staleLineCount >
+              // 0` gate just above.
+              : staleLineCount > 0
                 ? "Excluded (stale)"
                 : "Not yet available"
           }

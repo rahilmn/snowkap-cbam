@@ -93,6 +93,19 @@ const SCAN_ROOTS: string[] =
 const SCAN_FILES: string[] =
   [
     "app/page.tsx",
+    // 2026-09-07 (S5 review round 7, finding S5R7-A-Y1). Round 6's own
+    // S5R6-A-Y1 fix added src/domain/guidance to SCAN_ROOTS specifically
+    // because components/guidance/guidance-item-list.tsx renders
+    // item.title/item.reason one layer removed from where the literal
+    // prose is built -- its own commit message named BOTH "/attention
+    // and the dashboard's guidance tile" as the live rendering surfaces
+    // that justified the fix, but only the dashboard (app/page.tsx,
+    // already listed here) was actually added. app/attention/page.tsx
+    // is a distinct top-level route, never a subdirectory of any
+    // SCAN_ROOTS entry, and carries its own literal JSX prose besides
+    // embedding GuidanceItemList -- left unscanned, a conflation
+    // planted directly in this page's own copy would go undetected.
+    "app/attention/page.tsx",
   ];
 
 const SKIP_DIRECTORIES =
