@@ -86,6 +86,12 @@ function makeMockSupabase(
         inFilters.push({ table, values });
         return chain;
       },
+      // 2026-09-07 (S5 review round 7, finding S5R7-A-B1, guidance
+      // dimension): computeCompletenessReportStaleness's new
+      // currentPeriodShipmentIds check queries `shipments` with
+      // `.is("reporting_period_quarter", null)` for an ANNUAL period,
+      // matching compute-declaration-draft-facts.ts's own convention.
+      is: () => chain,
       order: () => chain,
       range: () => chain,
       maybeSingle: () =>
@@ -500,6 +506,90 @@ describe(
                   error: null,
                 },
                 regulatory_datasets: { data: [{ id: "dataset-current-1" }], error: null },
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          false,
+        );
+
+        expect(result?.completeness_report_stale_reason).toBeNull();
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 7, finding S5R7-A-B1, guidance dimension): flags completeness_report_stale as PERIOD_MEMBERSHIP_CHANGED when a new shipment has entered the period since this READY declaration's report was generated -- no member shipment's own status needs to change at all",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "READY",
+                        member_shipment_ids: ["ship-1"],
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: [
+                  // fetchMemberShipments: the one frozen member, still
+                  // LOCKED -- memberStatusStale must stay false so this
+                  // new check is even reached.
+                  { data: [shipmentSummaryRow], error: null },
+                  // currentPeriodShipmentIds: the period NOW also
+                  // contains ship-2, a shipment that was never a member
+                  // of this declaration at all.
+                  { data: [{ id: "ship-1" }, { id: "ship-2" }], error: null },
+                ],
+              },
+            ),
+            "org-1" as never,
+            "decl-1" as never,
+          );
+
+        expect(result?.completeness_report_stale).toBe(
+          true,
+        );
+
+        expect(result?.completeness_report_stale_reason).toBe(
+          "PERIOD_MEMBERSHIP_CHANGED",
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 7, finding S5R7-A-B1, guidance dimension): does NOT flag completeness_report_stale when the period's live non-VOID shipment set still exactly equals the frozen member set",
+      async () => {
+        const result =
+          await getDeclarationDetail(
+            makeMockSupabase(
+              {
+                declarations: [
+                  {
+                    data: declarationRow(
+                      {
+                        status: "READY",
+                        member_shipment_ids: ["ship-1"],
+                        completeness_report: { complete: true, blockers: [] },
+                      },
+                    ),
+                    error: null,
+                  },
+                  { data: null, error: null },
+                ],
+                shipments: [
+                  { data: [shipmentSummaryRow], error: null },
+                  { data: [{ id: "ship-1" }], error: null },
+                ],
               },
             ),
             "org-1" as never,

@@ -31,6 +31,14 @@ import type {
   EmissionDetermination,
 } from "../../domain/emissions/types";
 
+import {
+  reportingPeriodColumns,
+} from "../emissions/emission-data-mapper";
+
+import type {
+  ReportingPeriod,
+} from "../../domain/shared/reporting-period";
+
 export interface DeclarationMemberShipmentSummary {
   id: ShipmentId;
   reference: string;
@@ -101,14 +109,24 @@ export interface DeclarationDetail {
   // declarations only -- a FILED_RECORDED or VOID declaration is an
   // immutable historical record and can never be reported stale by a
   // LATER regulatory correction.
+  //
+  // 2026-09-07 (S5 review round 7, finding S5R7-A-B1, guidance
+  // dimension). A third, independent reason: the declaration's frozen
+  // member_shipment_ids no longer equals the period's LIVE non-VOID
+  // shipment set -- the exact invariant record_declaration_filed()'s
+  // own MEMBERS_NOT_PERIOD_COMPLETE gate enforces, reachable simply by
+  // creating a new shipment in a period whose declaration is already
+  // READY (no member shipment needs to change status at all, so
+  // app.invalidate_declaration_approval_on_reopen never fires and
+  // nothing else in this codebase catches the drift).
   completeness_report_stale: boolean;
-  // 2026-09-06 (S5 review remediation round 2, finding EF2-B3). Which
-  // of the two independent reasons above raised completeness_report_stale
-  // -- null when it is false. Mutually exclusive by construction, so a
-  // caller can render the ACTUAL cause rather than a single hardcoded
-  // "a member shipment was reopened" explanation that was wrong for
-  // reason (2).
-  completeness_report_stale_reason: "MEMBER_REOPENED" | "DATASET_SUPERSEDED" | null;
+  // 2026-09-06 (S5 review remediation round 2, finding EF2-B3;
+  // widened round 7, finding S5R7-A-B1). Which of the three independent
+  // reasons above raised completeness_report_stale -- null when it is
+  // false. Mutually exclusive by construction, so a caller can render
+  // the ACTUAL cause rather than a single hardcoded explanation that
+  // was wrong for the other two.
+  completeness_report_stale_reason: "MEMBER_REOPENED" | "DATASET_SUPERSEDED" | "PERIOD_MEMBERSHIP_CHANGED" | null;
 }
 
 interface ShipmentSummaryRow {
@@ -464,7 +482,90 @@ export async function getDeclarationDetail(
 
 export interface CompletenessReportStaleness {
   stale: boolean;
-  reason: "MEMBER_REOPENED" | "DATASET_SUPERSEDED" | null;
+  reason: "MEMBER_REOPENED" | "DATASET_SUPERSEDED" | "PERIOD_MEMBERSHIP_CHANGED" | null;
+}
+
+// Matches compute-declaration-draft-facts.ts's own SHIPMENTS_PAGE_SIZE
+// -- same PostgREST max_rows cap (supabase/config.toml), same reasoning:
+// an un-ranged query silently truncates rather than erroring.
+const PERIOD_MEMBERSHIP_PAGE_SIZE =
+  1000;
+
+/**
+ * 2026-09-07 (S5 review round 7, finding S5R7-A-B1, guidance
+ * dimension). Every non-VOID shipment id currently in `period` for
+ * `orgId` -- deliberately NOT a reuse of computeDeclarationDraftFacts
+ * (that function does much more: it also joins lines/calculations to
+ * build a full completeness report, work this check doesn't need), but
+ * mirrors its own org+period WHERE clause and VOID exclusion exactly,
+ * for the identical reason that function's own doc comment states: a
+ * VOID shipment retired before this declaration was prepared and never
+ * belongs in the set record_declaration_filed() will LOCK.
+ */
+async function currentPeriodShipmentIds(
+  supabase: SupabaseClient,
+  orgId: OrganizationId,
+  period: ReportingPeriod,
+): Promise<Set<string>> {
+  const columns =
+    reportingPeriodColumns(
+      period,
+    );
+
+  const ids: string[] =
+    [];
+
+  let offset =
+    0;
+
+  for (;;) {
+    let query =
+      supabase
+        .from("shipments")
+        .select("id")
+        .eq("org_id", orgId)
+        .eq("reporting_period_kind", columns.reporting_period_kind)
+        .eq("reporting_period_year", columns.reporting_period_year)
+        .neq("status", "VOID")
+        .order("id", { ascending: true })
+        .range(offset, offset + PERIOD_MEMBERSHIP_PAGE_SIZE - 1);
+
+    query =
+      columns.reporting_period_quarter === null
+        ? query.is("reporting_period_quarter", null)
+        : query.eq("reporting_period_quarter", columns.reporting_period_quarter);
+
+    const { data, error } =
+      await query;
+
+    // THROWS on a genuine query error rather than degrading -- a
+    // silently truncated/empty result here would report a false "no
+    // drift" the same way every other staleness check in this file
+    // already refuses to do.
+    if (error) {
+      throw new Error(
+        `declarations: period-membership shipments fetch failed (${error.message}).`,
+      );
+    }
+
+    const page =
+      (data ?? []) as { id: string }[];
+
+    ids.push(
+      ...page.map((row) => row.id),
+    );
+
+    if (page.length < PERIOD_MEMBERSHIP_PAGE_SIZE) {
+      break;
+    }
+
+    offset +=
+      PERIOD_MEMBERSHIP_PAGE_SIZE;
+  }
+
+  return new Set(
+    ids,
+  );
 }
 
 /**
@@ -484,7 +585,7 @@ export interface CompletenessReportStaleness {
  */
 export async function computeCompletenessReportStaleness(
   supabase: SupabaseClient,
-  declaration: Pick<Declaration, "status" | "completeness_report">,
+  declaration: Pick<Declaration, "status" | "completeness_report" | "org_id" | "reporting_period">,
   memberShipments: readonly DeclarationMemberShipmentSummary[],
   memberIds: readonly string[],
 ): Promise<CompletenessReportStaleness> {
@@ -541,19 +642,77 @@ export async function computeCompletenessReportStaleness(
       memberIds,
     ));
 
+  // 2026-09-07 (S5 review round 7, finding S5R7-A-B1, guidance
+  // dimension). memberStatusStale and datasetStale both re-verify facts
+  // about the FROZEN member set itself (its shipments' current status,
+  // its lines' current dataset currency) -- neither re-verifies that
+  // the frozen set still EQUALS the period's live non-VOID shipment
+  // set, the exact invariant record_declaration_filed()'s own
+  // MEMBERS_NOT_PERIOD_COMPLETE gate enforces. Once a declaration
+  // reaches READY, computeDeclarationDraftFacts (the only function that
+  // recomputes "every non-VOID shipment in this org+period") is never
+  // called again for it -- generateOrRefreshDeclarationDraft refuses a
+  // READY period outright (PERIOD_HAS_READY_DECLARATION), and
+  // app.invalidate_declaration_approval_on_reopen only fires when an
+  // EXISTING member shipment's own status leaves READY, never for a
+  // brand-new shipment inserted into the same period (which is not a
+  // member at all, and triggers no row event on the declaration). A new
+  // shipment entering the period therefore drifts the declaration out
+  // of sync with zero UI signal, until the one control a READY
+  // declaration renders (RecordFiledForm) is clicked and the filing is
+  // refused. Scoped to DRAFT/READY and gated on the two checks above
+  // for the identical mutual-exclusivity reason those two already share
+  // -- set equality (not containment) to catch both directions, exactly
+  // matching record_declaration_filed()'s own comparison.
+  const periodMembershipStale =
+    reportClaimsComplete &&
+    !memberStatusStale &&
+    !datasetStale &&
+    (declaration.status === "DRAFT" || declaration.status === "READY") &&
+    (await (
+      async () => {
+        const currentIds =
+          await currentPeriodShipmentIds(
+            supabase,
+            declaration.org_id,
+            declaration.reporting_period,
+          );
+
+        const frozenIds =
+          new Set(
+            memberIds,
+          );
+
+        if (currentIds.size !== frozenIds.size) {
+          return true;
+        }
+
+        for (const id of frozenIds) {
+          if (!currentIds.has(id)) {
+            return true;
+          }
+        }
+
+        return false;
+      }
+    )());
+
   // 2026-09-06 (S5 review remediation round 2, finding EF2-B3). Lets
   // the UI explain the ACTUAL reason rather than always printing the
-  // "a member shipment was reopened" copy -- memberStatusStale and
-  // datasetStale are mutually exclusive by construction (datasetStale
-  // is gated on `!memberStatusStale`), so this is a true discriminant,
-  // never both/neither when the combined result is stale.
+  // "a member shipment was reopened" copy -- memberStatusStale,
+  // datasetStale, and periodMembershipStale are mutually exclusive by
+  // construction (each later check is gated on every earlier one being
+  // false), so this is a true discriminant, never both/neither when the
+  // combined result is stale.
   return {
-    stale: memberStatusStale || datasetStale,
+    stale: memberStatusStale || datasetStale || periodMembershipStale,
     reason:
       memberStatusStale
         ? "MEMBER_REOPENED"
         : datasetStale
         ? "DATASET_SUPERSEDED"
+        : periodMembershipStale
+        ? "PERIOD_MEMBERSHIP_CHANGED"
         : null,
   };
 }

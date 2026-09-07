@@ -47,15 +47,16 @@ export function CompletenessReportCard(
     // A stale "complete" claim must never render as the same success
     // badge a genuinely current one does.
     stale?: boolean;
-    // 2026-09-06 (S5 review remediation round 2, finding EF2-B3). Which
-    // of the two independent reasons raised `stale` -- see
-    // get-declaration-detail.ts's own DeclarationDetail.
-    // completeness_report_stale_reason doc comment. The prior version of
-    // this card hardcoded the MEMBER_REOPENED explanation for every
-    // stale cause, which was FALSE (and pointed at a "Generate /
-    // refresh draft" control that isn't even rendered for a READY
-    // declaration) whenever DATASET_SUPERSEDED was the actual reason.
-    staleReason?: "MEMBER_REOPENED" | "DATASET_SUPERSEDED" | null;
+    // 2026-09-06 (S5 review remediation round 2, finding EF2-B3;
+    // widened round 7, finding S5R7-A-B1). Which of the three
+    // independent reasons raised `stale` -- see get-declaration-detail.ts's
+    // own DeclarationDetail.completeness_report_stale_reason doc
+    // comment. The prior version of this card hardcoded the
+    // MEMBER_REOPENED explanation for every stale cause, which was
+    // FALSE (and pointed at a "Generate / refresh draft" control that
+    // isn't even rendered for a READY declaration) whenever
+    // DATASET_SUPERSEDED was the actual reason.
+    staleReason?: "MEMBER_REOPENED" | "DATASET_SUPERSEDED" | "PERIOD_MEMBERSHIP_CHANGED" | null;
     // Needed alongside staleReason because the DATASET_SUPERSEDED
     // recovery instruction differs by status: a DRAFT declaration can
     // still be refreshed directly on this page; a READY declaration has
@@ -116,6 +117,18 @@ export function CompletenessReportCard(
                   ? "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. If the affected member shipment is still editable, reopen it, redetermine that line against the current dataset, then approve this declaration for filing again. If it has already been LOCKED (for example by an earlier filing -- the routine case for an amendment), this cannot be corrected through the normal declaration flow -- contact support."
                   : "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. Reopen the affected shipment, redetermine that line against the current dataset, then approve this declaration for filing again."
                 : "A regulatory dataset behind one of this declaration's default-value lines has since been corrected, so this report no longer reflects the current state. Click Generate / refresh draft to recheck completeness against the current dataset."
+              : staleReason === "PERIOD_MEMBERSHIP_CHANGED"
+              ? // 2026-09-07 (S5 review round 7, finding S5R7-A-B1,
+                // guidance dimension). A new shipment entering the
+                // period (or an existing one leaving it) never changes
+                // any EXISTING member shipment's own status, so it
+                // never fires app.invalidate_declaration_approval_on_reopen
+                // -- a READY declaration stays READY, with no "Generate
+                // / refresh draft" control on this page at all, until
+                // one of its existing member shipments is reopened.
+                declarationStatus === "READY"
+                ? "The shipments in this declaration's reporting period have changed since this report was generated -- one has moved period, or a new one has been added. Reopen one of its existing member shipments from that shipment's own detail page -- this returns the declaration to draft, where a fresh Generate/refresh will pick up the current period membership -- then approve it for filing again."
+                : "The shipments in this declaration's reporting period have changed since this report was generated -- one has moved period, or a new one has been added. Click Generate / refresh draft to recheck the current period membership."
               : "A member shipment was reopened since this was last checked, so this report no longer reflects the current state. Click Generate / refresh draft to recheck completeness."}
           </p>
         </div>
