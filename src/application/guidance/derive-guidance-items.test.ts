@@ -132,6 +132,22 @@ function mockSupabase(
             );
           }
 
+          // 2026-09-07 (S5 review round 8, finding S5R8-A-1/S5R8-A-B1).
+          // list-rejected-emission-data-for-guidance.ts's primary
+          // emission_data query now pages via .order()/.range(), same
+          // shape as the shipments/shipment_lines queries above -- this
+          // table used to resolve only through the `then` handler below,
+          // which `.range()` never reaches (the chain's `range()` method
+          // itself returns the settled Promise, short-circuiting `then`).
+          if (table === "emission_data") {
+            return Promise.resolve(
+              {
+                data: from === 0 ? (rejectedEmissionDataError ? null : rejectedEmissionDataRows) : [],
+                error: from === 0 ? rejectedEmissionDataError : null,
+              },
+            );
+          }
+
           return Promise.resolve(
             { data: [], error: null },
           );
@@ -145,11 +161,12 @@ function mockSupabase(
             );
           }
 
-          if (table === "emission_data") {
-            return resolve(
-              { data: rejectedEmissionDataError ? null : rejectedEmissionDataRows, error: rejectedEmissionDataError },
-            );
-          }
+          // 2026-09-07 (S5 review round 8). "emission_data" no longer
+          // resolves here -- its query now ends in `.range()`, which
+          // (like the shipments/shipment_lines queries above) returns a
+          // settled Promise directly, so `then()` above is never reached
+          // for that table. See the `range()` handler's own
+          // "emission_data" case above.
 
           if (table === "installations") {
             return resolve(
