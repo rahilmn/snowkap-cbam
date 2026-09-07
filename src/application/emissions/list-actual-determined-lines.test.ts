@@ -586,6 +586,83 @@ describe(
     );
 
     it(
+      "2026-09-07 (S5 review round 7, finding S5R7-SHARE-B3): chunks the sharing_grants follow-up query rather than issuing one oversized .in() call, when ACTUAL-determined lines span more than SHIPMENT_ID_CHUNK_SIZE distinct sharing grants",
+      async () => {
+        const GRANT_COUNT =
+          150;
+
+        const lineRows =
+          Array.from(
+            { length: GRANT_COUNT },
+            (_, index) =>
+              actualLineRow(
+                {
+                  id: `line-${index}`,
+                  emission_determination: {
+                    method: "ACTUAL",
+                    snapshot: {
+                      ...sharedSnapshot,
+                      sharing_grant_id: `grant-${index}`,
+                    },
+                  },
+                },
+              ),
+          );
+
+        const grantRows =
+          Array.from(
+            { length: GRANT_COUNT },
+            (_, index) => (
+              {
+                id: `grant-${index}`,
+                grantor_org_id: "org-producer",
+                status: "ACTIVE",
+                expires_at: null,
+              }
+            ),
+          );
+
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await listActualDeterminedLines(
+            makeMockSupabase(
+              {
+                shipment_lines: { data: lineRows, error: null },
+                shipments: { data: [shipmentRow], error: null },
+                emission_data: { data: [currentActiveRowSameVersion], error: null },
+                // The mock resolves every from("sharing_grants") call
+                // to this SAME full set regardless of which ids were
+                // actually requested -- realistic enough to prove every
+                // line resolves its grant across however many chunked
+                // queries actually ran.
+                sharing_grants: { data: grantRows, error: null },
+                organizations: { data: [{ id: "org-producer", name: "Acme Steel GmbH" }], error: null },
+              },
+              recorder,
+            ),
+            orgId,
+          );
+
+        expect(result).toHaveLength(
+          GRANT_COUNT,
+        );
+
+        // 150 ids at SHIPMENT_ID_CHUNK_SIZE=100 -- exactly 2 chunks, so
+        // exactly 2 separate `sharing_grants` queries, never 1 (the
+        // old, oversized-.in() shape).
+        expect(
+          recorder.fromCalls.filter(
+            (name) => name === "sharing_grants",
+          ),
+        ).toHaveLength(
+          2,
+        );
+      },
+    );
+
+    it(
       "throws -- rather than a false 'Unknown organization' placeholder for every SHARED row, or blanking unrelated OWN rows -- when the sharing_grants follow-up lookup itself errors",
       async () => {
         await expect(

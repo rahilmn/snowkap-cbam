@@ -489,25 +489,47 @@ export async function listActualDeterminedLines(
     new Map<string, SharingGrantStatus>();
 
   if (sharingGrantIds.length > 0) {
-    const { data: grantRows, error: grantError } =
-      await supabase
-        .from("sharing_grants")
-        .select(
-          "id, grantor_org_id, status, expires_at",
-        )
-        .in("id", sharingGrantIds);
+    // 2026-09-07 (S5 review round 7, finding S5R7-SHARE-B3). sharingGrantIds
+    // is the org's ENTIRE history of ACTUAL-determined lines' sharing
+    // grants, not scoped to one shipment or period -- and can exceed
+    // even the installation count, since each grant revoke+reissue
+    // cycle mints a new grant id a still-ACTUAL, un-redetermined
+    // historical snapshot can still reference. Chunked for the
+    // identical URL-length reason the shipments query just above this
+    // one already was (S5R6-SHARE-B3) -- reusing the same
+    // SHIPMENT_ID_CHUNK_SIZE/chunk() rather than a second, redundant
+    // constant for what is the same class of hazard.
+    const grantRowChunks =
+      await Promise.all(
+        chunk(
+          sharingGrantIds,
+          SHIPMENT_ID_CHUNK_SIZE,
+        ).map(
+          async (idsChunk) => {
+            const { data, error: grantError } =
+              await supabase
+                .from("sharing_grants")
+                .select(
+                  "id, grantor_org_id, status, expires_at",
+                )
+                .in("id", idsChunk);
 
-    // Throws rather than degrading -- see this function's own doc
-    // comment for why a transport failure here must never be
-    // indistinguishable from "no lines are determined from actual
-    // data," and must not blank the ENTIRE result (including unrelated
-    // OWN-provenance rows) just because a failure touched only the
-    // SHARED-row lookup.
-    if (grantError) {
-      throw new Error(
-        `list-actual-determined-lines: sharing_grants fetch failed (${grantError.message}).`,
+            // Throws rather than degrading -- see this function's own
+            // doc comment for why a transport failure here must never
+            // be indistinguishable from "no lines are determined from
+            // actual data," and must not blank the ENTIRE result
+            // (including unrelated OWN-provenance rows) just because a
+            // failure touched only the SHARED-row lookup.
+            if (grantError) {
+              throw new Error(
+                `list-actual-determined-lines: sharing_grants fetch failed (${grantError.message}).`,
+              );
+            }
+
+            return (data ?? []) as SharingGrantGrantorLookupRow[];
+          },
+        ),
       );
-    }
 
     // 2026-09-07 (S5 review round 4, finding S5R4-VOCAB-1). One clock
     // reading for the whole page, matching the other spot in this
@@ -518,7 +540,7 @@ export async function listActualDeterminedLines(
     const now =
       new Date();
 
-    for (const row of (grantRows ?? []) as SharingGrantGrantorLookupRow[]) {
+    for (const row of grantRowChunks.flat()) {
       grantorOrgIdBySharingGrantId.set(
         row.id,
         row.grantor_org_id,
