@@ -389,19 +389,42 @@ export async function persistAppSession(
   return freshToken;
 }
 
+// 2026-09-07 (S5 review round 10, finding S10-A-2, live-reproduced).
+// USED TO discard the update's `{data, error}` result entirely -- no
+// destructure, no check, no throw. This is the PRIMARY sign-out path
+// (called from opaque-session-cookies.ts's `setAll`, invoked on every
+// ordinary sign-out) and the error-recovery fallback in
+// app/(auth)/actions.ts's signOutAction. Both proceed to clear the
+// browser's opaque session cookie unconditionally right afterward,
+// regardless of whether this write actually happened -- on a genuine
+// transient failure, the browser was told "signed out" while the
+// app_sessions row backing that opaque token stayed live (revoked_at
+// still null) for up to the full 30-day TTL, reopening the exact
+// hazard the P14 AUTH-1 server-side session store (this file) was
+// purpose-built to close. Now throws, matching this file's own
+// persistAppSession (its insert-error path already throws, uncaught by
+// any caller) and this codebase's established "throw is for
+// infrastructure failures" convention (CLAUDE.md).
 export async function revokeAppSession(
   token: string,
 ): Promise<void> {
   const tokenHash =
     await hashToken(token);
 
-  await sessionStoreClient()
-    .from("app_sessions")
-    .update(
-      { revoked_at: new Date().toISOString() },
-    )
-    .eq("token_hash", tokenHash)
-    .is("revoked_at", null);
+  const { error } =
+    await sessionStoreClient()
+      .from("app_sessions")
+      .update(
+        { revoked_at: new Date().toISOString() },
+      )
+      .eq("token_hash", tokenHash)
+      .is("revoked_at", null);
+
+  if (error) {
+    throw new Error(
+      `app session: could not revoke the session (${error.code ?? "unknown"}).`,
+    );
+  }
 }
 
 /**
@@ -443,8 +466,25 @@ export async function revokeOtherAppSessions(
       );
   }
 
-  const { data } =
+  // 2026-09-07 (S5 review round 10, finding S10-A-1, live-reproduced).
+  // USED TO discard `error` entirely -- `data` comes back null on a
+  // genuine query failure, the exact same shape "no other live
+  // sessions exist" produces, so a real DB error silently reported 0
+  // (indistinguishable from success). This function's own sole caller
+  // (changePasswordForSession, app/account/password/change-password.ts)
+  // already wraps this call in a try/catch that correctly carries a
+  // thrown failure as `appSessionsRevoked: false` -- that caller's own
+  // doc comment ("Failure is carried, never raised") already assumed
+  // this function throws on failure; it never did. Now throws,
+  // matching this file's own persistAppSession/revokeAppSession.
+  const { data, error } =
     await query.select("id");
+
+  if (error) {
+    throw new Error(
+      `app session: could not revoke other sessions (${error.code ?? "unknown"}).`,
+    );
+  }
 
   return data?.length ?? 0;
 }

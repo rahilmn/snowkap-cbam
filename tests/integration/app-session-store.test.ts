@@ -315,6 +315,19 @@ describe.skipIf(!ready)(
     );
 
     it(
+      "2026-09-07 (S5 review round 10, finding S10-A-1): revokeOtherAppSessions THROWS on a genuine database error, distinct from a real '0 other sessions' result -- a malformed userId is used only to force a deterministic, reproducible Postgres-level error through this exact code path (in production userId is always a well-formed uuid from a real authenticated session)",
+      async () => {
+        await expect(
+          store.revokeOtherAppSessions(
+            { userId: "not-a-real-uuid-at-all", keepToken: null },
+          ),
+        ).rejects.toThrow(
+          /could not revoke other sessions/i,
+        );
+      },
+    );
+
+    it(
       "treats an expired session as no session",
       async () => {
         const userId =
