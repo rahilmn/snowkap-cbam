@@ -1422,5 +1422,89 @@ describe(
         );
       },
     );
+
+    it(
+      "2026-09-07 (S5 review round 7, finding S5R7-SHARE-B1): chunks both follow-up name lookups rather than issuing one oversized .in() call each, when the invited-to grants span more than SHARING_GRANT_ID_CHUNK_SIZE distinct grantors/installations",
+      async () => {
+        const GRANT_COUNT =
+          150;
+
+        const grantRows =
+          Array.from(
+            { length: GRANT_COUNT },
+            (_, index) => (
+              {
+                ...baseRow,
+                id: `grant-${index}`,
+                grantor_org_id: `org-chunk-${index}`,
+                installation_id: `installation-chunk-${index}`,
+                grantee_org_id: null,
+                invited_email: "buyer@example.com",
+              }
+            ),
+          );
+
+        const orgRows =
+          Array.from(
+            { length: GRANT_COUNT },
+            (_, index) => (
+              {
+                id: `org-chunk-${index}`,
+                name: `Org ${index}`,
+              }
+            ),
+          );
+
+        const installationRows =
+          Array.from(
+            { length: GRANT_COUNT },
+            (_, index) => (
+              {
+                id: `installation-chunk-${index}`,
+                name: `Installation ${index}`,
+              }
+            ),
+          );
+
+        const recorder: Recorder =
+          { fromCalls: [], ops: [] };
+
+        const result =
+          await listMyPendingSharingGrantInvitations(
+            makeMockSupabase(
+              {
+                sharing_grants: { data: grantRows, error: null },
+                organizations: { data: orgRows, error: null },
+                installations: { data: installationRows, error: null },
+              },
+              recorder,
+            ),
+            "buyer@example.com",
+          );
+
+        expect(result).toHaveLength(
+          GRANT_COUNT,
+        );
+
+        // 150 ids at SHARING_GRANT_ID_CHUNK_SIZE=100 -- exactly 2
+        // chunks for each lookup, never 1 (the old, oversized-.in()
+        // shape) for either.
+        expect(
+          recorder.fromCalls.filter(
+            (name) => name === "organizations",
+          ),
+        ).toHaveLength(
+          2,
+        );
+
+        expect(
+          recorder.fromCalls.filter(
+            (name) => name === "installations",
+          ),
+        ).toHaveLength(
+          2,
+        );
+      },
+    );
   },
 );

@@ -61,6 +61,39 @@ import {
 const SHARING_GRANTS_PAGE_SIZE =
   1000;
 
+// 2026-09-07 (S5 review round 7, finding S5R7-SHARE-B1). Used by
+// listMyPendingSharingGrantInvitations's own follow-up name lookups --
+// unlike max_rows=1000 row-count truncation, an oversized `.in()` list
+// overflows the REQUEST URL itself (HTTP 414), well before 1000
+// distinct ids. Matches the identical, already live-verified fix shape
+// used for this exact hazard elsewhere in this codebase
+// (list-draft-shipments-with-lines.ts's own SHIPMENT_ID_CHUNK_SIZE).
+const SHARING_GRANT_ID_CHUNK_SIZE =
+  100;
+
+function chunk<T>(
+  items: T[],
+  size: number,
+): T[][] {
+  const chunks: T[][] =
+    [];
+
+  for (
+    let index = 0;
+    index < items.length;
+    index += size
+  ) {
+    chunks.push(
+      items.slice(
+        index,
+        index + size,
+      ),
+    );
+  }
+
+  return chunks;
+}
+
 export async function listSharingGrantsIssued(
   supabase: SupabaseClient,
   orgId: OrganizationId,
@@ -999,22 +1032,47 @@ export async function listMyPendingSharingGrantInvitations(
       ),
     );
 
-  const [
-    { data: orgRows, error: orgError },
-    { data: installationRows, error: installationError },
-  ] =
+  // 2026-09-07 (S5 review round 7, finding S5R7-SHARE-B1). This
+  // function's own primary sharing_grants query is keyed on the
+  // caller's email across EVERY org that has ever invited them (round
+  // 6's own S5R6-SHARE-Y1 fix), not scoped to one org -- so
+  // grantorOrgIds/installationIds here can span far more distinct ids
+  // than the row-count pagination fix above was written to defend
+  // against. Unlike max_rows=1000 truncation, an oversized `.in()` list
+  // overflows the REQUEST URL itself (HTTP 414) at a MUCH lower
+  // threshold (confirmed live at ~250-300 distinct ids) -- reachable by
+  // an entirely ordinary shape (a central importer/broker email
+  // receiving one pending invitation each from a few hundred small
+  // producer counterparties), well before the 1000-row scenario the
+  // pagination loop exists to survive. Both chunked with the same
+  // conservative convention already established for this hazard shape
+  // elsewhere in this codebase.
+  const orgRowChunks =
     await Promise.all(
-      [
-        supabase
-          .from("organizations")
-          .select("id, name")
-          .in("id", grantorOrgIds),
+      chunk(
+        grantorOrgIds,
+        SHARING_GRANT_ID_CHUNK_SIZE,
+      ).map(
+        (idsChunk) =>
+          supabase
+            .from("organizations")
+            .select("id, name")
+            .in("id", idsChunk),
+      ),
+    );
 
-        supabase
-          .from("installations")
-          .select("id, name")
-          .in("id", installationIds),
-      ],
+  const installationRowChunks =
+    await Promise.all(
+      chunk(
+        installationIds,
+        SHARING_GRANT_ID_CHUNK_SIZE,
+      ).map(
+        (idsChunk) =>
+          supabase
+            .from("installations")
+            .select("id, name")
+            .in("id", idsChunk),
+      ),
     );
 
   // 2026-09-07 (S5 review round 3, finding S5R3-SES-02). Same posture
@@ -1022,6 +1080,12 @@ export async function listMyPendingSharingGrantInvitations(
   // grants list must not be blanked to [] just because the name lookup
   // failed -- that reproduces the identical false "no pending
   // invitations" outcome one step later.
+  const orgError =
+    orgRowChunks.find((result) => result.error !== null)?.error;
+
+  const installationError =
+    installationRowChunks.find((result) => result.error !== null)?.error;
+
   if (orgError || installationError) {
     throw new Error(
       `manage-sharing-grants: grantor/installation name lookup failed (${(orgError ?? installationError)?.message ?? "unknown"}).`,
@@ -1030,14 +1094,18 @@ export async function listMyPendingSharingGrantInvitations(
 
   const orgNameById =
     new Map(
-      ((orgRows as OrgNameRow[] | null) ?? []).map(
+      orgRowChunks.flatMap(
+        (result) => (result.data as OrgNameRow[] | null) ?? [],
+      ).map(
         (row) => [row.id, row.name] as const,
       ),
     );
 
   const installationNameById =
     new Map(
-      ((installationRows as InstallationNameRow[] | null) ?? []).map(
+      installationRowChunks.flatMap(
+        (result) => (result.data as InstallationNameRow[] | null) ?? [],
+      ).map(
         (row) => [row.id, row.name] as const,
       ),
     );
