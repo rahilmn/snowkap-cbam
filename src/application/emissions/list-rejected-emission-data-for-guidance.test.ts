@@ -52,6 +52,8 @@ function mockSupabase(
 
           return chain;
         },
+        order: () => chain,
+        range: () => chain,
         then: (
           resolve: (result: { data: unknown; error: unknown }) => unknown,
           reject: (reason: unknown) => unknown,
