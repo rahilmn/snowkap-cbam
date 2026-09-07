@@ -20,6 +20,57 @@ import {
   blockerReasonKey,
 } from "../../../../src/domain/status-vocabulary";
 
+type DeclarationStatusForCard =
+  "DRAFT" | "READY" | "FILED_RECORDED" | "VOID" | undefined;
+
+/**
+ * 2026-09-07 (S5 review round 10, finding S5R10-VOCAB-B1, live-
+ * reproduced). completeness_report is nullable at the schema level, and
+ * a bare DRAFT with no report at all is reachable through the ordinary
+ * "Create amendment" button (createDeclarationAmendment inserts exactly
+ * that row). From there, declarations_update_own_org_pre_filing (the
+ * same RLS policy that admits every other bare-client status PATCH this
+ * screen already accounts for) lets an ADMIN/OWNER move it straight to
+ * VOID -- or, since app.enforce_declaration_members_are_approved's own
+ * WHERE clause is vacuously satisfied by an empty member_shipment_ids
+ * array, straight to READY -- with no trigger requiring a report to
+ * exist first. This was the one message in the file that never branched
+ * on declarationStatus the way every OTHER conditional message here
+ * already does (RefreshDraftForm, the only control that could act on
+ * this message, renders for DRAFT only -- see declaration-actions.tsx).
+ * A VOID declaration pointed at a button that does not exist anywhere
+ * on the page; a READY one claimed "Not yet generated" beside
+ * DeclarationActions' real, irreversible "Record filed" control.
+ */
+function noReportSubtitle(
+  declarationStatus: DeclarationStatusForCard,
+): string {
+  if (declarationStatus === "READY" || declarationStatus === "FILED_RECORDED") {
+    return "No completeness report was ever generated for this declaration -- this should not normally occur.";
+  }
+
+  if (declarationStatus === "VOID") {
+    return "This declaration was voided before a completeness report was ever generated.";
+  }
+
+  return "Not yet generated -- click Generate / refresh draft to compute this.";
+}
+
+/** See noReportSubtitle's own doc comment -- the matching body copy. */
+function noReportBody(
+  declarationStatus: DeclarationStatusForCard,
+): string {
+  if (declarationStatus === "READY" || declarationStatus === "FILED_RECORDED") {
+    return "No completeness report exists for this declaration, so its readiness was never actually checked -- contact support before relying on it.";
+  }
+
+  if (declarationStatus === "VOID") {
+    return "No completeness report was generated before this declaration was voided.";
+  }
+
+  return "No completeness report yet.";
+}
+
 /**
  * Renders the completeness gate's own findings verbatim -- every
  * blocker named individually (shipment + line where it applies), never
@@ -105,13 +156,13 @@ export function CompletenessReportCard(
         <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
           {report
             ? `As of the last refresh (${report.shipment_count} shipment(s), ${report.line_count} line(s)).`
-            : "Not yet generated -- click Generate / refresh draft to compute this."}
+            : noReportSubtitle(declarationStatus)}
         </p>
       </div>
 
       {!report ? (
         <p className="p-4 text-sm text-[var(--text-secondary)]">
-          No completeness report yet.
+          {noReportBody(declarationStatus)}
         </p>
       ) : stale ? (
         <div className="p-4">
