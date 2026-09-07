@@ -114,6 +114,7 @@ interface TableResult {
 
 function makeMockSupabase(
   tables: Record<string, TableResult>,
+  fromCalls: string[] = [],
 ) {
   function builder(
     table: string,
@@ -139,7 +140,13 @@ function makeMockSupabase(
   }
 
   return {
-    from: (table: string) => builder(table),
+    from: (table: string) => {
+      fromCalls.push(
+        table,
+      );
+
+      return builder(table);
+    },
   } as never;
 }
 
@@ -256,6 +263,66 @@ describe(
             methodology: "EU_METHOD",
             resolution_reason: null,
           },
+        );
+      },
+    );
+
+    it(
+      "2026-09-07 (S5 review round 7, finding S5R7-A-1): chunks the installation-name lookup rather than issuing one oversized .in() call, when ACTUAL-determined lines span more than INSTALLATION_ID_CHUNK_SIZE distinct installations",
+      async () => {
+        const INSTALLATION_COUNT =
+          150;
+
+        const lineRows =
+          Array.from(
+            { length: INSTALLATION_COUNT },
+            (_, index) =>
+              lineRow(
+                {
+                  id: `line-${index}`,
+                  emission_determination: {
+                    ...actualDetermination,
+                    snapshot: {
+                      ...actualDetermination.snapshot,
+                      installation_id: `installation-${index}`,
+                    },
+                  },
+                  quantity_mwh: null,
+                },
+              ),
+          );
+
+        const fromCalls: string[] =
+          [];
+
+        const result =
+          await buildPeriodExportRows(
+            makeMockSupabase(
+              {
+                shipments: { data: [shipmentRow()], error: null },
+                shipment_lines: { data: lineRows, error: null },
+                latest_calculation_results: { data: [], error: null },
+                installations: { data: [{ id: "installation-0", name: "Installation Zero" }], error: null },
+              },
+              fromCalls,
+            ),
+            orgId,
+            annualPeriod,
+          );
+
+        expect(result).toHaveLength(
+          INSTALLATION_COUNT,
+        );
+
+        // 150 ids at INSTALLATION_ID_CHUNK_SIZE=100 -- exactly 2
+        // chunks, so exactly 2 separate `installations` queries, never
+        // 1 (the old, oversized-.in() shape).
+        expect(
+          fromCalls.filter(
+            (name) => name === "installations",
+          ),
+        ).toHaveLength(
+          2,
         );
       },
     );

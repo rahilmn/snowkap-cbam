@@ -312,6 +312,48 @@ function toExportRow(
   };
 }
 
+// 2026-09-07 (S5 review round 7, finding S5R7-A-1). `installationIds`
+// below is org-wide for one reporting period, across every shipment --
+// unlike max_rows=1000 row-count truncation, an oversized `.in()` list
+// overflows the REQUEST URL itself (PostgREST/the API gateway rejects
+// it outright with HTTP 414), well before 1000 distinct installations.
+// Live-confirmed on this exact stack: n=219 ids succeeds, n=220+ always
+// fails. Past that threshold this was not an occasional transient
+// failure (the shape the "degrade the names only" design below was
+// written for) but a SYSTEMATIC one -- every single call for a growing
+// org's period would fail identically, permanently blanking
+// installation_name on every ACTUAL-determined row in the export.
+// Chunked so the request URL itself never grows past a safe size,
+// matching list-draft-shipments-with-lines.ts's own SHIPMENT_ID_CHUNK_SIZE
+// convention for the identical hazard shape -- a per-CHUNK failure still
+// degrades gracefully (this function's own documented intent), it just
+// can no longer be guaranteed to happen on every call past a threshold.
+const INSTALLATION_ID_CHUNK_SIZE =
+  100;
+
+function chunkIds(
+  ids: readonly string[],
+  size: number,
+): string[][] {
+  const chunks: string[][] =
+    [];
+
+  for (
+    let index = 0;
+    index < ids.length;
+    index += size
+  ) {
+    chunks.push(
+      ids.slice(
+        index,
+        index + size,
+      ),
+    );
+  }
+
+  return chunks;
+}
+
 /**
  * Current, RLS-scoped names for the installations behind this period's
  * ACTUAL determinations.
@@ -361,18 +403,28 @@ async function fetchInstallationNames(
     return new Map();
   }
 
-  const { data, error } =
-    await supabase
-      .from("installations")
-      .select("id, name")
-      .in("id", installationIds);
+  const chunkResults =
+    await Promise.all(
+      chunkIds(
+        installationIds,
+        INSTALLATION_ID_CHUNK_SIZE,
+      ).map(
+        async (idsChunk) => {
+          const { data, error } =
+            await supabase
+              .from("installations")
+              .select("id, name")
+              .in("id", idsChunk);
 
-  if (error || !data) {
-    return new Map();
-  }
+          return error || !data
+            ? []
+            : (data as InstallationNameRow[]);
+        },
+      ),
+    );
 
   return new Map(
-    (data as InstallationNameRow[]).map(
+    chunkResults.flat().map(
       (row) => [row.id, row.name],
     ),
   );
