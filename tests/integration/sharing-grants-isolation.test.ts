@@ -951,6 +951,155 @@ describe.skipIf(!localSupabaseReachable)(
     );
 
     it(
+      "2026-09-07 (S5 review round 10, finding S5R10-AUTHZ-B1, live-reproduced): a dual-org actor (ADMIN of the grantor org AND a member of the grantee org) cannot use sharing_grants_update_grantor_revoke's own expiry-blind USING clause to accept an already-expired grant, even though grantee-accept's own USING would refuse it entered alone",
+      async () => {
+        // Self-contained fixtures (own orgs/user/installation/grant),
+        // separate from this file's shared beforeAll fixtures -- this
+        // scenario specifically needs an actor who is BOTH an admin of
+        // the grantor org AND a member of the grantee org, which none
+        // of the shared fixture users are.
+        const suffix =
+          `s5r10authzb1-${runId}`;
+
+        const { data: grantorOrg, error: grantorOrgError } =
+          await serviceClient
+            .from("organizations")
+            .insert(
+              { name: `Dual-Org Grantor ${suffix}`, slug: `dual-grantor-${suffix}`, capabilities: ["PRODUCER_OPERATOR"] },
+            )
+            .select("id")
+            .single();
+
+        const { data: granteeOrg, error: granteeOrgError } =
+          await serviceClient
+            .from("organizations")
+            .insert(
+              { name: `Dual-Org Grantee ${suffix}`, slug: `dual-grantee-${suffix}`, capabilities: ["IMPORTER_DECLARANT"] },
+            )
+            .select("id")
+            .single();
+
+        if (grantorOrgError || !grantorOrg || granteeOrgError || !granteeOrg) {
+          throw new Error(
+            `fixture org creation failed: ${grantorOrgError?.message ?? granteeOrgError?.message}`,
+          );
+        }
+
+        const { data: dualUser, error: dualUserError } =
+          await serviceClient.auth.admin.createUser(
+            {
+              email: `dual-org-${suffix}@snowkaptest.dev`,
+              password: "DualOrgPassw0rd",
+              email_confirm: true,
+            },
+          );
+
+        if (dualUserError || !dualUser.user) {
+          throw new Error(
+            `fixture user creation failed: ${dualUserError?.message}`,
+          );
+        }
+
+        const dualUserId =
+          dualUser.user.id;
+
+        await serviceClient
+          .from("memberships")
+          .insert(
+            [
+              { org_id: grantorOrg.id, user_id: dualUserId, role: "ADMIN" },
+              { org_id: granteeOrg.id, user_id: dualUserId, role: "MEMBER" },
+            ],
+          );
+
+        const { data: operator } =
+          await serviceClient
+            .from("operators")
+            .insert(
+              { org_id: grantorOrg.id, name: `Dual-Org Operator ${suffix}`, country: "DE", provenance: "OPERATOR_PROVIDED" },
+            )
+            .select("id")
+            .single();
+
+        const { data: installation } =
+          await serviceClient
+            .from("installations")
+            .insert(
+              { operator_id: operator!.id, org_id: grantorOrg.id, name: `Dual-Org Installation ${suffix}`, country: "DE", provenance: "OPERATOR_PROVIDED" },
+            )
+            .select("id")
+            .single();
+
+        const { data: expiredGrant } =
+          await serviceClient
+            .from("sharing_grants")
+            .insert(
+              {
+                grantor_org_id: grantorOrg.id,
+                grantee_org_id: granteeOrg.id,
+                installation_id: installation!.id,
+                status: "INVITED",
+                created_by_user_id: dualUserId,
+                expires_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+              },
+            )
+            .select("id")
+            .single();
+
+        const dualClient =
+          createClient(
+            LOCAL_API_URL,
+            LOCAL_ANON_KEY,
+            { auth: { persistSession: false } },
+          );
+
+        await dualClient.auth.signInWithPassword(
+          {
+            email: `dual-org-${suffix}@snowkaptest.dev`,
+            password: "DualOrgPassw0rd",
+          },
+        );
+
+        // The exact exploit shape: accept an already-expired grant via a
+        // bare client UPDATE, entering through the sibling grantor_revoke
+        // policy's own (deliberately expiry-blind) USING clause.
+        const { error: updateError } =
+          await dualClient
+            .from("sharing_grants")
+            .update(
+              { status: "ACTIVE" },
+            )
+            .eq(
+              "id",
+              expiredGrant!.id,
+            );
+
+        // Refused by RLS -- the fix closes the WITH CHECK gap that
+        // previously let this succeed.
+        expect(updateError).not.toBeNull();
+
+        const { data: afterAttempt } =
+          await serviceClient
+            .from("sharing_grants")
+            .select("status")
+            .eq("id", expiredGrant!.id)
+            .single();
+
+        expect(afterAttempt?.status).toBe(
+          "INVITED",
+        );
+
+        // Cleanup, scoped entirely to this test's own fixtures.
+        await serviceClient.from("sharing_grants").delete().eq("id", expiredGrant!.id);
+        await serviceClient.from("installations").delete().eq("id", installation!.id);
+        await serviceClient.from("operators").delete().eq("id", operator!.id);
+        await serviceClient.from("memberships").delete().in("org_id", [grantorOrg.id, granteeOrg.id]);
+        await serviceClient.from("organizations").delete().in("id", [grantorOrg.id, granteeOrg.id]);
+        await serviceClient.auth.admin.deleteUser(dualUserId);
+      },
+    );
+
+    it(
       "revoking the grant ends the grantee's read access; the producer's own org is unaffected",
       async () => {
         const { error: revokeError } =
